@@ -1,11 +1,23 @@
-﻿# CTYun API 文档目录
+# CTYun API 文档目录
 
-本目录用于后续平台接入与 ACIS 内核集成的基线文档索引，当前阶段只建立目录与约束，不写真实平台实现。
+本目录用于真实 ACIS / CTYun 接入的文档基线。
 
 ## 当前文档
-- `codex-context-min.md`：给 Codex 的压缩背景说明。
-- `integration-plan.md`：后续接入 ACIS 内核的实施计划。
+
+- `AcisApiKernel_Usage_Manual.md`
+  - ACIS 单文件内核的调用说明
+- `codex-context-min.md`
+  - 当前轮次的压缩上下文
+- `integration-plan.md`
+  - 真实 ACIS 内核接入计划与本轮落点
+
+## 当前状态
+
+- 第 3 轮已开始接入真实 ACIS 内核
+- 平台设备权威源主路径已切换到真实 ACIS 平台设备提供器
+- 若缺失 `configs/acis-kernel.json`，应用进入受控降级模式
 
 ## 使用约束
-- 后续涉及 CTYun、ACIS、预览地址、坐标转换、宿主页或日志封装的变更前，先阅读本目录文档。
-- 本轮文档只定义方向与边界，不代表已经完成平台能力接入。
+
+- 涉及 CTYun、ACIS、坐标转换、预览地址或日志封装的变更前，先阅读本目录文档
+- 不要绕过 `AcisApiKernel` 重新实现 token、签名、解密、坐标转换或预览回退逻辑

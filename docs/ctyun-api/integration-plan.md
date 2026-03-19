@@ -1,16 +1,48 @@
-﻿# ACIS 内核接入计划
+# ACIS 内核接入计划
 
-## 目标
-后续通过可复用的 ACIS 单文件内核，统一承接 CTYun token、平台接口、坐标转换、预览地址、宿主页与日志能力。
+## 第 3 轮当前落点
 
-## 计划步骤
-1. 明确 ACIS 内核在 `Infrastructure/Integrations/Acis` 的目录结构和对外适配边界。
-2. 在 `Services` 中定义 UI 可依赖的稳定接口，不暴露平台细节。
-3. 引入配置读取与本地日志写入边界，但不把接入参数展示到 UI。
-4. 逐步接入 token、平台接口、点位坐标转换与预览地址能力。
-5. 在地图区与详情抽屉中按“截图优先、单点播放”接入消费侧能力。
-6. 最后再接入派单、恢复通知等与平台或 webhook 关联的上下游编排。
+1. 在 `Infrastructure/Integrations/Acis` 复用现有 `AcisApiKernel.cs`
+2. 新增 `AcisKernelOptionsProvider`，读取 `configs/acis-kernel.json`
+3. 新增 `AcisKernelPlatformSiteProvider`，作为平台设备权威源主路径
+4. 通过 `GetDeviceCatalogPageAsync` 拉设备目录页，并限制总页数 / 总数量
+5. 对部分设备按需调用 `GetDeviceDetailAsync` 补拉详情
+6. 平台原始坐标直接保留到 `PlatformSiteSnapshot`
+7. 无配置或配置无效时进入受控降级，应用不崩溃
 
-## 非目标
-- 本轮不编造平台接口实现。
-- 本轮不接入真实 WebView2、地图 SDK、SQLite 或 webhook。
+## 当前主链路
+
+```text
+configs/acis-kernel.json
+  -> AcisKernelOptionsProvider
+  -> AcisKernelPlatformSiteProvider
+  -> AcisApiKernel.GetDeviceCatalogPageAsync
+  -> AcisApiKernel.GetDeviceDetailAsync
+  -> SiteMapQueryService
+  -> 地图 / 详情抽屉 / 异常缩略条
+```
+
+## 坐标纠偏说明
+
+- 当前项目坐标转换走前端高德 JSAPI
+- 后端 ACIS 主链不依赖高德 WebService 坐标转换
+- `AcisKernelPlatformSiteProvider` 获取设备目录和详情时，不再调用 `ConvertCoordinatesAsync` 作为必要步骤
+- 平台点位读取成功后，即使只有原始坐标，也要先进入地图 DTO
+- `SiteMapQueryService` 只负责平台快照 + 本地补充信息 + 运行态合并，不在服务层做高德坐标转换
+- 本地手工坐标仍作为平台无坐标时的兜底来源
+- `amap.webServiceKey` 允许为空
+- 若未来改回后端 Web 服务转换，再启用 `ConvertCoordinatesAsync`
+
+## 本轮边界
+
+- 不接真实播放 UI
+- 不接静默巡检
+- 不接企业微信派单
+- 不接真实告警编排消费
+
+## 后续轮次建议
+
+1. 在真实平台环境下校准目录分页规模与详情补拉数量
+2. 前端地图宿主接入高德 JSAPI，并按 `PlatformRawCoordinateType` 实施客户端转换
+3. 补充平台告警接入，替换当前演示状态字段
+4. 再接静默巡检与派单编排

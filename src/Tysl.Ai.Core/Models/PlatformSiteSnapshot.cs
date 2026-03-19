@@ -8,9 +8,11 @@ public sealed record PlatformSiteSnapshot
 
     public required string DeviceName { get; init; }
 
-    public double? PlatformLongitude { get; init; }
+    public double? RawLongitude { get; init; }
 
-    public double? PlatformLatitude { get; init; }
+    public double? RawLatitude { get; init; }
+
+    public required string RawCoordinateType { get; init; }
 
     public required DemoOnlineState DemoOnlineState { get; init; }
 

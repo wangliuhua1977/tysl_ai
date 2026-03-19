@@ -1,0 +1,9 @@
+{
+  "accessToken": "MxyqTtglSNh671Pqu9CQSUVcXTMo1iVn",
+  "refreshToken": "iEgjXiuucQUuTJKJ9EJAzNZXkhpV9DDH",
+  "expiresIn": 604800,
+  "refreshExpiresIn": 2592000,
+  "acquiredAtUtc": "2026-03-19T08:59:28.8078971+00:00",
+  "accessTokenExpiresAtUtc": "2026-03-26T08:59:28.8078971+00:00",
+  "refreshTokenExpiresAtUtc": "2026-04-18T08:59:28.8078971+00:00"
+}

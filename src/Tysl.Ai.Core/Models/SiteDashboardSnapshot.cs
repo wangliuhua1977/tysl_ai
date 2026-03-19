@@ -2,6 +2,12 @@ namespace Tysl.Ai.Core.Models;
 
 public sealed record SiteDashboardSnapshot
 {
+    public required string PlatformStatusText { get; init; }
+
+    public string? PlatformStatusDetailText { get; init; }
+
+    public required bool IsPlatformConnected { get; init; }
+
     public required int PointCount { get; init; }
 
     public required int MonitoredCount { get; init; }

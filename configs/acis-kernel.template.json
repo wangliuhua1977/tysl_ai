@@ -1,0 +1,38 @@
+{
+  "workDirectory": "C:\\tysl_ai\\runtime\\.acis-kernel",
+  "ctyun": {
+    "baseUrl": "https://your-ctyun-host.example.com",
+    "appId": "replace-with-app-id",
+    "appSecret": "replace-with-app-secret",
+    "enterpriseUser": "replace-with-enterprise-user",
+    "clientType": "1",
+    "version": "1.1",
+    "apiVersion": "1.0",
+    "grantType": "vcp_189",
+    "tokenReuseBeforeExpirySeconds": 60,
+    "rsaPrivateKeyPem": "-----BEGIN PRIVATE KEY-----\nREPLACE_WITH_PRIVATE_KEY\n-----END PRIVATE KEY-----",
+    "endpoints": {
+      "getAccessToken": "/open/oauth/getAccessToken",
+      "getAllDeviceListNew": "/open/token/device/getAllDeviceListNew",
+      "getCusDeviceByDeviceCode": "/open/token/device/getCusDeviceByDeviceCode",
+      "showDevice": "/open/token/device/showDevice",
+      "getDeviceInfoByDeviceCode": "/open/token/device/getDeviceInfoByDeviceCode",
+      "getDeviceAlarmMessage": "/open/token/device/getDeviceAlarmMessage",
+      "getAiAlertInfoList": "/open/token/AIAlarm/getAlertInfoList",
+      "getDeviceMediaUrlFlv": "/open/token/cloud/getDeviceMediaUrlFlv",
+      "getDeviceMediaUrlHls": "/open/token/cloud/getDeviceMediaUrlHls",
+      "getDeviceMediaWebrtcUrl": "/open/token/vpaas/getDeviceMediaWebrtcUrl",
+      "getH5StreamUrl": "/open/token/vpaas/getH5StreamUrl"
+    }
+  },
+  "amap": {
+    "coordinateConvertUrl": "https://restapi.amap.com/v3/assistant/coordinate/convert"
+  },
+  "preview": {
+    "clickProtocolOrder": [ "flv", "hls", "webrtc", "h5" ],
+    "inspectionProtocolOrder": [ "flv", "hls" ]
+  },
+  "http": {
+    "timeoutSeconds": 30
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "workDirectory": "C:\\tysl_ai\\runtime\\.acis-kernel",
+  "ctyun": {
+    "baseUrl": "https://vcp.21cn.com",
+    "appId": "755677184342",
+    "appSecret": "faa4a5c7e32b47cc94d4753e93a5ea97",
+    "enterpriseUser": "18981381088",
+    "clientType": "4",
+    "version": "1.1",
+    "apiVersion": "2.0",
+    "grantType": "vcp_189",
+    "tokenReuseBeforeExpirySeconds": 60,
+    "rsaPrivateKeyPem": "-----BEGIN PRIVATE KEY-----\nMIICdQIBADANBgkqhkiG9w0BAQEFAASCAl8wggJbAgEAAoGBAKFNXfLWptqRxF5CmJ20h0PBYxLl45fcBAIAoAB1k1I4bJLOLt8UcvloPUZjQceUxdbqYZ8yu6ewZHroBVTk4D+Aplbf3HA85iUD+9LIa3SpzUBH/rVD06fK+Oc5tZvIuhSkhHCtWp4pl/vnBbatowtGEtIGQ4QHUV5FEaCMvgW7AgMBAAECgYBGl9+ICd1YRvdT8X1td7bDNn2vpaDns0ilv7RGvy5Mi5ko3sewpfhzouU+Su5c9IVpO4ah78gk6ZPwHl9G+iwRrI7rDtu2nGbgXfbUnCalfWtqX5gjFzd8BZvya2xsrDmhXU6JriXzHdzQ0EUXxgrlMEgm+K9jfxGPwHSsRAAj0QJBANawtYYxV8WQN72pw1jWMYCa8PvIKeLbj5jJwlI4wXyk2F8qvCpU39OanbkpUDPJV0i3I4TlLYfYTUtTF657pOcCQQDAVtmMBNY8/E7yiRbsq8sc6DHRG8wzg/spIk8gldNGp1Aqky0f1AR0uscmlB8doGiTr8QiGE6fIYkzirBreWoNAkAW43IG433TD0QSEWZFM1jFuD8W6MkmaXgOtvvjni9qpXx38Otsq+3M9n/4PKJTUxTeKMA9q91FzVa4QByXOpFjAkAjXJRYktcUlUqqepvVXWxVXzcxe8vaOMynbmBf3EvgtIgfm7lzHZbII0LUC+2Ak+pGJM2JezCRPygrarcuuz7NAkBUi5yrOltTjKG5FNY0U81/dvX27OvUVmIRv8koZ+KjYWtpmH+/IYrUWECY2DwnPu0RUYlTIu+7BJiq4/2KfpJd\n-----END PRIVATE KEY-----",
+    "endpoints": {
+      "getAccessToken": "/open/oauth/getAccessToken",
+      "getAllDeviceListNew": "/open/token/device/getAllDeviceListNew",
+      "getCusDeviceByDeviceCode": "/open/token/device/getCusDeviceByDeviceCode",
+      "showDevice": "/open/token/device/showDevice",
+      "getDeviceInfoByDeviceCode": "/open/token/device/getDeviceInfoByDeviceCode",
+      "getDeviceAlarmMessage": "/open/token/device/getDeviceAlarmMessage",
+      "getAiAlertInfoList": "/open/token/AIAlarm/getAlertInfoList",
+      "getDeviceMediaUrlFlv": "/open/token/cloud/getDeviceMediaUrlFlv",
+      "getDeviceMediaUrlHls": "/open/token/cloud/getDeviceMediaUrlHls",
+      "getDeviceMediaWebrtcUrl": "/open/token/vpaas/getDeviceMediaWebrtcUrl",
+      "getH5StreamUrl": "/open/token/vpaas/getH5StreamUrl"
+    }
+  },
+  "amap": {
+    "webServiceKey": "",
+    "coordinateConvertUrl": "https://restapi.amap.com/v3/assistant/coordinate/convert"
+  },
+  "preview": {
+    "clickProtocolOrder": ["flv", "hls", "webrtc", "h5"],
+    "inspectionProtocolOrder": ["flv", "hls"]
+  },
+  "http": {
+    "timeoutSeconds": 30
+  }
+}

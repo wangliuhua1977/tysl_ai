@@ -45,7 +45,7 @@ public sealed class SiteEditorViewModel : ObservableObject
         this.maintenanceUnit = maintenanceUnit;
         this.maintainerName = maintainerName;
         this.maintainerPhone = maintainerPhone;
-        coordinatePickSummary = "坐标拾取只用于补录本地手工坐标，不会新增平台设备。";
+        coordinatePickSummary = "坐标拾取仅用于补录本地手工坐标，不会新增平台点位。";
 
         SaveCommand = new RelayCommand(() => SaveRequested?.Invoke(this, EventArgs.Empty));
         CancelCommand = new RelayCommand(() => CancelRequested?.Invoke(this, EventArgs.Empty));
@@ -189,7 +189,7 @@ public sealed class SiteEditorViewModel : ObservableObject
 
         if (longitude.HasValue != latitude.HasValue)
         {
-            errorMessage = "手工坐标必须同时填写经度和纬度，或同时留空。";
+            errorMessage = "手工坐标必须同时填写经纬度，或同时留空。";
             return false;
         }
 

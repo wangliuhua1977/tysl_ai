@@ -22,9 +22,11 @@ public sealed record SiteMapPoint
 
     public required bool IsMonitored { get; init; }
 
-    public required double Longitude { get; init; }
+    public required double DisplayLongitude { get; init; }
 
-    public required double Latitude { get; init; }
+    public required double DisplayLatitude { get; init; }
+
+    public required CoordinateSource CoordinateSource { get; init; }
 
     public required string CoordinateSourceText { get; init; }
 

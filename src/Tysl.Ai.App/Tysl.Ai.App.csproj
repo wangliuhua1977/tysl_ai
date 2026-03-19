@@ -7,6 +7,12 @@
     <ProjectReference Include="..\Tysl.Ai.Core\Tysl.Ai.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\configs\acis-kernel.template.json" Link="configs\acis-kernel.template.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>

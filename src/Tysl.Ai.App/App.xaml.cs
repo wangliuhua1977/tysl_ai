@@ -11,6 +11,8 @@ namespace Tysl.Ai.App;
 
 public partial class App : Application
 {
+    private AcisKernelPlatformSiteProvider? platformSiteProvider;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -20,10 +22,17 @@ public partial class App : Application
         var databaseInitializer = new SqliteDatabaseInitializer(connectionFactory);
         databaseInitializer.InitializeAsync().GetAwaiter().GetResult();
 
-        IPlatformSiteProvider platformSiteProvider = new StubPlatformSiteProvider();
+        var optionsProvider = new AcisKernelOptionsProvider();
+        var loadResult = optionsProvider.Load();
+
+        platformSiteProvider = new AcisKernelPlatformSiteProvider(loadResult);
+
         ISiteLocalProfileRepository repository = new SiteLocalProfileRepository(connectionFactory);
         ISiteLocalProfileService siteLocalProfileService = new SiteLocalProfileService(repository);
-        ISiteMapQueryService siteMapQueryService = new SiteMapQueryService(platformSiteProvider, repository);
+        ISiteMapQueryService siteMapQueryService = new SiteMapQueryService(
+            platformSiteProvider,
+            platformSiteProvider,
+            repository);
 
         var shellViewModel = new ShellViewModel(siteMapQueryService, siteLocalProfileService);
         var shellWindow = new ShellWindow
@@ -31,8 +40,16 @@ public partial class App : Application
             DataContext = shellViewModel
         };
 
+        Exit += HandleExit;
         MainWindow = shellWindow;
         shellWindow.Show();
+    }
+
+    private void HandleExit(object? sender, ExitEventArgs e)
+    {
+        Exit -= HandleExit;
+        platformSiteProvider?.Dispose();
+        platformSiteProvider = null;
     }
 
     private static string GetDatabasePath()

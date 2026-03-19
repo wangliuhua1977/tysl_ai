@@ -16,21 +16,27 @@ public sealed record SiteMergedView
 
     public required bool IsMonitored { get; init; }
 
-    public double? PlatformLongitude { get; init; }
+    public double? PlatformRawLongitude { get; init; }
 
-    public double? PlatformLatitude { get; init; }
+    public double? PlatformRawLatitude { get; init; }
+
+    public required string PlatformRawCoordinateType { get; init; }
 
     public double? ManualLongitude { get; init; }
 
     public double? ManualLatitude { get; init; }
 
-    public double? Longitude { get; init; }
+    public double? DisplayLongitude { get; init; }
 
-    public double? Latitude { get; init; }
+    public double? DisplayLatitude { get; init; }
 
     public required bool HasMapPoint { get; init; }
 
+    public required CoordinateSource CoordinateSource { get; init; }
+
     public required string CoordinateSourceText { get; init; }
+
+    public required string PlatformStatusSummary { get; init; }
 
     public string? AddressText { get; init; }
 

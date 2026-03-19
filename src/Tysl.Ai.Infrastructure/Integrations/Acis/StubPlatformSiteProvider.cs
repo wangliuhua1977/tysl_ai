@@ -12,8 +12,9 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
         {
             DeviceCode = "ACIS-DEMO-001",
             DeviceName = "环城北路隧道东口枪机",
-            PlatformLongitude = 120.5958,
-            PlatformLatitude = 30.0125,
+            RawLongitude = 120.5958,
+            RawLatitude = 30.0125,
+            RawCoordinateType = "gcj02",
             DemoOnlineState = DemoOnlineState.Online,
             DemoStatus = PointDemoStatus.Fault,
             DemoDispatchStatus = DispatchDemoStatus.None
@@ -22,8 +23,9 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
         {
             DeviceCode = "ACIS-DEMO-002",
             DeviceName = "高铁站前广场全景枪机",
-            PlatformLongitude = 120.6462,
-            PlatformLatitude = 30.0442,
+            RawLongitude = 120.6462,
+            RawLatitude = 30.0442,
+            RawCoordinateType = "gcj02",
             DemoOnlineState = DemoOnlineState.Online,
             DemoStatus = PointDemoStatus.Warning,
             DemoDispatchStatus = DispatchDemoStatus.Dispatched
@@ -32,8 +34,9 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
         {
             DeviceCode = "ACIS-DEMO-003",
             DeviceName = "滨江公园南栈桥水岸枪机",
-            PlatformLongitude = 120.6211,
-            PlatformLatitude = 29.9852,
+            RawLongitude = 120.6211,
+            RawLatitude = 29.9852,
+            RawCoordinateType = "gcj02",
             DemoOnlineState = DemoOnlineState.Online,
             DemoStatus = PointDemoStatus.Warning,
             DemoDispatchStatus = DispatchDemoStatus.Cooling
@@ -42,8 +45,9 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
         {
             DeviceCode = "ACIS-DEMO-004",
             DeviceName = "区政务中心东门门岗枪机",
-            PlatformLongitude = 120.5739,
-            PlatformLatitude = 30.0288,
+            RawLongitude = 120.5739,
+            RawLatitude = 30.0288,
+            RawCoordinateType = "gcj02",
             DemoOnlineState = DemoOnlineState.Online,
             DemoStatus = PointDemoStatus.Normal,
             DemoDispatchStatus = DispatchDemoStatus.None
@@ -52,8 +56,9 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
         {
             DeviceCode = "ACIS-DEMO-005",
             DeviceName = "江心泵站周界球机",
-            PlatformLongitude = 120.5534,
-            PlatformLatitude = 29.9981,
+            RawLongitude = 120.5534,
+            RawLatitude = 29.9981,
+            RawCoordinateType = "gcj02",
             DemoOnlineState = DemoOnlineState.Offline,
             DemoStatus = PointDemoStatus.Normal,
             DemoDispatchStatus = DispatchDemoStatus.None
@@ -62,8 +67,9 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
         {
             DeviceCode = "ACIS-DEMO-006",
             DeviceName = "科创园一期西门半球",
-            PlatformLongitude = null,
-            PlatformLatitude = null,
+            RawLongitude = null,
+            RawLatitude = null,
+            RawCoordinateType = "unknown",
             DemoOnlineState = DemoOnlineState.Online,
             DemoStatus = PointDemoStatus.Idle,
             DemoDispatchStatus = DispatchDemoStatus.None

@@ -14,14 +14,18 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
     private const double PickMaxLongitude = 120.69D;
     private const double PickMinLatitude = 29.97D;
     private const double PickMaxLatitude = 30.05D;
+
     private readonly ISiteLocalProfileRepository localProfileRepository;
+    private readonly IPlatformConnectionStateProvider platformConnectionStateProvider;
     private readonly IPlatformSiteProvider platformSiteProvider;
 
     public SiteMapQueryService(
         IPlatformSiteProvider platformSiteProvider,
+        IPlatformConnectionStateProvider platformConnectionStateProvider,
         ISiteLocalProfileRepository localProfileRepository)
     {
         this.platformSiteProvider = platformSiteProvider;
+        this.platformConnectionStateProvider = platformConnectionStateProvider;
         this.localProfileRepository = localProfileRepository;
     }
 
@@ -30,8 +34,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         string? searchText,
         CancellationToken cancellationToken = default)
     {
-        var mergedSites = await BuildMergedSitesAsync(cancellationToken);
-        var visibleSites = mergedSites
+        var mergeBundle = await BuildMergedSitesAsync(cancellationToken);
+        var visibleSites = mergeBundle.Sites
             .Where(site => MatchesFilter(site, filter))
             .Where(site => MatchesSearch(site, searchText))
             .ToList();
@@ -44,10 +48,13 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
         return new SiteDashboardSnapshot
         {
-            PointCount = mergedSites.Count,
-            MonitoredCount = mergedSites.Count(site => site.IsMonitored),
-            FaultCount = mergedSites.Count(IsAttentionSite),
-            DispatchedCount = mergedSites.Count(site => site.DemoDispatchStatus == DispatchDemoStatus.Dispatched),
+            PlatformStatusText = mergeBundle.ConnectionState.SummaryText,
+            PlatformStatusDetailText = mergeBundle.ConnectionState.DetailText,
+            IsPlatformConnected = mergeBundle.ConnectionState.IsConnected,
+            PointCount = mergeBundle.Sites.Count,
+            MonitoredCount = mergeBundle.Sites.Count(site => site.IsMonitored),
+            FaultCount = mergeBundle.Sites.Count(IsAttentionSite),
+            DispatchedCount = mergeBundle.Sites.Count(site => site.DemoDispatchStatus == DispatchDemoStatus.Dispatched),
             LastRefreshedAt = DateTimeOffset.Now,
             VisiblePoints = visibleMapSites
                 .Select(site => ToMapPoint(site, positions[site.DeviceCode]))
@@ -69,8 +76,9 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         }
 
         var normalizedDeviceCode = deviceCode.Trim();
-        var mergedSites = await BuildMergedSitesAsync(cancellationToken);
-        return mergedSites.FirstOrDefault(site => site.DeviceCode.Equals(
+        var mergeBundle = await BuildMergedSitesAsync(cancellationToken);
+
+        return mergeBundle.Sites.FirstOrDefault(site => site.DeviceCode.Equals(
             normalizedDeviceCode,
             StringComparison.OrdinalIgnoreCase));
     }
@@ -90,22 +98,25 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         };
     }
 
-    private async Task<IReadOnlyList<SiteMergedView>> BuildMergedSitesAsync(CancellationToken cancellationToken)
+    private async Task<SiteMergeBundle> BuildMergedSitesAsync(CancellationToken cancellationToken)
     {
         var platformSites = await platformSiteProvider.ListAsync(cancellationToken);
+        var platformConnectionState = platformConnectionStateProvider.GetCurrentState();
         var localProfiles = await localProfileRepository.ListAsync(cancellationToken);
         var localProfileMap = localProfiles.ToDictionary(
             profile => profile.DeviceCode,
             profile => profile,
             StringComparer.OrdinalIgnoreCase);
 
-        return platformSites
+        var mergedSites = platformSites
             .Select(platformSite =>
             {
                 localProfileMap.TryGetValue(platformSite.DeviceCode, out var localProfile);
-                return Merge(platformSite, localProfile);
+                return Merge(platformSite, localProfile, platformConnectionState);
             })
             .ToList();
+
+        return new SiteMergeBundle(mergedSites, platformConnectionState);
     }
 
     private static Dictionary<string, (double X, double Y)> BuildMapPositions(
@@ -116,10 +127,10 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             return [];
         }
 
-        var minLongitude = mapSites.Min(site => site.Longitude ?? 0D);
-        var maxLongitude = mapSites.Max(site => site.Longitude ?? 0D);
-        var minLatitude = mapSites.Min(site => site.Latitude ?? 0D);
-        var maxLatitude = mapSites.Max(site => site.Latitude ?? 0D);
+        var minLongitude = mapSites.Min(site => site.DisplayLongitude ?? 0D);
+        var maxLongitude = mapSites.Max(site => site.DisplayLongitude ?? 0D);
+        var minLatitude = mapSites.Min(site => site.DisplayLatitude ?? 0D);
+        var maxLatitude = mapSites.Max(site => site.DisplayLatitude ?? 0D);
 
         if (Math.Abs(maxLongitude - minLongitude) < 0.0001D)
         {
@@ -140,8 +151,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             site => site.DeviceCode,
             site =>
             {
-                var longitude = site.Longitude ?? 0D;
-                var latitude = site.Latitude ?? 0D;
+                var longitude = site.DisplayLongitude ?? 0D;
+                var latitude = site.DisplayLatitude ?? 0D;
                 var x = MapHorizontalPadding + (((longitude - minLongitude) / (maxLongitude - minLongitude)) * usableWidth);
                 var y = MapVerticalPadding + (((maxLatitude - latitude) / (maxLatitude - minLatitude)) * usableHeight);
                 return (Math.Round(x, 2), Math.Round(y, 2));
@@ -149,11 +160,25 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             StringComparer.OrdinalIgnoreCase);
     }
 
-    private static SiteMergedView Merge(PlatformSiteSnapshot platformSite, SiteLocalProfile? localProfile)
+    private static SiteMergedView Merge(
+        PlatformSiteSnapshot platformSite,
+        SiteLocalProfile? localProfile,
+        PlatformConnectionState platformConnectionState)
     {
-        var longitude = platformSite.PlatformLongitude ?? localProfile?.ManualLongitude;
-        var latitude = platformSite.PlatformLatitude ?? localProfile?.ManualLatitude;
-        var hasMapPoint = longitude.HasValue && latitude.HasValue;
+        var coordinateSource = ResolveCoordinateSource(platformSite, localProfile);
+        var displayLongitude = coordinateSource switch
+        {
+            CoordinateSource.PlatformRaw => platformSite.RawLongitude,
+            CoordinateSource.ManualOverride => localProfile?.ManualLongitude,
+            _ => null
+        };
+        var displayLatitude = coordinateSource switch
+        {
+            CoordinateSource.PlatformRaw => platformSite.RawLatitude,
+            CoordinateSource.ManualOverride => localProfile?.ManualLatitude,
+            _ => null
+        };
+        var hasMapPoint = displayLongitude.HasValue && displayLatitude.HasValue;
         var isMonitored = localProfile?.IsMonitored ?? true;
 
         return new SiteMergedView
@@ -164,14 +189,17 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             Alias = localProfile?.Alias,
             Remark = localProfile?.Remark,
             IsMonitored = isMonitored,
-            PlatformLongitude = platformSite.PlatformLongitude,
-            PlatformLatitude = platformSite.PlatformLatitude,
+            PlatformRawLongitude = platformSite.RawLongitude,
+            PlatformRawLatitude = platformSite.RawLatitude,
+            PlatformRawCoordinateType = platformSite.RawCoordinateType,
             ManualLongitude = localProfile?.ManualLongitude,
             ManualLatitude = localProfile?.ManualLatitude,
-            Longitude = longitude,
-            Latitude = latitude,
+            DisplayLongitude = displayLongitude,
+            DisplayLatitude = displayLatitude,
             HasMapPoint = hasMapPoint,
-            CoordinateSourceText = ResolveCoordinateSourceText(platformSite, localProfile, hasMapPoint),
+            CoordinateSource = coordinateSource,
+            CoordinateSourceText = ResolveCoordinateSourceText(coordinateSource),
+            PlatformStatusSummary = platformConnectionState.SummaryText,
             AddressText = localProfile?.AddressText,
             ProductAccessNumber = localProfile?.ProductAccessNumber,
             MaintenanceUnit = localProfile?.MaintenanceUnit,
@@ -201,8 +229,9 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             MaintainerName = site.MaintainerName,
             MaintainerPhone = site.MaintainerPhone,
             IsMonitored = site.IsMonitored,
-            Longitude = site.Longitude ?? 0D,
-            Latitude = site.Latitude ?? 0D,
+            DisplayLongitude = site.DisplayLongitude ?? 0D,
+            DisplayLatitude = site.DisplayLatitude ?? 0D,
+            CoordinateSource = site.CoordinateSource,
             CoordinateSourceText = site.CoordinateSourceText,
             DemoOnlineState = site.DemoOnlineState,
             DemoStatus = site.DemoStatus,
@@ -269,30 +298,34 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
     {
         return string.IsNullOrWhiteSpace(localProfile?.Alias)
             ? platformSite.DeviceName
-            : localProfile.Alias!.Trim();
+            : localProfile.Alias.Trim();
     }
 
-    private static string ResolveCoordinateSourceText(
+    private static CoordinateSource ResolveCoordinateSource(
         PlatformSiteSnapshot platformSite,
-        SiteLocalProfile? localProfile,
-        bool hasMapPoint)
+        SiteLocalProfile? localProfile)
     {
-        if (!hasMapPoint)
+        if (platformSite.RawLongitude.HasValue && platformSite.RawLatitude.HasValue)
         {
-            return "暂无可用坐标";
-        }
-
-        if (platformSite.PlatformLongitude.HasValue && platformSite.PlatformLatitude.HasValue)
-        {
-            return "平台坐标";
+            return CoordinateSource.PlatformRaw;
         }
 
         if (localProfile?.ManualLongitude.HasValue == true && localProfile.ManualLatitude.HasValue)
         {
-            return "手工补录坐标";
+            return CoordinateSource.ManualOverride;
         }
 
-        return "暂无可用坐标";
+        return CoordinateSource.None;
+    }
+
+    private static string ResolveCoordinateSourceText(CoordinateSource coordinateSource)
+    {
+        return coordinateSource switch
+        {
+            CoordinateSource.PlatformRaw => "平台原始",
+            CoordinateSource.ManualOverride => "本地手工",
+            _ => "暂无坐标"
+        };
     }
 
     private static SiteVisualState ResolveVisualState(PlatformSiteSnapshot platformSite, bool isMonitored)
@@ -367,4 +400,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             }
         };
     }
+
+    private sealed record SiteMergeBundle(
+        IReadOnlyList<SiteMergedView> Sites,
+        PlatformConnectionState ConnectionState);
 }

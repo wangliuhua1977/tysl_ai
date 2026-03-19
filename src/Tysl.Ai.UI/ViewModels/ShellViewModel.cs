@@ -11,11 +11,15 @@ public sealed class ShellViewModel : ObservableObject
     private SiteEditorViewModel? activeEditor;
     private int dispatchedCount;
     private int faultCount;
+    private bool hasVisiblePoints;
     private bool isCoordinatePickActive;
     private bool isFilterPanelExpanded = true;
-    private string mapInteractionHint = "地图点位由平台设备快照驱动，坐标拾取仅用于手工补录坐标。";
+    private string mapEmptyStateText = "正在等待平台点位。";
+    private string mapInteractionHint = "地图点位由平台权威源驱动，坐标拾取仅用于补录本地手工坐标。";
     private int monitoredCount;
     private int pointCount;
+    private string platformStatusDetail = "正在准备平台设备源。";
+    private string platformStatusText = "平台连接准备中";
     private string searchText = string.Empty;
     private DashboardFilterOption selectedFilter;
     private SiteDetailViewModel? selectedDetail;
@@ -171,6 +175,30 @@ public sealed class ShellViewModel : ObservableObject
         private set => SetProperty(ref mapInteractionHint, value);
     }
 
+    public string PlatformStatusText
+    {
+        get => platformStatusText;
+        private set => SetProperty(ref platformStatusText, value);
+    }
+
+    public string PlatformStatusDetail
+    {
+        get => platformStatusDetail;
+        private set => SetProperty(ref platformStatusDetail, value);
+    }
+
+    public bool HasVisiblePoints
+    {
+        get => hasVisiblePoints;
+        private set => SetProperty(ref hasVisiblePoints, value);
+    }
+
+    public string MapEmptyStateText
+    {
+        get => mapEmptyStateText;
+        private set => SetProperty(ref mapEmptyStateText, value);
+    }
+
     public string MonitorToggleText => SelectedDetail?.IsMonitored == false ? "纳入监测" : "暂停监测";
 
     public void HandleMapSurfaceClick(double relativeX, double relativeY)
@@ -203,6 +231,8 @@ public sealed class ShellViewModel : ObservableObject
         {
             var snapshot = await siteMapQueryService.GetDashboardAsync(SelectedFilter.Value, SearchText);
 
+            PlatformStatusText = snapshot.PlatformStatusText;
+            PlatformStatusDetail = snapshot.PlatformStatusDetailText ?? "平台状态正常。";
             PointCount = snapshot.PointCount;
             MonitoredCount = snapshot.MonitoredCount;
             FaultCount = snapshot.FaultCount;
@@ -221,6 +251,9 @@ public sealed class ShellViewModel : ObservableObject
             {
                 VisibleAlerts.Add(alert);
             }
+
+            HasVisiblePoints = VisiblePoints.Count > 0;
+            MapEmptyStateText = ResolveMapEmptyStateText(snapshot.IsPlatformConnected, snapshot.PlatformStatusText);
 
             var targetDeviceCode = preferredSelectionDeviceCode ?? selectedPointDeviceCode;
             var targetPoint = !string.IsNullOrWhiteSpace(targetDeviceCode)
@@ -244,9 +277,9 @@ public sealed class ShellViewModel : ObservableObject
 
             SelectedDetail = null;
         }
-        catch (Exception ex)
+        catch
         {
-            Notify("加载失败", ex.Message);
+            Notify("加载失败", "地图数据暂不可用，请稍后重试。");
         }
     }
 
@@ -263,9 +296,9 @@ public sealed class ShellViewModel : ObservableObject
             var detail = await siteMapQueryService.GetSiteDetailAsync(deviceCode);
             SelectedDetail = detail is null ? null : SiteDetailViewModel.FromSnapshot(detail);
         }
-        catch (Exception ex)
+        catch
         {
-            Notify("详情加载失败", ex.Message);
+            Notify("详情加载失败", "点位详情暂不可用，请稍后重试。");
         }
     }
 
@@ -293,9 +326,9 @@ public sealed class ShellViewModel : ObservableObject
             await siteLocalProfileService.UpsertAsync(input);
             await LoadDashboardAsync(SelectedDetail.DeviceCode);
         }
-        catch (Exception ex)
+        catch
         {
-            Notify("操作失败", ex.Message);
+            Notify("操作失败", "监测状态更新失败，请稍后重试。");
         }
     }
 
@@ -358,9 +391,9 @@ public sealed class ShellViewModel : ObservableObject
             editor.RequestClose();
             await LoadDashboardAsync(input!.DeviceCode);
         }
-        catch (Exception ex)
+        catch
         {
-            Notify("保存失败", ex.Message);
+            Notify("保存失败", "本地补充信息保存失败，请稍后重试。");
         }
     }
 
@@ -391,7 +424,17 @@ public sealed class ShellViewModel : ObservableObject
     private void ClearCoordinatePick()
     {
         IsCoordinatePickActive = false;
-        MapInteractionHint = "地图点位由平台设备快照驱动，坐标拾取仅用于手工补录坐标。";
+        MapInteractionHint = "地图点位由平台权威源驱动，坐标拾取仅用于补录本地手工坐标。";
+    }
+
+    private static string ResolveMapEmptyStateText(bool isPlatformConnected, string platformStatusText)
+    {
+        if (!isPlatformConnected)
+        {
+            return $"{platformStatusText}。请补充 ACIS 配置后重新刷新。";
+        }
+
+        return "当前筛选条件下暂无可展示点位。";
     }
 
     private void Notify(string title, string message)
