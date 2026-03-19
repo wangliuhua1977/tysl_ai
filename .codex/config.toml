@@ -1,0 +1,9 @@
+﻿# Project-level Codex config for Tysl.Ai.
+# Project root is the repository root resolved from `.git`.
+# Keep the default AGENTS.md / AGENTS.override.md discovery behavior.
+
+developer_instructions = """
+Treat this file as the project-level Codex configuration for Tysl.Ai.
+Use the Git repository root as the working project root.
+Preserve the default AGENTS.md and AGENTS.override.md instruction lookup behavior.
+"""

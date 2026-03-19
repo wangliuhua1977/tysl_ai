@@ -1,0 +1,19 @@
+﻿<UserControl x:Class="Tysl.Ai.UI.Controls.StatCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinWidth="120">
+    <Border Style="{StaticResource PanelCardStyle}"
+            Padding="14,12"
+            Margin="0,0,12,0"
+            ToolTip="{Binding Hint, RelativeSource={RelativeSource AncestorType=UserControl}}">
+        <StackPanel>
+            <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                       Style="{StaticResource CaptionTextStyle}" />
+            <TextBlock Margin="0,6,0,0"
+                       FontSize="22"
+                       FontWeight="SemiBold"
+                       Foreground="{StaticResource TextPrimaryBrush}"
+                       Text="{Binding Value, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+        </StackPanel>
+    </Border>
+</UserControl>
