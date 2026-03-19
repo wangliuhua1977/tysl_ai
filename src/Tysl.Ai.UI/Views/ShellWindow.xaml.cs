@@ -1,6 +1,7 @@
 using System.Windows;
-using System.Windows.Input;
+using Tysl.Ai.UI.Models;
 using Tysl.Ai.UI.ViewModels;
+using Tysl.Ai.UI.Views.Controls;
 
 namespace Tysl.Ai.UI.Views;
 
@@ -9,24 +10,17 @@ public partial class ShellWindow : Window
     private SiteEditorDialog? editorDialog;
     private ShellViewModel? shellViewModel;
 
-    public ShellWindow()
+    public ShellWindow(AmapHostConfiguration mapHostConfiguration)
     {
         InitializeComponent();
+
+        AmapHost.Configuration = mapHostConfiguration;
+        AmapHost.PointSelected += HandleMapPointSelected;
+        AmapHost.MapClicked += HandleMapClicked;
+        AmapHost.RenderedPointsUpdated += HandleRenderedPointsUpdated;
+
         DataContextChanged += OnDataContextChanged;
         Closed += OnClosed;
-    }
-
-    private void MapSurface_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (shellViewModel is null || MapClickSurface.ActualWidth <= 0 || MapClickSurface.ActualHeight <= 0)
-        {
-            return;
-        }
-
-        var position = e.GetPosition(MapClickSurface);
-        var relativeX = position.X / MapClickSurface.ActualWidth;
-        var relativeY = position.Y / MapClickSurface.ActualHeight;
-        shellViewModel.HandleMapSurfaceClick(relativeX, relativeY);
     }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -45,6 +39,21 @@ public partial class ShellWindow : Window
 
         shellViewModel.EditorDialogRequested += HandleEditorDialogRequested;
         shellViewModel.NotificationRequested += HandleNotificationRequested;
+    }
+
+    private void HandleMapPointSelected(object? sender, MapPointSelectedEventArgs e)
+    {
+        shellViewModel?.HandleMapPointSelected(e.DeviceCode);
+    }
+
+    private void HandleMapClicked(object? sender, MapClickedEventArgs e)
+    {
+        shellViewModel?.HandleMapClicked(e.Longitude, e.Latitude);
+    }
+
+    private void HandleRenderedPointsUpdated(object? sender, MapRenderedPointsEventArgs e)
+    {
+        shellViewModel?.HandleMapPointsRendered(e.Points);
     }
 
     private void HandleEditorDialogRequested(object? sender, SiteEditorDialogRequestedEventArgs e)
@@ -91,6 +100,10 @@ public partial class ShellWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        AmapHost.PointSelected -= HandleMapPointSelected;
+        AmapHost.MapClicked -= HandleMapClicked;
+        AmapHost.RenderedPointsUpdated -= HandleRenderedPointsUpdated;
+
         if (shellViewModel is not null)
         {
             shellViewModel.EditorDialogRequested -= HandleEditorDialogRequested;

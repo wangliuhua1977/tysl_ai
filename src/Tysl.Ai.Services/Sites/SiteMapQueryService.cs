@@ -6,15 +6,6 @@ namespace Tysl.Ai.Services.Sites;
 
 public sealed class SiteMapQueryService : ISiteMapQueryService
 {
-    private const double MapCanvasWidth = 1000D;
-    private const double MapCanvasHeight = 620D;
-    private const double MapHorizontalPadding = 78D;
-    private const double MapVerticalPadding = 68D;
-    private const double PickMinLongitude = 120.53D;
-    private const double PickMaxLongitude = 120.69D;
-    private const double PickMinLatitude = 29.97D;
-    private const double PickMaxLatitude = 30.05D;
-
     private readonly ISiteLocalProfileRepository localProfileRepository;
     private readonly IPlatformConnectionStateProvider platformConnectionStateProvider;
     private readonly IPlatformSiteProvider platformSiteProvider;
@@ -44,8 +35,6 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             .Where(site => site.HasMapPoint)
             .ToList();
 
-        var positions = BuildMapPositions(visibleMapSites);
-
         return new SiteDashboardSnapshot
         {
             PlatformStatusText = mergeBundle.ConnectionState.SummaryText,
@@ -57,7 +46,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             DispatchedCount = mergeBundle.Sites.Count(site => site.DemoDispatchStatus == DispatchDemoStatus.Dispatched),
             LastRefreshedAt = DateTimeOffset.Now,
             VisiblePoints = visibleMapSites
-                .Select(site => ToMapPoint(site, positions[site.DeviceCode]))
+                .Select(ToMapPoint)
                 .ToList(),
             VisibleAlerts = visibleSites
                 .Where(IsAttentionSite)
@@ -83,21 +72,6 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             StringComparison.OrdinalIgnoreCase));
     }
 
-    public DemoCoordinate CreateDemoCoordinate(double relativeX, double relativeY)
-    {
-        var clampedX = Math.Clamp(relativeX, 0D, 1D);
-        var clampedY = Math.Clamp(relativeY, 0D, 1D);
-
-        var longitude = PickMinLongitude + ((PickMaxLongitude - PickMinLongitude) * clampedX);
-        var latitude = PickMaxLatitude - ((PickMaxLatitude - PickMinLatitude) * clampedY);
-
-        return new DemoCoordinate
-        {
-            Longitude = Math.Round(longitude, 6),
-            Latitude = Math.Round(latitude, 6)
-        };
-    }
-
     private async Task<SiteMergeBundle> BuildMergedSitesAsync(CancellationToken cancellationToken)
     {
         var platformSites = await platformSiteProvider.ListAsync(cancellationToken);
@@ -117,47 +91,6 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             .ToList();
 
         return new SiteMergeBundle(mergedSites, platformConnectionState);
-    }
-
-    private static Dictionary<string, (double X, double Y)> BuildMapPositions(
-        IReadOnlyList<SiteMergedView> mapSites)
-    {
-        if (mapSites.Count == 0)
-        {
-            return [];
-        }
-
-        var minLongitude = mapSites.Min(site => site.DisplayLongitude ?? 0D);
-        var maxLongitude = mapSites.Max(site => site.DisplayLongitude ?? 0D);
-        var minLatitude = mapSites.Min(site => site.DisplayLatitude ?? 0D);
-        var maxLatitude = mapSites.Max(site => site.DisplayLatitude ?? 0D);
-
-        if (Math.Abs(maxLongitude - minLongitude) < 0.0001D)
-        {
-            maxLongitude += 0.01D;
-            minLongitude -= 0.01D;
-        }
-
-        if (Math.Abs(maxLatitude - minLatitude) < 0.0001D)
-        {
-            maxLatitude += 0.01D;
-            minLatitude -= 0.01D;
-        }
-
-        var usableWidth = MapCanvasWidth - (MapHorizontalPadding * 2);
-        var usableHeight = MapCanvasHeight - (MapVerticalPadding * 2);
-
-        return mapSites.ToDictionary(
-            site => site.DeviceCode,
-            site =>
-            {
-                var longitude = site.DisplayLongitude ?? 0D;
-                var latitude = site.DisplayLatitude ?? 0D;
-                var x = MapHorizontalPadding + (((longitude - minLongitude) / (maxLongitude - minLongitude)) * usableWidth);
-                var y = MapVerticalPadding + (((maxLatitude - latitude) / (maxLatitude - minLatitude)) * usableHeight);
-                return (Math.Round(x, 2), Math.Round(y, 2));
-            },
-            StringComparer.OrdinalIgnoreCase);
     }
 
     private static SiteMergedView Merge(
@@ -216,7 +149,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         };
     }
 
-    private static SiteMapPoint ToMapPoint(SiteMergedView site, (double X, double Y) position)
+    private static SiteMapPoint ToMapPoint(SiteMergedView site)
     {
         return new SiteMapPoint
         {
@@ -229,17 +162,21 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             MaintainerName = site.MaintainerName,
             MaintainerPhone = site.MaintainerPhone,
             IsMonitored = site.IsMonitored,
-            DisplayLongitude = site.DisplayLongitude ?? 0D,
-            DisplayLatitude = site.DisplayLatitude ?? 0D,
-            CoordinateSource = site.CoordinateSource,
-            CoordinateSourceText = site.CoordinateSourceText,
+            CoordinatePayload = new MapCoordinatePayload
+            {
+                PlatformRawLongitude = site.PlatformRawLongitude,
+                PlatformRawLatitude = site.PlatformRawLatitude,
+                RawCoordinateType = site.PlatformRawCoordinateType,
+                ManualLongitude = site.ManualLongitude,
+                ManualLatitude = site.ManualLatitude,
+                CoordinateSource = site.CoordinateSource,
+                CoordinateSourceText = site.CoordinateSourceText
+            },
             DemoOnlineState = site.DemoOnlineState,
             DemoStatus = site.DemoStatus,
             DemoDispatchStatus = site.DemoDispatchStatus,
             VisualState = site.VisualState,
-            StatusText = site.StatusText,
-            MapX = position.X,
-            MapY = position.Y
+            StatusText = site.StatusText
         };
     }
 

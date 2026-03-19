@@ -11,6 +11,9 @@
     <None Include="..\..\configs\acis-kernel.template.json" Link="configs\acis-kernel.template.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\..\configs\amap-js.template.json" Link="configs\amap-js.template.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <PropertyGroup>

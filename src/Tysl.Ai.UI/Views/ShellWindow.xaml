@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Tysl.Ai.UI.Controls"
+        xmlns:controlsView="clr-namespace:Tysl.Ai.UI.Views.Controls"
         xmlns:infrastructure="clr-namespace:Tysl.Ai.UI.Infrastructure"
         Style="{StaticResource ShellWindowStyle}"
         Title="天枢视联 AI 巡检系统"
@@ -54,7 +55,7 @@
                             VerticalAlignment="Center">
                     <controls:StatCard Title="点位数" Value="{Binding PointCount}" Hint="当前平台设备快照中的点位总数" />
                     <controls:StatCard Title="已监测" Value="{Binding MonitoredCount}" Hint="当前纳入监测的点位数量" />
-                    <controls:StatCard Title="异常数" Value="{Binding FaultCount}" Hint="异常、离线、派单或空闲点位数量" />
+                    <controls:StatCard Title="异常数" Value="{Binding FaultCount}" Hint="异常、离线或空闲点位数量" />
                     <controls:StatCard Title="已派单" Value="{Binding DispatchedCount}" Hint="当前处于派单状态的点位数量" />
                     <controls:StatCard Title="最后刷新" Value="{Binding LastRefreshText}" Hint="当前地图查询刷新时间" />
                 </StackPanel>
@@ -96,7 +97,7 @@
                                 Command="{Binding ToggleFilterPanelCommand}"
                                 Style="{StaticResource FlatActionButtonStyle}"
                                 ToolTip="展开或收起筛选栏"
-                                Content="≡" />
+                                Content="≋" />
                     </DockPanel>
 
                     <TextBox Grid.Row="1"
@@ -128,118 +129,46 @@
                                    Text="{Binding MapInteractionHint}" />
                     </DockPanel>
 
-                    <Border x:Name="MapClickSurface"
-                            Grid.Row="1"
-                            Padding="20"
-                            Background="{StaticResource PanelAltBrush}"
-                            BorderBrush="{StaticResource SubtleBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="18"
-                            MouseLeftButtonUp="MapSurface_MouseLeftButtonUp">
-                        <Grid>
-                            <Rectangle Fill="{StaticResource MapGridPatternBrush}" Opacity="0.92" RadiusX="18" RadiusY="18" />
-                            <Ellipse Width="520" Height="520" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{StaticResource AccentSoftBrush}" Opacity="0.12" />
-                            <TextBlock Margin="0,8,0,0"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Top"
+                    <Grid Grid.Row="1">
+                        <controlsView:AmapHostControl x:Name="AmapHost"
+                                                      StateJson="{Binding MapHostStateJson}" />
+
+                        <Border HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Padding="18,12"
+                                Background="{StaticResource CardBrush}"
+                                BorderBrush="{StaticResource SubtleBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="14">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasVisiblePoints}" Value="False">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <TextBlock MaxWidth="280"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap"
                                        Style="{StaticResource CaptionTextStyle}"
-                                       Text="平台设备点位承载区" />
+                                       Text="{Binding MapEmptyStateText}" />
+                        </Border>
 
-                            <Viewbox Margin="12,44,12,12" Stretch="Fill" StretchDirection="Both">
-                                <Canvas Width="1000" Height="620">
-                                    <ItemsControl ItemsSource="{Binding VisiblePoints}">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <Canvas />
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemContainerStyle>
-                                            <Style TargetType="ContentPresenter">
-                                                <Setter Property="Canvas.Left" Value="{Binding MapX}" />
-                                                <Setter Property="Canvas.Top" Value="{Binding MapY}" />
-                                            </Style>
-                                        </ItemsControl.ItemContainerStyle>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Button Width="178"
-                                                        Command="{Binding DataContext.SelectPointCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                        CommandParameter="{Binding}"
-                                                        Style="{StaticResource MapMarkerButtonStyle}">
-                                                    <Border x:Name="MarkerBorder"
-                                                            Padding="12"
-                                                            Background="{Binding VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=FillBrush}"
-                                                            BorderBrush="{Binding VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=BorderBrush}"
-                                                            BorderThickness="1.2"
-                                                            CornerRadius="16">
-                                                        <StackPanel>
-                                                            <DockPanel>
-                                                                <TextBlock FontSize="14" FontWeight="SemiBold" Text="{Binding DisplayName}" />
-                                                                <Border HorizontalAlignment="Right"
-                                                                        Padding="8,3"
-                                                                        Background="{Binding VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=FillBrush}"
-                                                                        BorderBrush="{Binding VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=BorderBrush}"
-                                                                        BorderThickness="1"
-                                                                        CornerRadius="9">
-                                                                    <TextBlock FontSize="11"
-                                                                               Foreground="{Binding VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=TextBrush}"
-                                                                               Text="{Binding StatusText}" />
-                                                                </Border>
-                                                            </DockPanel>
-                                                            <TextBlock Margin="0,9,0,0" Style="{StaticResource CaptionTextStyle}" Text="{Binding DeviceName}" />
-                                                            <TextBlock Margin="0,10,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding DeviceCode}" />
-                                                            <TextBlock Margin="0,5,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding MaintenanceLine}" />
-                                                        </StackPanel>
-                                                    </Border>
-                                                </Button>
-                                                <DataTemplate.Triggers>
-                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                        <Setter TargetName="MarkerBorder" Property="BorderThickness" Value="2.4" />
-                                                        <Setter TargetName="MarkerBorder" Property="Effect" Value="{StaticResource MapMarkerGlowEffect}" />
-                                                    </DataTrigger>
-                                                </DataTemplate.Triggers>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </Canvas>
-                            </Viewbox>
-
-                            <Border HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Padding="18,12"
-                                    Background="{StaticResource CardBrush}"
-                                    BorderBrush="{StaticResource SubtleBorderBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="14">
-                                <Border.Style>
-                                    <Style TargetType="Border">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding HasVisiblePoints}" Value="False">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Border.Style>
-                                <TextBlock MaxWidth="280"
-                                           TextAlignment="Center"
-                                           TextWrapping="Wrap"
-                                           Style="{StaticResource CaptionTextStyle}"
-                                           Text="{Binding MapEmptyStateText}" />
-                            </Border>
-
-                            <Border HorizontalAlignment="Center"
-                                    VerticalAlignment="Top"
-                                    Margin="0,54,0,0"
-                                    Padding="14,8"
-                                    Background="{StaticResource CardBrush}"
-                                    BorderBrush="{StaticResource AccentBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="12"
-                                    Visibility="{Binding IsCoordinatePickActive, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="手工坐标补录中，请点击地图占位区。" />
-                            </Border>
-                        </Grid>
-                    </Border>
+                        <Border HorizontalAlignment="Center"
+                                VerticalAlignment="Top"
+                                Margin="0,18,0,0"
+                                Padding="14,8"
+                                Background="{StaticResource CardBrush}"
+                                BorderBrush="{StaticResource AccentBrush}"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Visibility="{Binding IsCoordinatePickActive, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="手工坐标补录中，请点击地图回填经纬度。" />
+                        </Border>
+                    </Grid>
                 </Grid>
             </Border>
 
@@ -278,8 +207,8 @@
                         <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="坐标与平台" />
                         <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoordinateSourceText, StringFormat=当前坐标来源：{0}}" />
                         <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoordinateStatusText, StringFormat=坐标状态：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LongitudeText, StringFormat=当前经度：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LatitudeText, StringFormat=当前纬度：{0}}" />
+                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LongitudeText, StringFormat=当前显示经度：{0}}" />
+                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LatitudeText, StringFormat=当前显示纬度：{0}}" />
                         <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.PlatformCoordinateText, StringFormat=平台原始坐标：{0}}" />
                         <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.ManualCoordinateText, StringFormat=本地手工坐标：{0}}" />
                         <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.PlatformStatusSummary, StringFormat=平台状态：{0}}" />

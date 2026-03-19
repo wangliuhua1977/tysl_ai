@@ -11,6 +11,4 @@ public interface ISiteMapQueryService
         CancellationToken cancellationToken = default);
 
     Task<SiteMergedView?> GetSiteDetailAsync(string deviceCode, CancellationToken cancellationToken = default);
-
-    DemoCoordinate CreateDemoCoordinate(double relativeX, double relativeY);
 }

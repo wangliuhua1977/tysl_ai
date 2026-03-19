@@ -1,11 +1,21 @@
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using Tysl.Ai.Core.Enums;
 using Tysl.Ai.Core.Interfaces;
+using Tysl.Ai.Core.Models;
+using Tysl.Ai.UI.Models;
 
 namespace Tysl.Ai.UI.ViewModels;
 
 public sealed class ShellViewModel : ObservableObject
 {
+    private static readonly JsonSerializerOptions MapHostJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    private readonly bool isMapHostConfigured;
+    private readonly Dictionary<string, DemoCoordinate> renderedPointCoordinates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ISiteLocalProfileService siteLocalProfileService;
     private readonly ISiteMapQueryService siteMapQueryService;
     private SiteEditorViewModel? activeEditor;
@@ -14,22 +24,35 @@ public sealed class ShellViewModel : ObservableObject
     private bool hasVisiblePoints;
     private bool isCoordinatePickActive;
     private bool isFilterPanelExpanded = true;
-    private string mapEmptyStateText = "正在等待平台点位。";
-    private string mapInteractionHint = "地图点位由平台权威源驱动，坐标拾取仅用于补录本地手工坐标。";
+    private string mapEmptyStateText;
+    private string mapHostStateJson = "{\"points\":[],\"coordinatePickActive\":false}";
+    private string mapInteractionHint;
     private int monitoredCount;
     private int pointCount;
     private string platformStatusDetail = "正在准备平台设备源。";
     private string platformStatusText = "平台连接准备中";
     private string searchText = string.Empty;
-    private DashboardFilterOption selectedFilter;
     private SiteDetailViewModel? selectedDetail;
+    private SiteMergedView? selectedDetailSource;
+    private DashboardFilterOption selectedFilter;
     private SiteMapPointViewModel? selectedPoint;
     private string? selectedPointDeviceCode;
 
-    public ShellViewModel(ISiteMapQueryService siteMapQueryService, ISiteLocalProfileService siteLocalProfileService)
+    public ShellViewModel(
+        ISiteMapQueryService siteMapQueryService,
+        ISiteLocalProfileService siteLocalProfileService,
+        bool isMapHostConfigured)
     {
         this.siteMapQueryService = siteMapQueryService;
         this.siteLocalProfileService = siteLocalProfileService;
+        this.isMapHostConfigured = isMapHostConfigured;
+
+        mapEmptyStateText = isMapHostConfigured
+            ? "正在等待平台点位。"
+            : "地图未配置。请补充 amap-js.json 后重新启动。";
+        mapInteractionHint = isMapHostConfigured
+            ? "地图点位由平台权威源驱动，坐标拾取仅用于补录本地手工坐标。"
+            : "地图宿主未配置，暂不可拾取手工坐标。";
 
         Filters =
         [
@@ -143,6 +166,7 @@ public sealed class ShellViewModel : ObservableObject
             }
 
             selectedPointDeviceCode = value?.DeviceCode;
+            RefreshMapHostState();
             _ = LoadSelectedSiteDetailAsync(selectedPointDeviceCode);
         }
     }
@@ -166,7 +190,13 @@ public sealed class ShellViewModel : ObservableObject
     public bool IsCoordinatePickActive
     {
         get => isCoordinatePickActive;
-        private set => SetProperty(ref isCoordinatePickActive, value);
+        private set
+        {
+            if (SetProperty(ref isCoordinatePickActive, value))
+            {
+                RefreshMapHostState();
+            }
+        }
     }
 
     public string MapInteractionHint
@@ -199,17 +229,63 @@ public sealed class ShellViewModel : ObservableObject
         private set => SetProperty(ref mapEmptyStateText, value);
     }
 
+    public string MapHostStateJson
+    {
+        get => mapHostStateJson;
+        private set => SetProperty(ref mapHostStateJson, value);
+    }
+
     public string MonitorToggleText => SelectedDetail?.IsMonitored == false ? "纳入监测" : "暂停监测";
 
-    public void HandleMapSurfaceClick(double relativeX, double relativeY)
+    public void HandleMapClicked(double longitude, double latitude)
     {
         if (!IsCoordinatePickActive || activeEditor is null)
         {
             return;
         }
 
-        activeEditor.ApplyPickedCoordinate(siteMapQueryService.CreateDemoCoordinate(relativeX, relativeY));
+        activeEditor.ApplyPickedCoordinate(new DemoCoordinate
+        {
+            Longitude = Math.Round(longitude, 6),
+            Latitude = Math.Round(latitude, 6)
+        });
+
         ClearCoordinatePick();
+    }
+
+    public void HandleMapPointSelected(string deviceCode)
+    {
+        if (string.IsNullOrWhiteSpace(deviceCode))
+        {
+            return;
+        }
+
+        var point = VisiblePoints.FirstOrDefault(item => item.DeviceCode.Equals(deviceCode, StringComparison.OrdinalIgnoreCase));
+        if (point is not null)
+        {
+            SelectedPoint = point;
+            return;
+        }
+
+        selectedPointDeviceCode = deviceCode;
+        RefreshMapHostState();
+        _ = LoadSelectedSiteDetailAsync(deviceCode);
+    }
+
+    public void HandleMapPointsRendered(IReadOnlyList<MapHostRenderedPointDto> points)
+    {
+        renderedPointCoordinates.Clear();
+
+        foreach (var point in points)
+        {
+            renderedPointCoordinates[point.DeviceCode] = new DemoCoordinate
+            {
+                Longitude = point.Longitude,
+                Latitude = point.Latitude
+            };
+        }
+
+        RefreshSelectedDetail();
     }
 
     public void HandleEditorClosed(SiteEditorViewModel editor)
@@ -240,6 +316,7 @@ public sealed class ShellViewModel : ObservableObject
             LastRefreshText = snapshot.LastRefreshedAt.ToLocalTime().ToString("HH:mm:ss");
             OnPropertyChanged(nameof(LastRefreshText));
 
+            renderedPointCoordinates.Clear();
             VisiblePoints.Clear();
             foreach (var point in snapshot.VisiblePoints.Select(point => new SiteMapPointViewModel(point)))
             {
@@ -253,7 +330,7 @@ public sealed class ShellViewModel : ObservableObject
             }
 
             HasVisiblePoints = VisiblePoints.Count > 0;
-            MapEmptyStateText = ResolveMapEmptyStateText(snapshot.IsPlatformConnected, snapshot.PlatformStatusText);
+            MapEmptyStateText = ResolveMapEmptyStateText(isMapHostConfigured, snapshot.IsPlatformConnected, snapshot.PlatformStatusText);
 
             var targetDeviceCode = preferredSelectionDeviceCode ?? selectedPointDeviceCode;
             var targetPoint = !string.IsNullOrWhiteSpace(targetDeviceCode)
@@ -267,6 +344,7 @@ public sealed class ShellViewModel : ObservableObject
             }
 
             SelectedPoint = null;
+            RefreshMapHostState();
 
             if (!string.IsNullOrWhiteSpace(targetDeviceCode))
             {
@@ -275,6 +353,7 @@ public sealed class ShellViewModel : ObservableObject
                 return;
             }
 
+            selectedDetailSource = null;
             SelectedDetail = null;
         }
         catch
@@ -287,6 +366,7 @@ public sealed class ShellViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(deviceCode))
         {
+            selectedDetailSource = null;
             SelectedDetail = null;
             return;
         }
@@ -294,7 +374,10 @@ public sealed class ShellViewModel : ObservableObject
         try
         {
             var detail = await siteMapQueryService.GetSiteDetailAsync(deviceCode);
-            SelectedDetail = detail is null ? null : SiteDetailViewModel.FromSnapshot(detail);
+            selectedDetailSource = detail;
+            SelectedDetail = detail is null
+                ? null
+                : SiteDetailViewModel.FromSnapshot(detail, GetRenderedCoordinate(detail.DeviceCode));
         }
         catch
         {
@@ -369,6 +452,7 @@ public sealed class ShellViewModel : ObservableObject
             return;
         }
 
+        RefreshMapHostState();
         await LoadSelectedSiteDetailAsync(alert.PointId);
     }
 
@@ -415,20 +499,67 @@ public sealed class ShellViewModel : ObservableObject
             return;
         }
 
+        if (!isMapHostConfigured)
+        {
+            Notify("地图未配置", "请先补充 amap-js.json，再使用地图拾取手工坐标。");
+            return;
+        }
+
         activeEditor = editor;
         IsCoordinatePickActive = true;
-        MapInteractionHint = "手工坐标补录中，请点击地图占位区回填经纬度。";
+        MapInteractionHint = "手工坐标补录中，请点击地图回填经纬度。";
         editor.MarkCoordinatePickPending();
     }
 
     private void ClearCoordinatePick()
     {
         IsCoordinatePickActive = false;
-        MapInteractionHint = "地图点位由平台权威源驱动，坐标拾取仅用于补录本地手工坐标。";
+        MapInteractionHint = isMapHostConfigured
+            ? "地图点位由平台权威源驱动，坐标拾取仅用于补录本地手工坐标。"
+            : "地图宿主未配置，暂不可拾取手工坐标。";
     }
 
-    private static string ResolveMapEmptyStateText(bool isPlatformConnected, string platformStatusText)
+    private DemoCoordinate? GetRenderedCoordinate(string deviceCode)
     {
+        return renderedPointCoordinates.TryGetValue(deviceCode, out var coordinate)
+            ? coordinate
+            : null;
+    }
+
+    private void RefreshMapHostState()
+    {
+        var state = new MapHostStateDto
+        {
+            Points = VisiblePoints.Select(point => point.ToMapHostPoint()).ToList(),
+            SelectedDeviceCode = SelectedPoint?.DeviceCode,
+            CoordinatePickActive = IsCoordinatePickActive
+        };
+
+        MapHostStateJson = JsonSerializer.Serialize(state, MapHostJsonOptions);
+    }
+
+    private void RefreshSelectedDetail()
+    {
+        if (selectedDetailSource is null)
+        {
+            return;
+        }
+
+        SelectedDetail = SiteDetailViewModel.FromSnapshot(
+            selectedDetailSource,
+            GetRenderedCoordinate(selectedDetailSource.DeviceCode));
+    }
+
+    private static string ResolveMapEmptyStateText(
+        bool isMapHostConfigured,
+        bool isPlatformConnected,
+        string platformStatusText)
+    {
+        if (!isMapHostConfigured)
+        {
+            return "地图未配置。请补充 amap-js.json 后重新启动。";
+        }
+
         if (!isPlatformConnected)
         {
             return $"{platformStatusText}。请补充 ACIS 配置后重新刷新。";

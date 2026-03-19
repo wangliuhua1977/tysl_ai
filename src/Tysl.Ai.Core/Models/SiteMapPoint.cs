@@ -22,13 +22,7 @@ public sealed record SiteMapPoint
 
     public required bool IsMonitored { get; init; }
 
-    public required double DisplayLongitude { get; init; }
-
-    public required double DisplayLatitude { get; init; }
-
-    public required CoordinateSource CoordinateSource { get; init; }
-
-    public required string CoordinateSourceText { get; init; }
+    public required MapCoordinatePayload CoordinatePayload { get; init; }
 
     public required DemoOnlineState DemoOnlineState { get; init; }
 
@@ -39,8 +33,4 @@ public sealed record SiteMapPoint
     public required SiteVisualState VisualState { get; init; }
 
     public required string StatusText { get; init; }
-
-    public required double MapX { get; init; }
-
-    public required double MapY { get; init; }
 }
