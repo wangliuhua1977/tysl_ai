@@ -43,4 +43,14 @@ public sealed record SiteMapPoint
     public DateTimeOffset? LastSnapshotAt { get; init; }
 
     public required RuntimeFaultCode RuntimeFaultCode { get; init; }
+
+    public required DispatchStatus DispatchStatus { get; init; }
+
+    public required RecoveryStatus RecoveryStatus { get; init; }
+
+    public required bool IsDispatchCooling { get; init; }
+
+    public required string DispatchStateKey { get; init; }
+
+    public required string DispatchStateText { get; init; }
 }

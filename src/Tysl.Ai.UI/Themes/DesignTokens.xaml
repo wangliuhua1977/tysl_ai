@@ -24,6 +24,9 @@
     <Color x:Key="StatusDispatchedColor">#FFD36D</Color>
     <Color x:Key="StatusOfflineColor">#FF6B8B</Color>
     <Color x:Key="StatusUnmonitoredColor">#6B7E95</Color>
+    <Color x:Key="StatusPendingDispatchColor">#FFAE63</Color>
+    <Color x:Key="StatusPendingRecoveryColor">#9AB3FF</Color>
+    <Color x:Key="StatusRecoveredColor">#6FE1C1</Color>
 
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
     <SolidColorBrush x:Key="PanelBrush" Color="{StaticResource PanelColor}" />
@@ -75,6 +78,18 @@
     <SolidColorBrush x:Key="Status.Unmonitored.FillBrush" Color="#222E3A" />
     <SolidColorBrush x:Key="Status.Unmonitored.BorderBrush" Color="{StaticResource StatusUnmonitoredColor}" />
     <SolidColorBrush x:Key="Status.Unmonitored.TextBrush" Color="{StaticResource StatusUnmonitoredColor}" />
+
+    <SolidColorBrush x:Key="Status.PendingDispatch.FillBrush" Color="#452D1B" />
+    <SolidColorBrush x:Key="Status.PendingDispatch.BorderBrush" Color="{StaticResource StatusPendingDispatchColor}" />
+    <SolidColorBrush x:Key="Status.PendingDispatch.TextBrush" Color="{StaticResource StatusPendingDispatchColor}" />
+
+    <SolidColorBrush x:Key="Status.PendingRecovery.FillBrush" Color="#24345A" />
+    <SolidColorBrush x:Key="Status.PendingRecovery.BorderBrush" Color="{StaticResource StatusPendingRecoveryColor}" />
+    <SolidColorBrush x:Key="Status.PendingRecovery.TextBrush" Color="{StaticResource StatusPendingRecoveryColor}" />
+
+    <SolidColorBrush x:Key="Status.Recovered.FillBrush" Color="#173D39" />
+    <SolidColorBrush x:Key="Status.Recovered.BorderBrush" Color="{StaticResource StatusRecoveredColor}" />
+    <SolidColorBrush x:Key="Status.Recovered.TextBrush" Color="{StaticResource StatusRecoveredColor}" />
 
     <DrawingBrush x:Key="MapGridPatternBrush"
                   TileMode="Tile"

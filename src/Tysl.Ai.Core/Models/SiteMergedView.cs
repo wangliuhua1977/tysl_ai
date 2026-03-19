@@ -60,6 +60,42 @@ public sealed record SiteMergedView
 
     public DateTimeOffset? RuntimeUpdatedAt { get; init; }
 
+    public long? DispatchRecordId { get; init; }
+
+    public required bool HasDispatchRecord { get; init; }
+
+    public string? DispatchFaultCode { get; init; }
+
+    public string? DispatchFaultSummary { get; init; }
+
+    public required DispatchStatus DispatchStatus { get; init; }
+
+    public required DispatchMode DispatchMode { get; init; }
+
+    public DateTimeOffset? DispatchTriggeredAt { get; init; }
+
+    public DateTimeOffset? DispatchSentAt { get; init; }
+
+    public DateTimeOffset? CoolingUntil { get; init; }
+
+    public required RecoveryMode RecoveryMode { get; init; }
+
+    public required RecoveryStatus RecoveryStatus { get; init; }
+
+    public DateTimeOffset? RecoveredAt { get; init; }
+
+    public string? RecoverySummary { get; init; }
+
+    public string? DispatchMessageDigest { get; init; }
+
+    public required bool IsDispatchCooling { get; init; }
+
+    public required bool CanConfirmRecovery { get; init; }
+
+    public required string DispatchStatusText { get; init; }
+
+    public required string RecoveryStatusText { get; init; }
+
     public string? AddressText { get; init; }
 
     public string? ProductAccessNumber { get; init; }

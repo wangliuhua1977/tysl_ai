@@ -24,6 +24,8 @@ public sealed class SqliteDatabaseInitializer
         await CreateSiteRuntimeStateTableAsync(connection, cancellationToken);
         await CreateSnapshotRecordTableAsync(connection, cancellationToken);
         await CreateInspectionSettingsTableAsync(connection, cancellationToken);
+        await CreateDispatchPolicyTableAsync(connection, cancellationToken);
+        await CreateDispatchRecordTableAsync(connection, cancellationToken);
 
         if (await TableExistsAsync(connection, "site_profile", cancellationToken))
         {
@@ -35,6 +37,7 @@ public sealed class SqliteDatabaseInitializer
         }
 
         await SeedInspectionSettingsAsync(connection, cancellationToken);
+        await SeedDispatchPolicyAsync(connection, cancellationToken);
 
         await using var countCommand = connection.CreateCommand();
         countCommand.CommandText = "SELECT COUNT(1) FROM site_local_profile;";
@@ -146,6 +149,68 @@ public sealed class SqliteDatabaseInitializer
                 detail_batch_size INTEGER NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            """;
+
+        await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task CreateDispatchPolicyTableAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var createTableCommand = connection.CreateCommand();
+        createTableCommand.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS dispatch_policy (
+                id INTEGER PRIMARY KEY NOT NULL,
+                enabled INTEGER NOT NULL,
+                mode INTEGER NOT NULL,
+                cooling_minutes INTEGER NOT NULL,
+                recovery_mode INTEGER NOT NULL,
+                repeat_after_recovery INTEGER NOT NULL,
+                notify_on_recovery INTEGER NOT NULL,
+                webhook_url TEXT NULL,
+                mention_mobiles TEXT NULL,
+                mention_all INTEGER NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """;
+
+        await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task CreateDispatchRecordTableAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var createTableCommand = connection.CreateCommand();
+        createTableCommand.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS dispatch_record (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_code TEXT NOT NULL,
+                fault_code TEXT NOT NULL,
+                fault_summary TEXT NOT NULL,
+                dispatch_status INTEGER NOT NULL,
+                dispatch_mode INTEGER NOT NULL,
+                triggered_at TEXT NOT NULL,
+                sent_at TEXT NULL,
+                cooling_until TEXT NULL,
+                recovered_at TEXT NULL,
+                recovery_mode INTEGER NOT NULL,
+                recovery_status INTEGER NOT NULL,
+                recovery_summary TEXT NULL,
+                message_digest TEXT NULL,
+                snapshot_path TEXT NULL,
+                last_inspection_at TEXT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_dispatch_record_device_triggered_at
+            ON dispatch_record (device_code, triggered_at DESC, id DESC);
+
+            CREATE INDEX IF NOT EXISTS ix_dispatch_record_device_recovered_at
+            ON dispatch_record (device_code, recovered_at, updated_at DESC);
             """;
 
         await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
@@ -269,6 +334,68 @@ public sealed class SqliteDatabaseInitializer
         insertCommand.Parameters.AddWithValue("$maxPointsPerCycle", defaults.MaxPointsPerCycle);
         insertCommand.Parameters.AddWithValue("$detailBatchSize", defaults.DetailBatchSize);
         insertCommand.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.UtcDateTime.ToString("O"));
+
+        await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task SeedDispatchPolicyAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var countCommand = connection.CreateCommand();
+        countCommand.CommandText = "SELECT COUNT(1) FROM dispatch_policy WHERE id = 1;";
+        var existingCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken));
+        if (existingCount > 0)
+        {
+            return;
+        }
+
+        var defaults = DispatchPolicy.Default with
+        {
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        await using var insertCommand = connection.CreateCommand();
+        insertCommand.CommandText =
+            """
+            INSERT INTO dispatch_policy (
+                id,
+                enabled,
+                mode,
+                cooling_minutes,
+                recovery_mode,
+                repeat_after_recovery,
+                notify_on_recovery,
+                webhook_url,
+                mention_mobiles,
+                mention_all,
+                updated_at
+            )
+            VALUES (
+                1,
+                $enabled,
+                $mode,
+                $coolingMinutes,
+                $recoveryMode,
+                $repeatAfterRecovery,
+                $notifyOnRecovery,
+                $webhookUrl,
+                $mentionMobiles,
+                $mentionAll,
+                $updatedAt
+            );
+            """;
+
+        insertCommand.Parameters.AddWithValue("$enabled", defaults.Enabled ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$mode", (int)defaults.Mode);
+        insertCommand.Parameters.AddWithValue("$coolingMinutes", defaults.CoolingMinutes);
+        insertCommand.Parameters.AddWithValue("$recoveryMode", (int)defaults.RecoveryMode);
+        insertCommand.Parameters.AddWithValue("$repeatAfterRecovery", defaults.RepeatAfterRecovery ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$notifyOnRecovery", defaults.NotifyOnRecovery ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$webhookUrl", (object?)defaults.WebhookUrl ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$mentionMobiles", "[]");
+        insertCommand.Parameters.AddWithValue("$mentionAll", defaults.MentionAll ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$updatedAt", defaults.UpdatedAt.UtcDateTime.ToString("O"));
 
         await insertCommand.ExecuteNonQueryAsync(cancellationToken);
     }

@@ -1,0 +1,6 @@
+deviceCode=51110207021322000001
+displayName=测试海康
+capturedAt=2026-03-19T11:36:07.7351963+00:00
+previewResolveState=Failed
+faultCode=Offline
+summary=Offline; preview resolve failed; snapshot trace updated

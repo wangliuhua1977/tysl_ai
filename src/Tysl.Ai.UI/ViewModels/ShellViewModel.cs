@@ -16,6 +16,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     };
 
     private readonly SemaphoreSlim dashboardLoadLock = new(1, 1);
+    private readonly IDispatchService dispatchService;
     private readonly DispatcherTimer refreshTimer;
     private readonly bool isMapHostConfigured;
     private readonly Dictionary<string, DemoCoordinate> renderedPointCoordinates = new(StringComparer.OrdinalIgnoreCase);
@@ -45,10 +46,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public ShellViewModel(
         ISiteMapQueryService siteMapQueryService,
         ISiteLocalProfileService siteLocalProfileService,
+        IDispatchService dispatchService,
         bool isMapHostConfigured)
     {
         this.siteMapQueryService = siteMapQueryService;
         this.siteLocalProfileService = siteLocalProfileService;
+        this.dispatchService = dispatchService;
         this.isMapHostConfigured = isMapHostConfigured;
 
         mapEmptyStateText = isMapHostConfigured
@@ -72,6 +75,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         ToggleFilterPanelCommand = new RelayCommand(() => IsFilterPanelExpanded = !IsFilterPanelExpanded);
         EditSelectedSiteCommand = new AsyncRelayCommand(OpenEditEditorAsync, () => SelectedDetail is not null);
         ToggleMonitoringCommand = new AsyncRelayCommand(ToggleMonitoringAsync, () => SelectedDetail is not null);
+        ConfirmRecoveryCommand = new AsyncRelayCommand(ConfirmRecoveryAsync, () => SelectedDetail?.CanConfirmRecovery == true);
         SelectPointCommand = new RelayCommand<SiteMapPointViewModel>(SelectPoint);
         SelectAlertCommand = new RelayCommand<SiteAlertDigestViewModel>(SelectAlert);
 
@@ -126,6 +130,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand EditSelectedSiteCommand { get; }
 
     public AsyncRelayCommand ToggleMonitoringCommand { get; }
+
+    public AsyncRelayCommand ConfirmRecoveryCommand { get; }
 
     public RelayCommand<SiteMapPointViewModel> SelectPointCommand { get; }
 
@@ -194,6 +200,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
             EditSelectedSiteCommand.NotifyCanExecuteChanged();
             ToggleMonitoringCommand.NotifyCanExecuteChanged();
+            ConfirmRecoveryCommand.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(MonitorToggleText));
         }
     }
@@ -452,6 +459,24 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         catch
         {
             Notify("操作失败", "监测状态更新失败，请稍后重试。");
+        }
+    }
+
+    private async Task ConfirmRecoveryAsync()
+    {
+        if (SelectedDetail?.DispatchRecordId is not long dispatchRecordId)
+        {
+            return;
+        }
+
+        try
+        {
+            await dispatchService.ConfirmRecoveryAsync(dispatchRecordId);
+            await LoadDashboardAsync(SelectedDetail.DeviceCode, true);
+        }
+        catch
+        {
+            Notify("恢复确认失败", "恢复状态更新失败，请稍后重试。");
         }
     }
 

@@ -2799,3 +2799,388 @@
 [2026-03-19 18:38:25.003] [CTYunPreview] deviceCode=3KSCP28433J79HT, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/5a1c6ea3b99fafe2685c2e44caa6f782/0_0/live.flv?token=db06cd150a26118a711645da14e05660&origin=97a3ba1d7fd4982f1ad34e725c49975f14cbe7987948ecebf167cd251ac82efa7967bd35fd4711e79d136377caa990d94e8e9049c89b43a601221bc19ea42cdaa012b26f1a52f267550c41be8160f7bf450d73d7fe73c4607c61b2fa5acf1459f80d11eed0d17d713677b152e7bd650b3196cf767db79b1c7c339b41467907df63c7aa2eed008b1d79b0591eca7f40b2dce3e5dcd947129f45123f1522cd549a31dce1ba3f5ff77f6342e714d5c61b34&reqid=5fdb5c9740e2427faa7b94a01f85a600, streamAcquireResult=已获取FLV流地址
 [2026-03-19 18:38:25.416] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
 [2026-03-19 18:38:25.418] [CTYunPreview] deviceCode=3KSCP28355F3X5H, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/3e9792cac0ccfc006f69e962c511b7d4/0_0/live.flv?token=5d911023dc269ce2e3abbaa3e6f62768&origin=97a3ba1d7fd4982f1ad34e725c49975fe3acc757d532d30efdd981f1a74f80fb6d24c8955e0f1fb4de37a2549b916974e25522d82935b87ac7756acdefef33a05c93b89561f1d00d4971e89407320e8e9cc9ca234fd508545006a36557516a862478133236d586f59c96bfba68a8d13b36e97bd5a1e0092e6874b4bf13ea8e30787e037443cf74a7a34da4c5875c09295f5ee072962df0aed8c8b8b56b320053fb55881531eb45bdd031d785e529125c&reqid=01bb5213796c427e85537cae516c41d2, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:35:55.082] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.087] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.097] [CTYunHttp] Calling protected API: path=/open/token/device/getAllDeviceListNew, paramsSummary=accessToken=redacted&enterpriseUser=189****088&lastId=0&pageSize=20&hasChildDevices=0
+[2026-03-19 19:35:55.304] [CTYunHttp] Protected API responded: path=/open/token/device/getAllDeviceListNew, status=200 OK
+[2026-03-19 19:35:55.676] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.677] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.678] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.678] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.679] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.679] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.679] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB190259NA7L-001
+[2026-03-19 19:35:55.680] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.680] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB19025GRT5H-000
+[2026-03-19 19:35:55.680] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.680] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB190259NA7L-000
+[2026-03-19 19:35:55.680] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB19025GRT5H-001
+[2026-03-19 19:35:55.870] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:55.871] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.872] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB190259NA7L-000
+[2026-03-19 19:35:55.874] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:55.875] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.876] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB190259NA7L-001
+[2026-03-19 19:35:55.881] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:55.882] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.883] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB19025GRT5H-001
+[2026-03-19 19:35:55.920] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:55.921] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.922] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB19025GRT5H-000
+[2026-03-19 19:35:55.991] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:55.993] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:55.993] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB190259NA7L-000
+[2026-03-19 19:35:56.021] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:56.022] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.022] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB19025GRT5H-001
+[2026-03-19 19:35:56.044] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.045] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:56.045] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.046] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB19025GRT5H-000
+[2026-03-19 19:35:56.046] [PointDetail] Device detail resolved: deviceCode=3DZDB190259NA7L-000, hasCoordinate=False, online=True, snapshotCount=3
+[2026-03-19 19:35:56.047] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.048] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.048] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:56.049] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3ELCP28474MT8LC
+[2026-03-19 19:35:56.049] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.050] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB190259NA7L-001
+[2026-03-19 19:35:56.050] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.051] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:56.051] [PointDetail] Device detail resolved: deviceCode=3DZDB19025GRT5H-001, hasCoordinate=False, online=True, snapshotCount=3
+[2026-03-19 19:35:56.052] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.052] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.053] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP28355F3X5H
+[2026-03-19 19:35:56.071] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.073] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:56.073] [PointDetail] Device detail resolved: deviceCode=3DZDB19025GRT5H-000, hasCoordinate=False, online=True, snapshotCount=3
+[2026-03-19 19:35:56.076] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.077] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.078] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP284337JYTK
+[2026-03-19 19:35:56.118] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.119] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:56.119] [PointDetail] Device detail resolved: deviceCode=3DZDB190259NA7L-001, hasCoordinate=False, online=True, snapshotCount=3
+[2026-03-19 19:35:56.120] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.121] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.121] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP28433J79HT
+[2026-03-19 19:35:56.190] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.191] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.192] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3ELCP28474MT8LC
+[2026-03-19 19:35:56.226] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.226] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.227] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP284337JYTK
+[2026-03-19 19:35:56.261] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.263] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.263] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP28355F3X5H
+[2026-03-19 19:35:56.359] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.360] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.361] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP28433J79HT
+[2026-03-19 19:35:56.366] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:56.367] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.367] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3ELCP28474MT8LC
+[2026-03-19 19:35:56.396] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.407] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:56.408] [PointDetail] Device detail resolved: deviceCode=3ELCP28474MT8LC, hasCoordinate=True, online=False, snapshotCount=3
+[2026-03-19 19:35:56.410] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.411] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.413] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP2907449LJM
+[2026-03-19 19:35:56.424] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:56.427] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.428] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP284337JYTK
+[2026-03-19 19:35:56.429] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:56.431] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.432] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP28355F3X5H
+[2026-03-19 19:35:56.452] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.454] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:56.455] [PointDetail] Device detail resolved: deviceCode=3KSCP284337JYTK, hasCoordinate=True, online=True, snapshotCount=3
+[2026-03-19 19:35:56.455] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.455] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.456] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.456] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:56.456] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP29325ECQXZ
+[2026-03-19 19:35:56.457] [PointDetail] Device detail resolved: deviceCode=3KSCP28355F3X5H, hasCoordinate=False, online=True, snapshotCount=3
+[2026-03-19 19:35:56.457] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.458] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.459] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP29354HL56W
+[2026-03-19 19:35:56.538] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:56.538] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.539] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP28433J79HT
+[2026-03-19 19:35:56.564] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.564] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:56.565] [PointDetail] Device detail resolved: deviceCode=3KSCP28433J79HT, hasCoordinate=True, online=True, snapshotCount=3
+[2026-03-19 19:35:56.565] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.566] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.566] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3TPBH7930658PHZ
+[2026-03-19 19:35:56.588] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.589] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.589] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP29325ECQXZ
+[2026-03-19 19:35:56.596] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.597] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.598] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP2907449LJM
+[2026-03-19 19:35:56.647] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.647] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.648] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP29354HL56W
+[2026-03-19 19:35:56.738] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.738] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.739] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3TPBH7930658PHZ
+[2026-03-19 19:35:56.747] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:56.747] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.748] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP2907449LJM
+[2026-03-19 19:35:56.771] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.772] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:56.773] [PointDetail] Device detail resolved: deviceCode=3KSCP2907449LJM, hasCoordinate=True, online=False, snapshotCount=3
+[2026-03-19 19:35:56.774] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.774] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.775] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324008961
+[2026-03-19 19:35:56.797] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:56.798] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.798] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP29354HL56W
+[2026-03-19 19:35:56.822] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.823] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:56.823] [PointDetail] Device detail resolved: deviceCode=3KSCP29354HL56W, hasCoordinate=True, online=True, snapshotCount=3
+[2026-03-19 19:35:56.823] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.823] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.824] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324008964
+[2026-03-19 19:35:56.906] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:56.907] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.908] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP29325ECQXZ
+[2026-03-19 19:35:56.930] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.931] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:56.931] [PointDetail] Device detail resolved: deviceCode=3KSCP29325ECQXZ, hasCoordinate=True, online=False, snapshotCount=3
+[2026-03-19 19:35:56.932] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.932] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.932] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324010444
+[2026-03-19 19:35:56.968] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.969] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.970] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324008961
+[2026-03-19 19:35:56.970] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:56.971] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:56.971] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324008964
+[2026-03-19 19:35:57.002] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:57.002] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.003] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3TPBH7930658PHZ
+[2026-03-19 19:35:57.073] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.074] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.074] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324010444
+[2026-03-19 19:35:57.095] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.096] [PointDetail] Device detail resolved: deviceCode=3TPBH7930658PHZ, hasCoordinate=True, online=True, snapshotCount=3
+[2026-03-19 19:35:57.097] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.097] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.097] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110201021322000020
+[2026-03-19 19:35:57.146] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:57.147] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:57.147] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.148] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.148] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324008964
+[2026-03-19 19:35:57.148] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324008961
+[2026-03-19 19:35:57.170] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.171] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.171] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:57.172] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:57.172] [PointDetail] Device detail resolved: deviceCode=51110200441324008964, hasCoordinate=False, online=False, snapshotCount=3
+[2026-03-19 19:35:57.172] [PointDetail] Device detail resolved: deviceCode=51110200441324008961, hasCoordinate=True, online=False, snapshotCount=3
+[2026-03-19 19:35:57.172] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.173] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.173] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.173] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.174] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110207021322000001
+[2026-03-19 19:35:57.174] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110209021322000002
+[2026-03-19 19:35:57.244] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.245] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.246] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110201021322000020
+[2026-03-19 19:35:57.279] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:57.280] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.281] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324010444
+[2026-03-19 19:35:57.305] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.306] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:57.306] [PointDetail] Device detail resolved: deviceCode=51110200441324010444, hasCoordinate=False, online=True, snapshotCount=3
+[2026-03-19 19:35:57.307] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.307] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.308] [CTYunHttp] Calling protected API: path=/open/token/device/getCusDeviceByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51118112021322000012
+[2026-03-19 19:35:57.319] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.320] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.321] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110209021322000002
+[2026-03-19 19:35:57.343] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.343] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.344] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110207021322000001
+[2026-03-19 19:35:57.377] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:57.378] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.378] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110201021322000020
+[2026-03-19 19:35:57.403] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.405] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:57.406] [PointDetail] Device detail resolved: deviceCode=51110201021322000020, hasCoordinate=True, online=True, snapshotCount=3
+[2026-03-19 19:35:57.428] [CTYunHttp] Protected API responded: path=/open/token/device/getCusDeviceByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.429] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.431] [CTYunHttp] Calling protected API: path=/open/token/device/showDevice, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51118112021322000012
+[2026-03-19 19:35:57.445] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:57.447] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.447] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110209021322000002
+[2026-03-19 19:35:57.450] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:57.451] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.452] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110207021322000001
+[2026-03-19 19:35:57.471] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.472] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:57.472] [PointDetail] Device detail resolved: deviceCode=51110209021322000002, hasCoordinate=True, online=True, snapshotCount=3
+[2026-03-19 19:35:57.482] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.483] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:57.483] [PointDetail] Device detail resolved: deviceCode=51110207021322000001, hasCoordinate=True, online=False, snapshotCount=3
+[2026-03-19 19:35:57.587] [CTYunHttp] Protected API responded: path=/open/token/device/showDevice, status=200 OK
+[2026-03-19 19:35:57.588] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.588] [CTYunHttp] Calling protected API: path=/open/token/device/getDeviceInfoByDeviceCode, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51118112021322000012
+[2026-03-19 19:35:57.611] [CTYunHttp] Protected API responded: path=/open/token/device/getDeviceInfoByDeviceCode, status=200 OK
+[2026-03-19 19:35:57.612] [CTYunHttp] Protected API returned business failure: path=/open/token/device/getDeviceInfoByDeviceCode, code=30041, message=调用过于频繁，请稍后再试！
+[2026-03-19 19:35:57.612] [PointDetail] Device detail resolved: deviceCode=51118112021322000012, hasCoordinate=True, online=False, snapshotCount=3
+[2026-03-19 19:35:57.629] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.630] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.631] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3ELCP28474MT8LC&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:35:57.632] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.633] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.633] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP2907449LJM&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:35:57.633] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.634] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.634] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP29325ECQXZ&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:35:57.634] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.635] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.635] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324008961&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:35:57.692] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:35:57.692] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlFlv, code=6000, message=设备离线
+[2026-03-19 19:35:57.693] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:35:57.694] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlFlv, code=6000, message=设备离线
+[2026-03-19 19:35:57.700] [CTYunPreview] deviceCode=3KSCP29325ECQXZ, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=6000, responseMessage=设备离线, matchedFieldPath=none, decryptMode=none, parsedProtocolType=flv, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:35:57.701] [CTYunPreview] deviceCode=3KSCP2907449LJM, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=6000, responseMessage=设备离线, matchedFieldPath=none, decryptMode=none, parsedProtocolType=flv, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:35:57.702] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.702] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.703] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.703] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:57.703] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlHls, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP2907449LJM&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:35:57.704] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlHls, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP29325ECQXZ&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:35:57.755] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlHls, status=200 OK
+[2026-03-19 19:35:57.755] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlHls, code=20012, message=当前设备不在线,设备编码:3KSCP29325ECQXZ
+[2026-03-19 19:35:57.756] [CTYunPreview] deviceCode=3KSCP29325ECQXZ, selectedProtocol=hls, attemptedProtocols=flv>hls, mediaApiPath=/open/token/cloud/getDeviceMediaUrlHls, responseCode=20012, responseMessage=当前设备不在线,设备编码:3KSCP29325ECQXZ, matchedFieldPath=none, decryptMode=none, parsedProtocolType=hls, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:35:57.757] [InspectionPreview] Preview resolve failed for deviceCode=3KSCP29325ECQXZ: 预览地址接口未返回可解析的数据。
+[2026-03-19 19:35:57.819] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlHls, status=200 OK
+[2026-03-19 19:35:58.192] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:35:58.192] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlHls, code=20012, message=当前设备不在线,设备编码:3KSCP2907449LJM
+[2026-03-19 19:35:58.193] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlFlv, code=8051, message=通知设备推流失败，请检查设备是否在线或稍后重试
+[2026-03-19 19:35:58.193] [CTYunPreview] deviceCode=3KSCP2907449LJM, selectedProtocol=hls, attemptedProtocols=flv>hls, mediaApiPath=/open/token/cloud/getDeviceMediaUrlHls, responseCode=20012, responseMessage=当前设备不在线,设备编码:3KSCP2907449LJM, matchedFieldPath=none, decryptMode=none, parsedProtocolType=hls, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:35:58.193] [CTYunPreview] deviceCode=51110200441324008961, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=8051, responseMessage=通知设备推流失败，请检查设备是否在线或稍后重试, matchedFieldPath=none, decryptMode=none, parsedProtocolType=flv, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:35:58.193] [InspectionPreview] Preview resolve failed for deviceCode=3KSCP2907449LJM: 预览地址接口未返回可解析的数据。
+[2026-03-19 19:35:58.194] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:58.194] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:35:58.194] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlHls, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324008961&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:35:58.242] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlHls, status=200 OK
+[2026-03-19 19:35:58.243] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlHls, code=20012, message=当前设备不在线,设备编码:51110200441324008961
+[2026-03-19 19:35:58.243] [CTYunPreview] deviceCode=51110200441324008961, selectedProtocol=hls, attemptedProtocols=flv>hls, mediaApiPath=/open/token/cloud/getDeviceMediaUrlHls, responseCode=20012, responseMessage=当前设备不在线,设备编码:51110200441324008961, matchedFieldPath=none, decryptMode=none, parsedProtocolType=hls, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:35:58.244] [InspectionPreview] Preview resolve failed for deviceCode=51110200441324008961: 预览地址接口未返回可解析的数据。
+[2026-03-19 19:36:07.651] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=504 GatewayTimeout
+[2026-03-19 19:36:07.652] [SilentInspection] Inspection failed for deviceCode=3ELCP28474MT8LC: CTYun API HTTP 失败：/open/token/cloud/getDeviceMediaUrlFlv -> 504 Gateway Time-out
+[2026-03-19 19:36:07.733] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:07.734] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:07.734] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324008964&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:07.735] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:07.735] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:07.736] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110207021322000001&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:07.736] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:07.737] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:07.738] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51118112021322000012&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:07.738] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:07.739] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:07.739] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP29354HL56W&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:07.894] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:07.904] [CTYunPreview] deviceCode=3KSCP29354HL56W, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/0c0bec7b7ad4dc602841522399bedad0/0_0/live.flv?token=cd92ee427953616bfb17673a5277fb53&origin=97a3ba1d7fd4982f1ad34e725c49975fd65ac0b8be577d35549e72ca3350c9dadccd688eed3d669725cd0b4cd520a0113790fa0f9c8a91c118ccc1c6b9064dafb6f6f4419778f4b401bdd706c2ef235cf933bface3bbe502d42120ecbae9c63ae4cf62511f54d6d59a970598f71007d85a84447ff395f56ab18525600f3c39ffe30130ba4b00050a053c57fa5cf71f03c3ec64a57e0c7c9bc8f8edd17dbe9ca1157f497db139daca425643b54a2d5e9b&reqid=63d74bc9258f41bd9a298f19efabaa2e, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:08.006] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.043] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlFlv, code=8051, message=通知设备推流失败，请检查设备是否在线或稍后重试
+[2026-03-19 19:36:08.043] [CTYunPreview] deviceCode=51110200441324008964, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=8051, responseMessage=通知设备推流失败，请检查设备是否在线或稍后重试, matchedFieldPath=none, decryptMode=none, parsedProtocolType=flv, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:36:08.044] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.044] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.045] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlHls, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324008964&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.118] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlHls, status=200 OK
+[2026-03-19 19:36:08.118] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlHls, code=20012, message=当前设备不在线,设备编码:51110200441324008964
+[2026-03-19 19:36:08.119] [CTYunPreview] deviceCode=51110200441324008964, selectedProtocol=hls, attemptedProtocols=flv>hls, mediaApiPath=/open/token/cloud/getDeviceMediaUrlHls, responseCode=20012, responseMessage=当前设备不在线,设备编码:51110200441324008964, matchedFieldPath=none, decryptMode=none, parsedProtocolType=hls, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:36:08.119] [InspectionPreview] Preview resolve failed for deviceCode=51110200441324008964: 预览地址接口未返回可解析的数据。
+[2026-03-19 19:36:08.206] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.207] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlFlv, code=8051, message=通知设备推流失败，请检查设备是否在线或稍后重试
+[2026-03-19 19:36:08.208] [CTYunPreview] deviceCode=51118112021322000012, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=8051, responseMessage=通知设备推流失败，请检查设备是否在线或稍后重试, matchedFieldPath=none, decryptMode=none, parsedProtocolType=flv, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:36:08.208] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.209] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.209] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlHls, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51118112021322000012&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.212] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.212] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlFlv, code=8051, message=通知设备推流失败，请检查设备是否在线或稍后重试
+[2026-03-19 19:36:08.213] [CTYunPreview] deviceCode=51110207021322000001, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=8051, responseMessage=通知设备推流失败，请检查设备是否在线或稍后重试, matchedFieldPath=none, decryptMode=none, parsedProtocolType=flv, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:36:08.213] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.213] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.214] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlHls, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110207021322000001&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.262] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlHls, status=200 OK
+[2026-03-19 19:36:08.263] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlHls, code=20012, message=当前设备不在线,设备编码:51110207021322000001
+[2026-03-19 19:36:08.263] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlHls, status=200 OK
+[2026-03-19 19:36:08.263] [CTYunPreview] deviceCode=51110207021322000001, selectedProtocol=hls, attemptedProtocols=flv>hls, mediaApiPath=/open/token/cloud/getDeviceMediaUrlHls, responseCode=20012, responseMessage=当前设备不在线,设备编码:51110207021322000001, matchedFieldPath=none, decryptMode=none, parsedProtocolType=hls, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:36:08.264] [CTYunHttp] Protected API returned business failure: path=/open/token/cloud/getDeviceMediaUrlHls, code=20012, message=当前设备不在线,设备编码:51118112021322000012
+[2026-03-19 19:36:08.264] [InspectionPreview] Preview resolve failed for deviceCode=51110207021322000001: 预览地址接口未返回可解析的数据。
+[2026-03-19 19:36:08.264] [CTYunPreview] deviceCode=51118112021322000012, selectedProtocol=hls, attemptedProtocols=flv>hls, mediaApiPath=/open/token/cloud/getDeviceMediaUrlHls, responseCode=20012, responseMessage=当前设备不在线,设备编码:51118112021322000012, matchedFieldPath=none, decryptMode=none, parsedProtocolType=hls, parsedPreviewUrl=null, streamAcquireResult=接口成功但未返回可解析的预览地址
+[2026-03-19 19:36:08.264] [InspectionPreview] Preview resolve failed for deviceCode=51118112021322000012: 预览地址接口未返回可解析的数据。
+[2026-03-19 19:36:08.428] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.429] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.429] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3TPBH7930658PHZ&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.430] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.430] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.431] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110200441324010444&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.431] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.432] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.432] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110201021322000020&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.433] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.433] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.434] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=51110209021322000002&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.535] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.538] [CTYunPreview] deviceCode=51110200441324010444, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-scybhls.ctseelink.cn:8005/live/511500014-197-15522_51110200441324010444_live_1/live.flv?token=BE38F01C23D3DC829DDF5CDC06195364C6073665FDC73D74D45D8A89178AD1BE&origin=97A3BA1D7FD4982F1AD34E725C49975F08B8A1E8D530FCE8FE684CC75C6974B919E93A7F2A6EC73830B6993693AA02CDAFDC37E27365BB086AC8251DD6C31CC3051E6280BA157546275CEFD99E984E36E04D4DBCB97549EC3D51D3BF9BD84BC838A6FACEEDD55A60268F327445B4CD243BF404331047519E0813E8CC6A8950F0BDE3EB1965AFA07D9AA35BA3235323780879BBA0A5A72D88C63C3125ED50438E&hls_ctx=b8b6a3e3cb2943a4aa71cc08a1095a54, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:08.555] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.557] [CTYunPreview] deviceCode=3TPBH7930658PHZ, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/59999ba81c85f1dcf626f0d105af59b0/0_0/live.flv?token=ff3f4aec81e401efa02cbd3ded7a696f&origin=97a3ba1d7fd4982f1ad34e725c49975f140badcde13b18808f1415850d61bf1ea0d33cc9f7934f0673c7a597d8ea54b832f078fed4c21eaa79ae55a6f6cb20d04285f5c10583947c991bc2d2b8af328ce6c1af37f7e05afb827c5f7dcc85dd9ae5546c92209efc1cc8016765a4e2e3565050e96b79b9e078d1d0287546b872f711c15bde5660d41a3fa7161fcef9fc655733e0d51db881397feb607bc8d30290e175482bf6436ad18de141aba404e9c1&reqid=5f9338a65c37477492d0256c27a4d885, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:08.570] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.572] [CTYunPreview] deviceCode=51110209021322000002, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://liveplay.evaas.cn-sichuan-3.ctyunxs.cn/dlife/live/51000001300001_51110209021322000002_live_1.flv?auth_key=D7f5JqlKZqVdVn16slwA+9Plpfs=&TimeStamp=1773920470547&StreamType=1&Watermark=szsh, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:08.704] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.707] [CTYunPreview] deviceCode=51110201021322000020, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://liveplay.vaas.cn-hefei-1.ctyunxs.cn/vaas/live/3401000100004_51110201021322000020_live_1.flv?auth_key=1773920470-18c5df0c687548bb93ef773d81ce69c4-30003-2b0fd77739f1afdb0b4ba6e2301fcb6e, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:08.715] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.715] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.716] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB190259NA7L-000&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.716] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.717] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.717] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB190259NA7L-001&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.718] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.718] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.718] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB19025GRT5H-000&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.719] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.720] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:08.720] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3DZDB19025GRT5H-001&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:08.787] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.790] [CTYunPreview] deviceCode=3DZDB19025GRT5H-000, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/86e889005cd06b3dd5618f223623af344ccbcd2fa14febd10b763e116e35340e/0_0/live.flv?token=c125ca38201f67574e4d4f81a46fe72c&origin=97a3ba1d7fd4982f1ad34e725c49975f86b054685a72c6bf427b1226530a4d869f12de887267b557ad87116ff971bd8e826b51a8ca61057b07c44cd69b45504d2706941c8d4abadbc2d7a9ead1e526c8e62140c211ba5dcd1ed4ef69bbdd28009ceb0e1bbedee5a233945f2a1256125f27638aed39c0c227ea2ae1621836b82daa19baf8688ddbfb02678614ecd19e9692b175ff47565b40a837a297234b1b8be788a7f6854c3062557c99aff7373447055979822956e87e37554659b48f9f5ce69f2dd19c36a9d001f3117dc80412ae&reqid=49bd00e05e284ab49bbee40d2360cb23, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:08.796] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.796] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.797] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:08.799] [CTYunPreview] deviceCode=3DZDB190259NA7L-001, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/60ab97b535c9b2832321879268be891d6601a7bc31e0b1aeb629aaa95a0ac074/0_0/live.flv?token=954818de277909bf1220d6500b0a9474&origin=97a3ba1d7fd4982f1ad34e725c49975f1307ac750d3eeb7d76584f1d5b2e450ec848291051bdc2820992ea91c5e52c1a5e151648cac21a0f1aeb987dbcd6890b72d1e622494c1c40b532129abe214ccb2d554c672f4c3cdaf7f036cad16887bd747ed8004e7eee6705f85b002802a298c59e7f8407fec7bcd69c692c5e0f122d7b7e0ab2693a7717bd1f8bcc94bafdd34d23b5f192a477738cf8017d25354a970bae1603f5af40e54fcd78ce26616db18aa2364d89cfa6ee1ae7bded757a85ef43be5134cf670b4e08afd59f3b105084&reqid=0bd81c7964884abf8e02836d42b7a4fc, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:08.799] [CTYunPreview] deviceCode=3DZDB190259NA7L-000, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/60ab97b535c9b2832321879268be891d4ccbcd2fa14febd10b763e116e35340e/0_0/live.flv?token=eef0e755f06b8a2330306ed6fcb4c5c9&origin=97a3ba1d7fd4982f1ad34e725c49975f91ef01c8c5b0aa5c5d995214cccc7250fd0aa5842d747128c237fd3d26c36b53e15eb4a85725f47b8a15d2263c7a23a465f5aa682e24654ef90f083445689da7c3c7f16db1d87ad87f6667ce772ff3045fea343a9ca99b63b00c91607e1724be3567f7f02536de77ba62402620059a57bafa6e79a3197bbe9e9c289bf026af245744711c84314fd8d40d1da1151c1994a5d82def2bf5cf484766b510c99d49841ada5e4105e867b3f87230bf4ff23b1632ce83c2b4e89c129f56a9fe5ce270fd&reqid=f63ba63469ff4713a6575eb73039cc06, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:08.800] [CTYunPreview] deviceCode=3DZDB19025GRT5H-001, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/86e889005cd06b3dd5618f223623af346601a7bc31e0b1aeb629aaa95a0ac074/0_0/live.flv?token=2ded08f76ea4c40541dc9e05fb0b5461&origin=97a3ba1d7fd4982f1ad34e725c49975fcd1c47e44c19c2a32847d235538ca7bf0b214b47e897e37a9e30c7f2f46f0b1c9b98cc44ce36416b878872631a7c7c2c7a2901979934858b0a4110f6b807cae747480769805d434b7660e9a05bd8c191a048446c10686d936551f9e6661d990b72c41358bde164da475caed1b707c4f96e7992c0e88a843a1a91002a72d3179c99f90f173d5a2e0d70d6a25321ce6d89c5dc1132d8424364a5d8039c1880006d24748514002323189e42fe02f46c091f9ffaf3ab1b21dd721b3a03a551b507a2&reqid=3b319013c4ea456cb211a72c7716722e, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:09.110] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:09.111] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:09.111] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP28355F3X5H&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:09.112] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:09.112] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:09.112] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP284337JYTK&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:09.113] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:09.113] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:09.114] [CTYunHttp] Calling protected API: path=/open/token/cloud/getDeviceMediaUrlFlv, paramsSummary=accessToken=redacted&enterpriseUser=189****088&deviceCode=3KSCP28433J79HT&mediaType=0&supportDomain=1&mute=0&netType=0&expire=300
+[2026-03-19 19:36:09.180] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:09.182] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:09.183] [CTYunHttp] Protected API responded: path=/open/token/cloud/getDeviceMediaUrlFlv, status=200 OK
+[2026-03-19 19:36:09.183] [CTYunPreview] deviceCode=3KSCP284337JYTK, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/35bb1d9cb7aa73033c6230e2b49d5d8e/0_0/live.flv?token=c514df1731a15b3a22c61c6041cff75d&origin=97a3ba1d7fd4982f1ad34e725c49975f1358c45faf03e103fff17e32c35514a9807a62a457073294f76914282eb5a4271b244a09540c74089a5bcdfbbde95c44c622927ef2808d1f2d4867ca8e0fe9e6261a5416edfa4d6641c4d54129c0d99ed5448acc303c52212349cb8d99896db1059d604b85a766998416485e82b9e295c4d263c4bba5a7ea8b5985255f180e7dcd74f4bba8a0cffb97a2df0bab885ab5bd25bd5816e9b48266fb429b90b23a29&reqid=88f9b54b2d864dfbab7c05ea8da9dd89, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:09.185] [CTYunPreview] deviceCode=3KSCP28433J79HT, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/5a1c6ea3b99fafe2685c2e44caa6f782/0_0/live.flv?token=378051983ce1b311aaddeafb5da5a36e&origin=97a3ba1d7fd4982f1ad34e725c49975f14cbe7987948ecebf167cd251ac82efa7967bd35fd4711e79d136377caa990d94e8e9049c89b43a601221bc19ea42cda12737e061238ef1f8eb55e1cc474cae32ebabdca4d55ea14539bd0b2b171b6cb8a92d6dac39544925fa1ab18939c1f3d6eafd0ab1f8850687840a6b77b5dd6415d28d2818443aae72bad9e03902cc021328b9c98f2d16e7b152b234525dcc3b894ae6b4f00b300f0a011bcb241a93dde&reqid=faaa0d806e624662a99b79a1d0f77157, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:09.185] [CTYunPreview] deviceCode=3KSCP28355F3X5H, selectedProtocol=flv, attemptedProtocols=flv, mediaApiPath=/open/token/cloud/getDeviceMediaUrlFlv, responseCode=0, responseMessage=成功, matchedFieldPath=payload.url, decryptMode=rsa-hex-pkcs1, parsedProtocolType=flv, parsedPreviewUrl=https://vnet-schls.ctseelink.cn/3e9792cac0ccfc006f69e962c511b7d4/0_0/live.flv?token=522eda92f5ba2acc38f0bb66b4f7ad89&origin=97a3ba1d7fd4982f1ad34e725c49975fe3acc757d532d30efdd981f1a74f80fb6d24c8955e0f1fb4de37a2549b916974e25522d82935b87ac7756acdefef33a04eb20a45c588a351d4f3c6493ca3b40a1eeb90e781fb8447a4cda1d0133e20c16124d6d4f58a38ac92af44821d75222984c8ce74c1558d3d35fc310068bf4ac467dfc9babb53621612b89e8981946698206ac9eb0ab282063c649de0ef273081ccc7b9410b1083c6e1be7057acb93a08&reqid=0cd6eb794f334c309d9fa4f58e18eef2, streamAcquireResult=已获取FLV流地址
+[2026-03-19 19:36:27.910] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:27.912] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:36:27.913] [CTYunHttp] Calling protected API: path=/open/token/device/getAllDeviceListNew, paramsSummary=accessToken=redacted&enterpriseUser=189****088&lastId=0&pageSize=20&hasChildDevices=0
+[2026-03-19 19:36:28.021] [CTYunHttp] Protected API responded: path=/open/token/device/getAllDeviceListNew, status=200 OK
+[2026-03-19 19:37:15.053] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:37:15.053] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:37:15.054] [CTYunHttp] Calling protected API: path=/open/token/device/getAllDeviceListNew, paramsSummary=accessToken=redacted&enterpriseUser=189****088&lastId=0&pageSize=20&hasChildDevices=0
+[2026-03-19 19:37:15.152] [CTYunHttp] Protected API responded: path=/open/token/device/getAllDeviceListNew, status=200 OK
+[2026-03-19 19:37:45.670] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:37:45.671] [Token] 复用本地 accessToken，expiresAt=2026-03-26 08:59:28.
+[2026-03-19 19:37:45.672] [CTYunHttp] Calling protected API: path=/open/token/device/getAllDeviceListNew, paramsSummary=accessToken=redacted&enterpriseUser=189****088&lastId=0&pageSize=20&hasChildDevices=0
+[2026-03-19 19:37:45.802] [CTYunHttp] Protected API responded: path=/open/token/device/getAllDeviceListNew, status=200 OK

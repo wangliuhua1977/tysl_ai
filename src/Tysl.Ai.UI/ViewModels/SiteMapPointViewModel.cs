@@ -29,6 +29,8 @@ public sealed class SiteMapPointViewModel : ObservableObject
             ? BuildCoordinateSummary(point)
             : point.RuntimeSummaryText!;
         SummaryText = RuntimeSummaryText;
+        DispatchStateText = point.DispatchStateText;
+        DispatchStateKey = point.DispatchStateKey;
         LastInspectionAtText = point.LastInspectionAt?.ToLocalTime().ToString("HH:mm:ss") ?? "--:--:--";
         LastSnapshotPath = point.LastSnapshotPath;
         HasSnapshot = !string.IsNullOrWhiteSpace(point.LastSnapshotPath);
@@ -72,6 +74,10 @@ public sealed class SiteMapPointViewModel : ObservableObject
 
     public string RuntimeSummaryText { get; }
 
+    public string DispatchStateText { get; }
+
+    public string DispatchStateKey { get; }
+
     public string LastInspectionAtText { get; }
 
     public string? LastSnapshotPath { get; }
@@ -98,6 +104,8 @@ public sealed class SiteMapPointViewModel : ObservableObject
             OnlineStateText = OnlineStateText,
             MonitoringText = MonitoringText,
             SummaryText = SummaryText,
+            DispatchStateKey = DispatchStateKey,
+            DispatchStateText = DispatchStateText,
             PlatformRawLongitude = PlatformRawLongitude,
             PlatformRawLatitude = PlatformRawLatitude,
             RawCoordinateType = RawCoordinateType,

@@ -6,6 +6,9 @@ namespace Tysl.Ai.Services.Sites;
 
 public sealed class SiteMapQueryService : ISiteMapQueryService
 {
+    private static readonly TimeSpan RecoveredHighlightWindow = TimeSpan.FromMinutes(45);
+
+    private readonly IDispatchRecordRepository dispatchRecordRepository;
     private readonly ISiteLocalProfileRepository localProfileRepository;
     private readonly IPlatformConnectionStateProvider platformConnectionStateProvider;
     private readonly IPlatformSiteProvider platformSiteProvider;
@@ -15,12 +18,14 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         IPlatformSiteProvider platformSiteProvider,
         IPlatformConnectionStateProvider platformConnectionStateProvider,
         ISiteLocalProfileRepository localProfileRepository,
-        ISiteRuntimeStateRepository runtimeStateRepository)
+        ISiteRuntimeStateRepository runtimeStateRepository,
+        IDispatchRecordRepository dispatchRecordRepository)
     {
         this.platformSiteProvider = platformSiteProvider;
         this.platformConnectionStateProvider = platformConnectionStateProvider;
         this.localProfileRepository = localProfileRepository;
         this.runtimeStateRepository = runtimeStateRepository;
+        this.dispatchRecordRepository = dispatchRecordRepository;
     }
 
     public async Task<SiteDashboardSnapshot> GetDashboardAsync(
@@ -46,7 +51,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             PointCount = mergeBundle.Sites.Count,
             MonitoredCount = mergeBundle.Sites.Count(site => site.IsMonitored),
             FaultCount = mergeBundle.Sites.Count(IsAttentionSite),
-            DispatchedCount = mergeBundle.Sites.Count(site => site.DemoDispatchStatus == DispatchDemoStatus.Dispatched),
+            DispatchedCount = mergeBundle.Sites.Count(HasActiveDispatch),
             LastRefreshedAt = DateTimeOffset.Now,
             VisiblePoints = visibleMapSites
                 .Select(ToMapPoint)
@@ -83,6 +88,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         var platformConnectionState = platformConnectionStateProvider.GetCurrentState();
         var localProfiles = await localProfileRepository.ListAsync(cancellationToken);
         var runtimeStates = await runtimeStateRepository.ListAsync(cancellationToken);
+        var dispatchRecords = await dispatchRecordRepository.ListLatestAsync(cancellationToken);
 
         var localProfileMap = localProfiles.ToDictionary(
             profile => profile.DeviceCode,
@@ -92,13 +98,18 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             state => state.DeviceCode,
             state => state,
             StringComparer.OrdinalIgnoreCase);
+        var dispatchRecordMap = dispatchRecords.ToDictionary(
+            record => record.DeviceCode,
+            record => record,
+            StringComparer.OrdinalIgnoreCase);
 
         var mergedSites = platformSites
             .Select(platformSite =>
             {
                 localProfileMap.TryGetValue(platformSite.DeviceCode, out var localProfile);
                 runtimeStateMap.TryGetValue(platformSite.DeviceCode, out var runtimeState);
-                return Merge(platformSite, localProfile, runtimeState, platformConnectionState);
+                dispatchRecordMap.TryGetValue(platformSite.DeviceCode, out var dispatchRecord);
+                return Merge(platformSite, localProfile, runtimeState, dispatchRecord, platformConnectionState);
             })
             .ToList();
 
@@ -109,6 +120,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         PlatformSiteSnapshot platformSite,
         SiteLocalProfile? localProfile,
         SiteRuntimeState? runtimeState,
+        DispatchRecord? dispatchRecord,
         PlatformConnectionState platformConnectionState)
     {
         var coordinateSource = ResolveCoordinateSource(platformSite, localProfile);
@@ -126,6 +138,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         };
         var hasMapPoint = displayLongitude.HasValue && displayLatitude.HasValue;
         var isMonitored = localProfile?.IsMonitored ?? true;
+        var dispatchPresentation = ResolveDispatchPresentation(dispatchRecord, runtimeState);
 
         return new SiteMergedView
         {
@@ -157,6 +170,24 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             ConsecutiveFailureCount = runtimeState?.ConsecutiveFailureCount ?? 0,
             LastInspectionRunState = runtimeState?.LastInspectionRunState ?? InspectionRunState.None,
             RuntimeUpdatedAt = runtimeState?.UpdatedAt,
+            DispatchRecordId = dispatchRecord?.Id,
+            HasDispatchRecord = dispatchRecord is not null,
+            DispatchFaultCode = dispatchRecord?.FaultCode,
+            DispatchFaultSummary = dispatchRecord?.FaultSummary,
+            DispatchStatus = dispatchRecord?.DispatchStatus ?? DispatchStatus.None,
+            DispatchMode = dispatchRecord?.DispatchMode ?? DispatchMode.Automatic,
+            DispatchTriggeredAt = dispatchRecord?.TriggeredAt,
+            DispatchSentAt = dispatchRecord?.SentAt,
+            CoolingUntil = dispatchRecord?.CoolingUntil,
+            RecoveryMode = dispatchRecord?.RecoveryMode ?? RecoveryMode.Automatic,
+            RecoveryStatus = dispatchRecord?.RecoveryStatus ?? RecoveryStatus.None,
+            RecoveredAt = dispatchRecord?.RecoveredAt,
+            RecoverySummary = dispatchRecord?.RecoverySummary,
+            DispatchMessageDigest = dispatchRecord?.MessageDigest,
+            IsDispatchCooling = dispatchPresentation.IsCooling,
+            CanConfirmRecovery = dispatchPresentation.CanConfirmRecovery,
+            DispatchStatusText = dispatchPresentation.DispatchStatusText,
+            RecoveryStatusText = dispatchPresentation.RecoveryStatusText,
             AddressText = localProfile?.AddressText,
             ProductAccessNumber = localProfile?.ProductAccessNumber,
             MaintenanceUnit = localProfile?.MaintenanceUnit,
@@ -165,8 +196,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             DemoOnlineState = runtimeState?.LastOnlineState ?? platformSite.DemoOnlineState,
             DemoStatus = platformSite.DemoStatus,
             DemoDispatchStatus = platformSite.DemoDispatchStatus,
-            VisualState = ResolveVisualState(platformSite, runtimeState, isMonitored),
-            StatusText = ResolveStatusText(platformSite, runtimeState, isMonitored),
+            VisualState = ResolveVisualState(platformSite, runtimeState, dispatchPresentation, isMonitored),
+            StatusText = ResolveStatusText(platformSite, runtimeState, dispatchPresentation, isMonitored),
             HasLocalProfile = localProfile is not null,
             CreatedAt = localProfile?.CreatedAt,
             UpdatedAt = localProfile?.UpdatedAt
@@ -205,7 +236,12 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             LastInspectionAt = site.LastInspectionAt,
             LastSnapshotPath = site.LastSnapshotPath,
             LastSnapshotAt = site.LastSnapshotAt,
-            RuntimeFaultCode = site.RuntimeFaultCode
+            RuntimeFaultCode = site.RuntimeFaultCode,
+            DispatchStatus = site.DispatchStatus,
+            RecoveryStatus = site.RecoveryStatus,
+            IsDispatchCooling = site.IsDispatchCooling,
+            DispatchStateKey = ResolveDispatchStateKey(site),
+            DispatchStateText = ResolveDispatchStateText(site)
         };
     }
 
@@ -216,7 +252,9 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             PointId = site.DeviceCode,
             PointDisplayName = site.DisplayName,
             IssueLabel = ResolveAlertLabel(site),
-            OccurredAtText = (site.LastInspectionAt ?? site.RuntimeUpdatedAt ?? site.UpdatedAt)?.ToLocalTime().ToString("HH:mm") ?? "--:--",
+            OccurredAtText = (site.RecoveredAt ?? site.DispatchSentAt ?? site.DispatchTriggeredAt ?? site.LastInspectionAt ?? site.RuntimeUpdatedAt ?? site.UpdatedAt)
+                ?.ToLocalTime()
+                .ToString("HH:mm") ?? "--:--",
             RuntimeSummary = ResolveRuntimeSummary(site),
             SnapshotPath = site.LastSnapshotPath
         };
@@ -228,7 +266,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         {
             SiteDashboardFilter.Fault => IsAttentionSite(site),
             SiteDashboardFilter.Monitored => site.IsMonitored,
-            SiteDashboardFilter.Dispatched => site.DemoDispatchStatus == DispatchDemoStatus.Dispatched,
+            SiteDashboardFilter.Dispatched => HasActiveDispatch(site),
             _ => true
         };
     }
@@ -248,7 +286,11 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             || (site.AddressText?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
             || (site.MaintenanceUnit?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
             || (site.MaintainerName?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
-            || (site.RuntimeSummary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false);
+            || (site.RuntimeSummary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || site.DispatchStatusText.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || site.RecoveryStatusText.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || (site.DispatchFaultSummary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (site.RecoverySummary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
     private static bool IsAttentionSite(SiteMergedView site)
@@ -256,6 +298,16 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         if (!site.IsMonitored)
         {
             return false;
+        }
+
+        if (site.CanConfirmRecovery || HasActiveDispatch(site))
+        {
+            return true;
+        }
+
+        if (IsRecentlyRecovered(site))
+        {
+            return true;
         }
 
         if (site.RuntimeFaultCode != RuntimeFaultCode.None)
@@ -273,8 +325,43 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             || site.DemoStatus != PointDemoStatus.Normal;
     }
 
+    private static bool HasActiveDispatch(SiteMergedView site)
+    {
+        return site.HasDispatchRecord
+            && !site.RecoveredAt.HasValue
+            && site.DispatchStatus != DispatchStatus.None;
+    }
+
+    private static bool IsRecentlyRecovered(SiteMergedView site)
+    {
+        return site.RecoveredAt is DateTimeOffset recoveredAt
+            && recoveredAt >= DateTimeOffset.UtcNow.Subtract(RecoveredHighlightWindow);
+    }
+
     private static int GetAlertPriority(SiteMergedView site)
     {
+        if (site.CanConfirmRecovery)
+        {
+            return 7;
+        }
+
+        if (HasActiveDispatch(site))
+        {
+            return site.RuntimeFaultCode switch
+            {
+                RuntimeFaultCode.Offline => 6,
+                RuntimeFaultCode.InspectionExecutionFailed => 5,
+                RuntimeFaultCode.PreviewResolveFailed => 4,
+                RuntimeFaultCode.SnapshotFailed => 3,
+                _ => 2
+            };
+        }
+
+        if (IsRecentlyRecovered(site))
+        {
+            return 1;
+        }
+
         return site.RuntimeFaultCode switch
         {
             RuntimeFaultCode.Offline => 5,
@@ -287,7 +374,10 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
     private static DateTimeOffset GetAlertTimestamp(SiteMergedView site)
     {
-        return site.LastInspectionAt
+        return site.RecoveredAt
+            ?? site.DispatchSentAt
+            ?? site.DispatchTriggeredAt
+            ?? site.LastInspectionAt
             ?? site.RuntimeUpdatedAt
             ?? site.UpdatedAt
             ?? DateTimeOffset.MinValue;
@@ -330,11 +420,39 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
     private static SiteVisualState ResolveVisualState(
         PlatformSiteSnapshot platformSite,
         SiteRuntimeState? runtimeState,
+        DispatchPresentation dispatchPresentation,
         bool isMonitored)
     {
         if (!isMonitored)
         {
             return SiteVisualState.Unmonitored;
+        }
+
+        if (dispatchPresentation.CanConfirmRecovery)
+        {
+            return SiteVisualState.PendingRecovery;
+        }
+
+        if (dispatchPresentation.IsRecovered)
+        {
+            return SiteVisualState.Recovered;
+        }
+
+        if (dispatchPresentation.HasActiveDispatch)
+        {
+            if (dispatchPresentation.IsCooling)
+            {
+                return SiteVisualState.Cooling;
+            }
+
+            return dispatchPresentation.DispatchStatus switch
+            {
+                DispatchStatus.PendingDispatch => SiteVisualState.PendingDispatch,
+                DispatchStatus.SendFailed => SiteVisualState.PendingDispatch,
+                DispatchStatus.WebhookNotConfigured => SiteVisualState.PendingDispatch,
+                DispatchStatus.Dispatched => SiteVisualState.Dispatched,
+                _ => SiteVisualState.Warning
+            };
         }
 
         if (runtimeState is not null)
@@ -380,11 +498,27 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
     private static string ResolveStatusText(
         PlatformSiteSnapshot platformSite,
         SiteRuntimeState? runtimeState,
+        DispatchPresentation dispatchPresentation,
         bool isMonitored)
     {
         if (!isMonitored)
         {
             return "未纳入监测";
+        }
+
+        if (dispatchPresentation.CanConfirmRecovery)
+        {
+            return "待人工恢复";
+        }
+
+        if (dispatchPresentation.IsRecovered)
+        {
+            return "已恢复";
+        }
+
+        if (dispatchPresentation.HasActiveDispatch)
+        {
+            return dispatchPresentation.DispatchStatusText;
         }
 
         if (runtimeState is not null)
@@ -413,7 +547,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         return platformSite.DemoDispatchStatus switch
         {
             DispatchDemoStatus.Dispatched => "已派单",
-            DispatchDemoStatus.Cooling => "冷却观察中",
+            DispatchDemoStatus.Cooling => "冷却中",
             _ => platformSite.DemoStatus switch
             {
                 PointDemoStatus.Fault => "设备故障",
@@ -426,6 +560,21 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
     private static string ResolveAlertLabel(SiteMergedView site)
     {
+        if (site.CanConfirmRecovery)
+        {
+            return "待人工恢复";
+        }
+
+        if (IsRecentlyRecovered(site))
+        {
+            return "已恢复";
+        }
+
+        if (HasActiveDispatch(site))
+        {
+            return ResolveDispatchStateText(site);
+        }
+
         return site.RuntimeFaultCode switch
         {
             RuntimeFaultCode.Offline => "设备离线",
@@ -438,6 +587,32 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
     private static string ResolveRuntimeSummary(SiteMergedView site)
     {
+        if (site.CanConfirmRecovery)
+        {
+            return string.IsNullOrWhiteSpace(site.RecoverySummary)
+                ? "运行态已恢复，待人工确认"
+                : site.RecoverySummary!;
+        }
+
+        if (IsRecentlyRecovered(site))
+        {
+            return string.IsNullOrWhiteSpace(site.RecoverySummary)
+                ? "故障已恢复"
+                : site.RecoverySummary!;
+        }
+
+        if (HasActiveDispatch(site))
+        {
+            var parts = new[]
+            {
+                ResolveDispatchStateText(site),
+                site.DispatchFaultSummary,
+                site.RuntimeSummary
+            }.Where(item => !string.IsNullOrWhiteSpace(item)).Distinct().ToArray();
+
+            return parts.Length == 0 ? site.StatusText : string.Join("；", parts);
+        }
+
         if (!string.IsNullOrWhiteSpace(site.RuntimeSummary))
         {
             return site.RuntimeSummary!;
@@ -457,7 +632,150 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         return site.IsMonitored ? "尚未产生运行态记录。" : "当前点位未纳入静默巡检。";
     }
 
+    private static string ResolveDispatchStateKey(SiteMergedView site)
+    {
+        if (!site.HasDispatchRecord)
+        {
+            return "none";
+        }
+
+        if (site.CanConfirmRecovery)
+        {
+            return "recovery-pending";
+        }
+
+        if (site.RecoveredAt.HasValue)
+        {
+            return "recovered";
+        }
+
+        if (site.IsDispatchCooling)
+        {
+            return "cooling";
+        }
+
+        return site.DispatchStatus switch
+        {
+            DispatchStatus.PendingDispatch => "pending",
+            DispatchStatus.Dispatched => "dispatched",
+            DispatchStatus.SendFailed => "send-failed",
+            DispatchStatus.WebhookNotConfigured => "pending",
+            _ => "none"
+        };
+    }
+
+    private static string ResolveDispatchStateText(SiteMergedView site)
+    {
+        if (!site.HasDispatchRecord)
+        {
+            return "未处置";
+        }
+
+        if (site.CanConfirmRecovery)
+        {
+            return "待人工恢复";
+        }
+
+        if (site.RecoveredAt.HasValue)
+        {
+            return "已恢复";
+        }
+
+        if (site.IsDispatchCooling)
+        {
+            return "冷却中";
+        }
+
+        return site.DispatchStatus switch
+        {
+            DispatchStatus.PendingDispatch => "待派单",
+            DispatchStatus.Dispatched => "已派单",
+            DispatchStatus.SendFailed => "发送失败",
+            DispatchStatus.WebhookNotConfigured => "待发送",
+            _ => "未处置"
+        };
+    }
+
+    private static DispatchPresentation ResolveDispatchPresentation(
+        DispatchRecord? dispatchRecord,
+        SiteRuntimeState? runtimeState)
+    {
+        if (dispatchRecord is null)
+        {
+            return new DispatchPresentation(
+                false,
+                false,
+                false,
+                DispatchStatus.None,
+                "未触发派单",
+                "未恢复");
+        }
+
+        var isCooling =
+            !dispatchRecord.IsRecovered
+            && dispatchRecord.DispatchStatus == DispatchStatus.Dispatched
+            && dispatchRecord.CoolingUntil is DateTimeOffset coolingUntil
+            && coolingUntil > DateTimeOffset.UtcNow;
+        var canConfirmRecovery = dispatchRecord.RecoveryStatus == RecoveryStatus.PendingConfirmation;
+        var isRecovered =
+            dispatchRecord.IsRecovered
+            && runtimeState?.LastFaultCode == RuntimeFaultCode.None
+            && runtimeState?.LastInspectionRunState != InspectionRunState.Failed
+            && dispatchRecord.RecoveredAt is DateTimeOffset recoveredAt
+            && recoveredAt >= DateTimeOffset.UtcNow.Subtract(RecoveredHighlightWindow);
+
+        return new DispatchPresentation(
+            dispatchRecord.DispatchStatus != DispatchStatus.None && !dispatchRecord.IsRecovered,
+            isCooling,
+            canConfirmRecovery,
+            dispatchRecord.DispatchStatus,
+            ResolveDispatchStatusText(dispatchRecord, isCooling),
+            ResolveRecoveryStatusText(dispatchRecord));
+    }
+
+    private static string ResolveDispatchStatusText(DispatchRecord record, bool isCooling)
+    {
+        if (isCooling)
+        {
+            return "冷却中";
+        }
+
+        return record.DispatchStatus switch
+        {
+            DispatchStatus.PendingDispatch => "待派单",
+            DispatchStatus.Dispatched => "已派单",
+            DispatchStatus.SendFailed => "发送失败",
+            DispatchStatus.WebhookNotConfigured => "待发送",
+            _ => "未触发派单"
+        };
+    }
+
+    private static string ResolveRecoveryStatusText(DispatchRecord record)
+    {
+        return record.RecoveryStatus switch
+        {
+            RecoveryStatus.PendingConfirmation => "待人工确认恢复",
+            RecoveryStatus.Recovered => "已恢复",
+            RecoveryStatus.NotificationFailed => "已恢复（通知未发送）",
+            _ => record.RecoveredAt.HasValue ? "已恢复" : "未恢复"
+        };
+    }
+
     private sealed record SiteMergeBundle(
         IReadOnlyList<SiteMergedView> Sites,
         PlatformConnectionState ConnectionState);
+
+    private sealed record DispatchPresentation(
+        bool HasActiveDispatch,
+        bool IsCooling,
+        bool CanConfirmRecovery,
+        DispatchStatus DispatchStatus,
+        string DispatchStatusText,
+        string RecoveryStatusText)
+    {
+        public bool IsRecovered =>
+            !HasActiveDispatch
+            && !CanConfirmRecovery
+            && RecoveryStatusText.StartsWith("已恢复", StringComparison.Ordinal);
+    }
 }

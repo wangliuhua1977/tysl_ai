@@ -9,6 +9,7 @@ namespace Tysl.Ai.Infrastructure.Background;
 public sealed class SilentInspectionService : ISilentInspectionService
 {
     private readonly IInspectionSettingsProvider inspectionSettingsProvider;
+    private readonly IDispatchService dispatchService;
     private readonly ISiteLocalProfileRepository localProfileRepository;
     private readonly AcisKernelPlatformSiteProvider platformSiteProvider;
     private readonly SnapshotRecordRepository snapshotRecordRepository;
@@ -20,6 +21,7 @@ public sealed class SilentInspectionService : ISilentInspectionService
         ISiteLocalProfileRepository localProfileRepository,
         ISiteRuntimeStateRepository siteRuntimeStateRepository,
         IInspectionSettingsProvider inspectionSettingsProvider,
+        IDispatchService dispatchService,
         ISnapshotStorage snapshotStorage,
         SnapshotRecordRepository snapshotRecordRepository)
     {
@@ -27,6 +29,7 @@ public sealed class SilentInspectionService : ISilentInspectionService
         this.localProfileRepository = localProfileRepository;
         this.siteRuntimeStateRepository = siteRuntimeStateRepository;
         this.inspectionSettingsProvider = inspectionSettingsProvider;
+        this.dispatchService = dispatchService;
         this.snapshotStorage = snapshotStorage;
         this.snapshotRecordRepository = snapshotRecordRepository;
     }
@@ -162,6 +165,11 @@ public sealed class SilentInspectionService : ISilentInspectionService
             };
 
             await siteRuntimeStateRepository.UpsertAsync(runtimeState, cancellationToken);
+            await dispatchService.ProcessInspectionResultAsync(
+                platformSite,
+                localProfile,
+                runtimeState,
+                cancellationToken);
 
             if (settings.SnapshotEnabled && snapshotResult.IsSuccess && !string.IsNullOrWhiteSpace(snapshotResult.SnapshotPath))
             {
@@ -207,6 +215,11 @@ public sealed class SilentInspectionService : ISilentInspectionService
             };
 
             await siteRuntimeStateRepository.UpsertAsync(failureState, cancellationToken);
+            await dispatchService.ProcessInspectionResultAsync(
+                platformSite,
+                localProfile,
+                failureState,
+                cancellationToken);
         }
     }
 

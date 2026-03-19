@@ -36,6 +36,19 @@ public sealed class SiteDetailViewModel
         LastSnapshotAtText = detail.LastSnapshotAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "暂无截图";
         LastSnapshotPath = detail.LastSnapshotPath;
         HasSnapshot = !string.IsNullOrWhiteSpace(detail.LastSnapshotPath);
+        HasDispatchRecord = detail.HasDispatchRecord;
+        DispatchRecordId = detail.DispatchRecordId;
+        DispatchHeadlineText = detail.HasDispatchRecord
+            ? $"派单：{detail.DispatchStatusText} / 恢复：{detail.RecoveryStatusText}"
+            : "派单：未触发 / 恢复：未恢复";
+        DispatchStatusText = detail.DispatchStatusText;
+        DispatchTriggeredAtText = detail.DispatchTriggeredAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未触发";
+        LastDispatchAtText = detail.DispatchSentAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未发送";
+        CoolingUntilText = detail.CoolingUntil?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "未进入冷却";
+        RecoveryStatusText = detail.RecoveryStatusText;
+        RecoveredAtText = detail.RecoveredAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未恢复";
+        RecoverySummaryText = string.IsNullOrWhiteSpace(detail.RecoverySummary) ? "暂无恢复摘要" : detail.RecoverySummary!;
+        CanConfirmRecovery = detail.CanConfirmRecovery && detail.DispatchRecordId.HasValue;
 
         var displayCoordinate = ResolveCurrentDisplayCoordinate(detail, displayCoordinateOverride);
         LongitudeText = displayCoordinate?.Longitude.ToString("F6") ?? ResolveDisplayCoordinateFallback(detail);
@@ -97,6 +110,28 @@ public sealed class SiteDetailViewModel
     public string? LastSnapshotPath { get; }
 
     public bool HasSnapshot { get; }
+
+    public bool HasDispatchRecord { get; }
+
+    public long? DispatchRecordId { get; }
+
+    public string DispatchHeadlineText { get; }
+
+    public string DispatchStatusText { get; }
+
+    public string DispatchTriggeredAtText { get; }
+
+    public string LastDispatchAtText { get; }
+
+    public string CoolingUntilText { get; }
+
+    public string RecoveryStatusText { get; }
+
+    public string RecoveredAtText { get; }
+
+    public string RecoverySummaryText { get; }
+
+    public bool CanConfirmRecovery { get; }
 
     public string LongitudeText { get; }
 

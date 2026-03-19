@@ -18,6 +18,10 @@ public sealed record MapHostPointDto
 
     public required string SummaryText { get; init; }
 
+    public required string DispatchStateKey { get; init; }
+
+    public required string DispatchStateText { get; init; }
+
     public double? PlatformRawLongitude { get; init; }
 
     public double? PlatformRawLatitude { get; init; }

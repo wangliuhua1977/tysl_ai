@@ -109,6 +109,30 @@ body {
     background: rgba(255, 255, 255, 0.82);
 }
 
+.marker-status--pending {
+    background: #ffae63;
+}
+
+.marker-status--dispatched {
+    background: #ffd36d;
+}
+
+.marker-status--cooling {
+    background: #7bc9ff;
+}
+
+.marker-status--send-failed {
+    background: #ff6b8b;
+}
+
+.marker-status--recovery-pending {
+    background: #9ab3ff;
+}
+
+.marker-status--recovered {
+    background: #6fe1c1;
+}
+
 .point-card {
     background: rgba(9, 19, 32, 0.95);
     border: 1px solid rgba(46, 168, 255, 0.32);
@@ -140,6 +164,11 @@ body {
     font-size: 11px;
     line-height: 1;
     padding: 5px 8px;
+}
+
+.point-card__badge--dispatch {
+    background: rgba(33, 61, 39, 0.92);
+    border-color: rgba(111, 225, 193, 0.72);
 }
 
 .point-card__summary {

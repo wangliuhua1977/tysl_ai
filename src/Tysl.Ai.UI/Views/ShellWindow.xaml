@@ -55,8 +55,8 @@
                             VerticalAlignment="Center">
                     <controls:StatCard Title="点位数" Value="{Binding PointCount}" Hint="当前平台设备快照中的点位总数" />
                     <controls:StatCard Title="已监测" Value="{Binding MonitoredCount}" Hint="当前纳入监测的点位数量" />
-                    <controls:StatCard Title="异常数" Value="{Binding FaultCount}" Hint="异常、离线或空闲点位数量" />
-                    <controls:StatCard Title="已派单" Value="{Binding DispatchedCount}" Hint="当前处于派单状态的点位数量" />
+                    <controls:StatCard Title="异常数" Value="{Binding FaultCount}" Hint="异常、离线或待处置点位数量" />
+                    <controls:StatCard Title="处置中" Value="{Binding DispatchedCount}" Hint="当前存在派单或恢复处理状态的点位数量" />
                     <controls:StatCard Title="最后刷新" Value="{Binding LastRefreshText}" Hint="当前地图查询刷新时间" />
                 </StackPanel>
             </Grid>
@@ -97,7 +97,7 @@
                                 Command="{Binding ToggleFilterPanelCommand}"
                                 Style="{StaticResource FlatActionButtonStyle}"
                                 ToolTip="展开或收起筛选栏"
-                                Content="≋" />
+                                Content="≡" />
                     </DockPanel>
 
                     <TextBox Grid.Row="1"
@@ -199,6 +199,9 @@
                                 <TextBlock Foreground="{Binding SelectedDetail.VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=TextBrush}"
                                            Text="{Binding SelectedDetail.StatusText, TargetNullValue=等待选择点位}" />
                             </Border>
+                            <TextBlock Margin="0,10,0,0"
+                                       Style="{StaticResource CaptionTextStyle}"
+                                       Text="{Binding SelectedDetail.DispatchHeadlineText, TargetNullValue=派单：未触发 / 恢复：未恢复}" />
 
                             <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="主档与补充信息" />
                             <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.DeviceCode, StringFormat=设备编码：{0}}" />
@@ -215,6 +218,21 @@
                             <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LastProductStateText, StringFormat=平台状态：{0}}" />
                             <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.ConsecutiveFailureText, StringFormat=连续失败：{0}}" />
                             <TextBlock Margin="0,6,0,0" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Text="{Binding SelectedDetail.RuntimeSummaryText}" />
+
+                            <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="派单处置" />
+                            <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.DispatchStatusText, StringFormat=当前派单状态：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.DispatchTriggeredAtText, StringFormat=最近触发时间：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LastDispatchAtText, StringFormat=最近派单时间：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoolingUntilText, StringFormat=冷却到期时间：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.RecoveryStatusText, StringFormat=恢复状态：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.RecoveredAtText, StringFormat=恢复时间：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Text="{Binding SelectedDetail.RecoverySummaryText}" />
+                            <Button Margin="0,10,0,0"
+                                    HorizontalAlignment="Left"
+                                    Command="{Binding ConfirmRecoveryCommand}"
+                                    Style="{StaticResource FlatActionButtonStyle}"
+                                    Visibility="{Binding SelectedDetail.CanConfirmRecovery, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                    Content="确认恢复" />
 
                             <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="最近截图留痕" />
                             <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LastSnapshotAtText, StringFormat=最近截图：{0}}" />

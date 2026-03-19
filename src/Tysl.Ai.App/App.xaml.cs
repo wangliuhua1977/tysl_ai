@@ -3,7 +3,9 @@ using System.Windows;
 using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.Infrastructure.Background;
 using Tysl.Ai.Infrastructure.Configuration;
+using Tysl.Ai.Infrastructure.Dispatch;
 using Tysl.Ai.Infrastructure.Integrations.Acis;
+using Tysl.Ai.Infrastructure.Messaging;
 using Tysl.Ai.Infrastructure.Persistence.Sqlite;
 using Tysl.Ai.Infrastructure.Storage;
 using Tysl.Ai.Services.Sites;
@@ -17,6 +19,7 @@ public partial class App : Application
 {
     private AcisKernelPlatformSiteProvider? platformSiteProvider;
     private SilentInspectionHostedService? silentInspectionHostedService;
+    private WeComWebhookSender? webhookSender;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -37,20 +40,31 @@ public partial class App : Application
         ISiteLocalProfileRepository repository = new SiteLocalProfileRepository(connectionFactory);
         ISiteRuntimeStateRepository runtimeStateRepository = new SiteRuntimeStateRepository(connectionFactory);
         IInspectionSettingsProvider inspectionSettingsProvider = new InspectionSettingsProvider(connectionFactory);
+        IDispatchPolicyProvider dispatchPolicyProvider = new DispatchPolicyProvider(connectionFactory);
+        IDispatchRecordRepository dispatchRecordRepository = new DispatchRecordRepository(connectionFactory);
         ISnapshotStorage snapshotStorage = new SnapshotStorage(ProjectPathResolver.EnsureRuntimeDirectory("snapshots"));
         var snapshotRecordRepository = new SnapshotRecordRepository(connectionFactory);
+        webhookSender = new WeComWebhookSender();
+        IDispatchService dispatchService = new DispatchService(
+            dispatchPolicyProvider,
+            dispatchRecordRepository,
+            repository,
+            platformSiteProvider,
+            webhookSender);
         ISiteLocalProfileService siteLocalProfileService = new SiteLocalProfileService(repository);
         ISiteMapQueryService siteMapQueryService = new SiteMapQueryService(
             platformSiteProvider,
             platformSiteProvider,
             repository,
-            runtimeStateRepository);
+            runtimeStateRepository,
+            dispatchRecordRepository);
 
         ISilentInspectionService silentInspectionService = new SilentInspectionService(
             platformSiteProvider,
             repository,
             runtimeStateRepository,
             inspectionSettingsProvider,
+            dispatchService,
             snapshotStorage,
             snapshotRecordRepository);
         silentInspectionHostedService = new SilentInspectionHostedService(
@@ -61,6 +75,7 @@ public partial class App : Application
         var shellViewModel = new ShellViewModel(
             siteMapQueryService,
             siteLocalProfileService,
+            dispatchService,
             amapLoadResult.IsReady);
         var shellWindow = new ShellWindow(BuildMapHostConfiguration(amapLoadResult))
         {
@@ -77,6 +92,8 @@ public partial class App : Application
         Exit -= HandleExit;
         silentInspectionHostedService?.Dispose();
         silentInspectionHostedService = null;
+        webhookSender?.Dispose();
+        webhookSender = null;
         platformSiteProvider?.Dispose();
         platformSiteProvider = null;
     }

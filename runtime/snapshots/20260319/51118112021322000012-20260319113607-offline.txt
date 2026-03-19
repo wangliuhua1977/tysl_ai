@@ -1,0 +1,6 @@
+deviceCode=51118112021322000012
+displayName=峨眉金顶看万佛顶
+capturedAt=2026-03-19T11:36:07.7366527+00:00
+previewResolveState=Failed
+faultCode=Offline
+summary=Offline; preview resolve failed; snapshot trace updated

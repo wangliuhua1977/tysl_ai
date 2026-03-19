@@ -21,6 +21,9 @@ public sealed class SiteVisualStateToBrushConverter : IValueConverter
             SiteVisualState.Dispatched => $"Status.Dispatched.{suffix}",
             SiteVisualState.Offline => $"Status.Offline.{suffix}",
             SiteVisualState.Unmonitored => $"Status.Unmonitored.{suffix}",
+            SiteVisualState.PendingDispatch => $"Status.PendingDispatch.{suffix}",
+            SiteVisualState.PendingRecovery => $"Status.PendingRecovery.{suffix}",
+            SiteVisualState.Recovered => $"Status.Recovered.{suffix}",
             _ => $"Status.Normal.{suffix}"
         };
 

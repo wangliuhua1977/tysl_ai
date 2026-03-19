@@ -9,5 +9,8 @@ public enum SiteVisualState
     Cooling = 4,
     Dispatched = 5,
     Unmonitored = 6,
-    Offline = 7
+    Offline = 7,
+    PendingDispatch = 8,
+    PendingRecovery = 9,
+    Recovered = 10
 }
