@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using System.Windows.Threading;
 using Tysl.Ai.Core.Enums;
 using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.Core.Models;
@@ -7,13 +8,15 @@ using Tysl.Ai.UI.Models;
 
 namespace Tysl.Ai.UI.ViewModels;
 
-public sealed class ShellViewModel : ObservableObject
+public sealed class ShellViewModel : ObservableObject, IDisposable
 {
     private static readonly JsonSerializerOptions MapHostJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
+    private readonly SemaphoreSlim dashboardLoadLock = new(1, 1);
+    private readonly DispatcherTimer refreshTimer;
     private readonly bool isMapHostConfigured;
     private readonly Dictionary<string, DemoCoordinate> renderedPointCoordinates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ISiteLocalProfileService siteLocalProfileService;
@@ -23,6 +26,7 @@ public sealed class ShellViewModel : ObservableObject
     private int faultCount;
     private bool hasVisiblePoints;
     private bool isCoordinatePickActive;
+    private bool isDisposed;
     private bool isFilterPanelExpanded = true;
     private string mapEmptyStateText;
     private string mapHostStateJson = "{\"points\":[],\"coordinatePickActive\":false}";
@@ -49,9 +53,9 @@ public sealed class ShellViewModel : ObservableObject
 
         mapEmptyStateText = isMapHostConfigured
             ? "正在等待平台点位。"
-            : "地图未配置。请补充 amap-js.json 后重新启动。";
+            : "地图未配置。请补充 amap-js.json 后重启。";
         mapInteractionHint = isMapHostConfigured
-            ? "地图点位由平台权威源驱动，坐标拾取仅用于补录本地手工坐标。"
+            ? "地图只负责展示与联动，坐标拾取仅用于补录本地手工坐标。"
             : "地图宿主未配置，暂不可拾取手工坐标。";
 
         Filters =
@@ -70,6 +74,13 @@ public sealed class ShellViewModel : ObservableObject
         ToggleMonitoringCommand = new AsyncRelayCommand(ToggleMonitoringAsync, () => SelectedDetail is not null);
         SelectPointCommand = new RelayCommand<SiteMapPointViewModel>(SelectPoint);
         SelectAlertCommand = new RelayCommand<SiteAlertDigestViewModel>(SelectAlert);
+
+        refreshTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(20)
+        };
+        refreshTimer.Tick += HandleRefreshTimerTick;
+        refreshTimer.Start();
 
         _ = LoadDashboardAsync();
     }
@@ -301,8 +312,27 @@ public sealed class ShellViewModel : ObservableObject
         editor.CoordinatePickRequested -= HandleEditorCoordinatePickRequested;
     }
 
-    private async Task LoadDashboardAsync(string? preferredSelectionDeviceCode = null)
+    public void Dispose()
     {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        isDisposed = true;
+        refreshTimer.Stop();
+        refreshTimer.Tick -= HandleRefreshTimerTick;
+        dashboardLoadLock.Dispose();
+    }
+
+    private async void HandleRefreshTimerTick(object? sender, EventArgs e)
+    {
+        await LoadDashboardAsync(selectedPointDeviceCode);
+    }
+
+    private async Task LoadDashboardAsync(string? preferredSelectionDeviceCode = null, bool notifyOnError = false)
+    {
+        await dashboardLoadLock.WaitAsync();
         try
         {
             var snapshot = await siteMapQueryService.GetDashboardAsync(SelectedFilter.Value, SearchText);
@@ -349,7 +379,7 @@ public sealed class ShellViewModel : ObservableObject
             if (!string.IsNullOrWhiteSpace(targetDeviceCode))
             {
                 selectedPointDeviceCode = targetDeviceCode;
-                await LoadSelectedSiteDetailAsync(targetDeviceCode);
+                await LoadSelectedSiteDetailAsync(targetDeviceCode, notifyOnError);
                 return;
             }
 
@@ -358,11 +388,18 @@ public sealed class ShellViewModel : ObservableObject
         }
         catch
         {
-            Notify("加载失败", "地图数据暂不可用，请稍后重试。");
+            if (notifyOnError)
+            {
+                Notify("加载失败", "地图数据暂不可用，请稍后重试。");
+            }
+        }
+        finally
+        {
+            dashboardLoadLock.Release();
         }
     }
 
-    private async Task LoadSelectedSiteDetailAsync(string? deviceCode)
+    private async Task LoadSelectedSiteDetailAsync(string? deviceCode, bool notifyOnError = false)
     {
         if (string.IsNullOrWhiteSpace(deviceCode))
         {
@@ -381,7 +418,10 @@ public sealed class ShellViewModel : ObservableObject
         }
         catch
         {
-            Notify("详情加载失败", "点位详情暂不可用，请稍后重试。");
+            if (notifyOnError)
+            {
+                Notify("详情加载失败", "点位详情暂不可用，请稍后重试。");
+            }
         }
     }
 
@@ -407,7 +447,7 @@ public sealed class ShellViewModel : ObservableObject
         {
             var input = SelectedDetail.CreateLocalProfileInput(!SelectedDetail.IsMonitored);
             await siteLocalProfileService.UpsertAsync(input);
-            await LoadDashboardAsync(SelectedDetail.DeviceCode);
+            await LoadDashboardAsync(SelectedDetail.DeviceCode, true);
         }
         catch
         {
@@ -473,7 +513,7 @@ public sealed class ShellViewModel : ObservableObject
         {
             await siteLocalProfileService.UpsertAsync(input!);
             editor.RequestClose();
-            await LoadDashboardAsync(input!.DeviceCode);
+            await LoadDashboardAsync(input!.DeviceCode, true);
         }
         catch
         {
@@ -515,7 +555,7 @@ public sealed class ShellViewModel : ObservableObject
     {
         IsCoordinatePickActive = false;
         MapInteractionHint = isMapHostConfigured
-            ? "地图点位由平台权威源驱动，坐标拾取仅用于补录本地手工坐标。"
+            ? "地图只负责展示与联动，坐标拾取仅用于补录本地手工坐标。"
             : "地图宿主未配置，暂不可拾取手工坐标。";
     }
 
@@ -557,12 +597,12 @@ public sealed class ShellViewModel : ObservableObject
     {
         if (!isMapHostConfigured)
         {
-            return "地图未配置。请补充 amap-js.json 后重新启动。";
+            return "地图未配置。请补充 amap-js.json 后重启。";
         }
 
         if (!isPlatformConnected)
         {
-            return $"{platformStatusText}。请补充 ACIS 配置后重新刷新。";
+            return $"{platformStatusText}。请补充 ACIS 配置后重试。";
         }
 
         return "当前筛选条件下暂无可展示点位。";

@@ -27,6 +27,15 @@ public sealed class SiteDetailViewModel
         CoordinateSourceText = detail.CoordinateSourceText;
         CoordinateStatusText = BuildCoordinateStatusText(detail, displayCoordinateOverride);
         PlatformStatusSummary = detail.PlatformStatusSummary;
+        RuntimeSummaryText = string.IsNullOrWhiteSpace(detail.RuntimeSummary) ? "尚未产生运行态摘要。" : detail.RuntimeSummary!;
+        LastInspectionAtText = detail.LastInspectionAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未巡检";
+        LastInspectionRunStateText = ResolveInspectionRunStateText(detail.LastInspectionRunState);
+        LastPreviewResolveStateText = ResolvePreviewResolveStateText(detail.LastPreviewResolveState);
+        LastProductStateText = string.IsNullOrWhiteSpace(detail.LastProductState) ? "暂无" : detail.LastProductState!;
+        ConsecutiveFailureText = detail.ConsecutiveFailureCount <= 0 ? "0 次" : $"{detail.ConsecutiveFailureCount} 次";
+        LastSnapshotAtText = detail.LastSnapshotAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "暂无截图";
+        LastSnapshotPath = detail.LastSnapshotPath;
+        HasSnapshot = !string.IsNullOrWhiteSpace(detail.LastSnapshotPath);
 
         var displayCoordinate = ResolveCurrentDisplayCoordinate(detail, displayCoordinateOverride);
         LongitudeText = displayCoordinate?.Longitude.ToString("F6") ?? ResolveDisplayCoordinateFallback(detail);
@@ -70,6 +79,24 @@ public sealed class SiteDetailViewModel
     public string CoordinateStatusText { get; }
 
     public string PlatformStatusSummary { get; }
+
+    public string RuntimeSummaryText { get; }
+
+    public string LastInspectionAtText { get; }
+
+    public string LastInspectionRunStateText { get; }
+
+    public string LastPreviewResolveStateText { get; }
+
+    public string LastProductStateText { get; }
+
+    public string ConsecutiveFailureText { get; }
+
+    public string LastSnapshotAtText { get; }
+
+    public string? LastSnapshotPath { get; }
+
+    public bool HasSnapshot { get; }
 
     public string LongitudeText { get; }
 
@@ -132,7 +159,7 @@ public sealed class SiteDetailViewModel
             CoordinateSource.PlatformRaw when displayCoordinateOverride is not null
                 => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），已由前端地图宿主转换后显示",
             CoordinateSource.PlatformRaw when RequiresFrontendConversion(detail.PlatformRawCoordinateType)
-                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），待前端地图宿主转换",
+                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），等待前端地图宿主转换",
             CoordinateSource.PlatformRaw
                 => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），当前按 GCJ-02 直接显示",
             CoordinateSource.ManualOverride => "当前使用本地手工坐标（GCJ-02）",
@@ -174,7 +201,7 @@ public sealed class SiteDetailViewModel
         if (detail.CoordinateSource == CoordinateSource.PlatformRaw
             && RequiresFrontendConversion(detail.PlatformRawCoordinateType))
         {
-            return "待地图转换";
+            return "等待地图转换";
         }
 
         return "暂无";
@@ -204,6 +231,29 @@ public sealed class SiteDetailViewModel
             "gps" => "wgs84/gps",
             "mapbar" => "mapbar",
             _ => "unknown"
+        };
+    }
+
+    private static string ResolveInspectionRunStateText(InspectionRunState state)
+    {
+        return state switch
+        {
+            InspectionRunState.Succeeded => "巡检成功",
+            InspectionRunState.SucceededWithFault => "巡检完成但存在异常",
+            InspectionRunState.Failed => "巡检失败",
+            InspectionRunState.Skipped => "巡检跳过",
+            _ => "尚未巡检"
+        };
+    }
+
+    private static string ResolvePreviewResolveStateText(PreviewResolveState state)
+    {
+        return state switch
+        {
+            PreviewResolveState.Resolved => "解析成功",
+            PreviewResolveState.Failed => "解析失败",
+            PreviewResolveState.Skipped => "已跳过",
+            _ => "未知"
         };
     }
 }

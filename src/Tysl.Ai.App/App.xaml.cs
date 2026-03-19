@@ -1,9 +1,11 @@
 using System.IO;
 using System.Windows;
 using Tysl.Ai.Core.Interfaces;
+using Tysl.Ai.Infrastructure.Background;
 using Tysl.Ai.Infrastructure.Configuration;
 using Tysl.Ai.Infrastructure.Integrations.Acis;
 using Tysl.Ai.Infrastructure.Persistence.Sqlite;
+using Tysl.Ai.Infrastructure.Storage;
 using Tysl.Ai.Services.Sites;
 using Tysl.Ai.UI.Models;
 using Tysl.Ai.UI.ViewModels;
@@ -14,6 +16,7 @@ namespace Tysl.Ai.App;
 public partial class App : Application
 {
     private AcisKernelPlatformSiteProvider? platformSiteProvider;
+    private SilentInspectionHostedService? silentInspectionHostedService;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -32,11 +35,28 @@ public partial class App : Application
         platformSiteProvider = new AcisKernelPlatformSiteProvider(loadResult);
 
         ISiteLocalProfileRepository repository = new SiteLocalProfileRepository(connectionFactory);
+        ISiteRuntimeStateRepository runtimeStateRepository = new SiteRuntimeStateRepository(connectionFactory);
+        IInspectionSettingsProvider inspectionSettingsProvider = new InspectionSettingsProvider(connectionFactory);
+        ISnapshotStorage snapshotStorage = new SnapshotStorage(ProjectPathResolver.EnsureRuntimeDirectory("snapshots"));
+        var snapshotRecordRepository = new SnapshotRecordRepository(connectionFactory);
         ISiteLocalProfileService siteLocalProfileService = new SiteLocalProfileService(repository);
         ISiteMapQueryService siteMapQueryService = new SiteMapQueryService(
             platformSiteProvider,
             platformSiteProvider,
-            repository);
+            repository,
+            runtimeStateRepository);
+
+        ISilentInspectionService silentInspectionService = new SilentInspectionService(
+            platformSiteProvider,
+            repository,
+            runtimeStateRepository,
+            inspectionSettingsProvider,
+            snapshotStorage,
+            snapshotRecordRepository);
+        silentInspectionHostedService = new SilentInspectionHostedService(
+            silentInspectionService,
+            inspectionSettingsProvider);
+        silentInspectionHostedService.Start();
 
         var shellViewModel = new ShellViewModel(
             siteMapQueryService,
@@ -55,6 +75,8 @@ public partial class App : Application
     private void HandleExit(object? sender, ExitEventArgs e)
     {
         Exit -= HandleExit;
+        silentInspectionHostedService?.Dispose();
+        silentInspectionHostedService = null;
         platformSiteProvider?.Dispose();
         platformSiteProvider = null;
     }

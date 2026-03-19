@@ -33,4 +33,14 @@ public sealed record SiteMapPoint
     public required SiteVisualState VisualState { get; init; }
 
     public required string StatusText { get; init; }
+
+    public string? RuntimeSummaryText { get; init; }
+
+    public DateTimeOffset? LastInspectionAt { get; init; }
+
+    public string? LastSnapshotPath { get; init; }
+
+    public DateTimeOffset? LastSnapshotAt { get; init; }
+
+    public required RuntimeFaultCode RuntimeFaultCode { get; init; }
 }

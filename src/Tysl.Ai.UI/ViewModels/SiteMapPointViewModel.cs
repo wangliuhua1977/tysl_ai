@@ -25,7 +25,13 @@ public sealed class SiteMapPointViewModel : ObservableObject
         AddressText = string.IsNullOrWhiteSpace(point.AddressText) ? "地址待补充" : point.AddressText!;
         OnlineStateText = point.DemoOnlineState == DemoOnlineState.Offline ? "离线" : "在线";
         MonitoringText = point.IsMonitored ? "已纳入监测" : "未纳入监测";
-        SummaryText = BuildSummaryText(point);
+        RuntimeSummaryText = string.IsNullOrWhiteSpace(point.RuntimeSummaryText)
+            ? BuildCoordinateSummary(point)
+            : point.RuntimeSummaryText!;
+        SummaryText = RuntimeSummaryText;
+        LastInspectionAtText = point.LastInspectionAt?.ToLocalTime().ToString("HH:mm:ss") ?? "--:--:--";
+        LastSnapshotPath = point.LastSnapshotPath;
+        HasSnapshot = !string.IsNullOrWhiteSpace(point.LastSnapshotPath);
 
         var maintenanceUnit = string.IsNullOrWhiteSpace(point.MaintenanceUnit) ? "维护单位待补充" : point.MaintenanceUnit!;
         var maintainerName = string.IsNullOrWhiteSpace(point.MaintainerName) ? "维护人待补充" : point.MaintainerName!;
@@ -64,6 +70,14 @@ public sealed class SiteMapPointViewModel : ObservableObject
 
     public string SummaryText { get; }
 
+    public string RuntimeSummaryText { get; }
+
+    public string LastInspectionAtText { get; }
+
+    public string? LastSnapshotPath { get; }
+
+    public bool HasSnapshot { get; }
+
     public string MaintenanceLine { get; }
 
     public bool IsSelected
@@ -92,18 +106,18 @@ public sealed class SiteMapPointViewModel : ObservableObject
         };
     }
 
-    private static string BuildSummaryText(SiteMapPoint point)
+    private static string BuildCoordinateSummary(SiteMapPoint point)
     {
         if (!point.IsMonitored)
         {
-            return "当前未纳入监测";
+            return "当前未纳入监测。";
         }
 
         return point.CoordinatePayload.CoordinateSource switch
         {
-            CoordinateSource.ManualOverride => "当前使用本地手工坐标",
-            CoordinateSource.PlatformRaw => "当前使用平台原始坐标",
-            _ => "当前暂无可用坐标"
+            CoordinateSource.ManualOverride => "当前使用本地手工坐标。",
+            CoordinateSource.PlatformRaw => "当前使用平台原始坐标。",
+            _ => "当前暂无可用坐标。"
         };
     }
 }

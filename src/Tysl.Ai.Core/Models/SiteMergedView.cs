@@ -38,6 +38,28 @@ public sealed record SiteMergedView
 
     public required string PlatformStatusSummary { get; init; }
 
+    public required bool HasRuntimeState { get; init; }
+
+    public DateTimeOffset? LastInspectionAt { get; init; }
+
+    public string? LastProductState { get; init; }
+
+    public required PreviewResolveState LastPreviewResolveState { get; init; }
+
+    public string? LastSnapshotPath { get; init; }
+
+    public DateTimeOffset? LastSnapshotAt { get; init; }
+
+    public required RuntimeFaultCode RuntimeFaultCode { get; init; }
+
+    public string? RuntimeSummary { get; init; }
+
+    public required int ConsecutiveFailureCount { get; init; }
+
+    public required InspectionRunState LastInspectionRunState { get; init; }
+
+    public DateTimeOffset? RuntimeUpdatedAt { get; init; }
+
     public string? AddressText { get; init; }
 
     public string? ProductAccessNumber { get; init; }

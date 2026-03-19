@@ -108,6 +108,7 @@ public partial class ShellWindow : Window
         {
             shellViewModel.EditorDialogRequested -= HandleEditorDialogRequested;
             shellViewModel.NotificationRequested -= HandleNotificationRequested;
+            shellViewModel.Dispose();
         }
     }
 }

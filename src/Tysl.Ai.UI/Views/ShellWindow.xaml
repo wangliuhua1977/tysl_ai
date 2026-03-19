@@ -182,47 +182,76 @@
 
                     <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="点位详情" />
 
-                    <StackPanel Grid.Row="1" Margin="0,16,0,16">
-                        <TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding SelectedDetail.DisplayName, TargetNullValue=未选择点位}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource CaptionTextStyle}" Text="{Binding SelectedDetail.DeviceName}" />
-                        <Border Margin="0,14,0,0"
-                                HorizontalAlignment="Left"
-                                Padding="10,5"
-                                Background="{Binding SelectedDetail.VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=FillBrush}"
-                                BorderBrush="{Binding SelectedDetail.VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=BorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="10">
-                            <TextBlock Foreground="{Binding SelectedDetail.VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=TextBrush}"
-                                       Text="{Binding SelectedDetail.StatusText, TargetNullValue=等待选择点位}" />
-                        </Border>
+                    <ScrollViewer Grid.Row="1"
+                                  Margin="0,16,0,16"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding SelectedDetail.DisplayName, TargetNullValue=未选择点位}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource CaptionTextStyle}" Text="{Binding SelectedDetail.DeviceName}" />
+                            <Border Margin="0,14,0,0"
+                                    HorizontalAlignment="Left"
+                                    Padding="10,5"
+                                    Background="{Binding SelectedDetail.VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=FillBrush}"
+                                    BorderBrush="{Binding SelectedDetail.VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10">
+                                <TextBlock Foreground="{Binding SelectedDetail.VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=TextBrush}"
+                                           Text="{Binding SelectedDetail.StatusText, TargetNullValue=等待选择点位}" />
+                            </Border>
 
-                        <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="主档与补充信息" />
-                        <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.DeviceCode, StringFormat=设备编码：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.Alias, StringFormat=别名：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.OnlineStateText, StringFormat=在线状态：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.MonitoringText, StringFormat=监测状态：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LocalProfileStatusText}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.AddressText, StringFormat=地址：{0}}" />
+                            <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="主档与补充信息" />
+                            <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.DeviceCode, StringFormat=设备编码：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.Alias, StringFormat=别名：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.OnlineStateText, StringFormat=在线状态：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.MonitoringText, StringFormat=监测状态：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LocalProfileStatusText}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.AddressText, StringFormat=地址：{0}}" />
 
-                        <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="坐标与平台" />
-                        <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoordinateSourceText, StringFormat=当前坐标来源：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoordinateStatusText, StringFormat=坐标状态：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LongitudeText, StringFormat=当前显示经度：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LatitudeText, StringFormat=当前显示纬度：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.PlatformCoordinateText, StringFormat=平台原始坐标：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.ManualCoordinateText, StringFormat=本地手工坐标：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.PlatformStatusSummary, StringFormat=平台状态：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.ProductAccessNumber, StringFormat=接入号：{0}}" />
+                            <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="运行态" />
+                            <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LastInspectionAtText, StringFormat=最近巡检：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LastInspectionRunStateText, StringFormat=巡检结果：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LastPreviewResolveStateText, StringFormat=预览解析：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LastProductStateText, StringFormat=平台状态：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.ConsecutiveFailureText, StringFormat=连续失败：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Text="{Binding SelectedDetail.RuntimeSummaryText}" />
 
-                        <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="维护信息" />
-                        <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.MaintenanceUnit, StringFormat=单位：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.MaintainerName, StringFormat=维护人：{0}}" />
-                        <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.MaintainerPhone, StringFormat=电话：{0}}" />
+                            <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="最近截图留痕" />
+                            <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LastSnapshotAtText, StringFormat=最近截图：{0}}" />
+                            <Border Margin="0,10,0,0"
+                                    CornerRadius="12"
+                                    BorderBrush="{StaticResource SubtleBorderBrush}"
+                                    BorderThickness="1"
+                                    Background="{StaticResource PanelAltBrush}"
+                                    Visibility="{Binding SelectedDetail.HasSnapshot, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <Image Height="160"
+                                       Stretch="UniformToFill"
+                                       Source="{Binding SelectedDetail.LastSnapshotPath}" />
+                            </Border>
+                            <TextBlock Margin="0,6,0,0"
+                                       Style="{StaticResource DetailValueTextStyle}"
+                                       Text="{Binding SelectedDetail.LastSnapshotPath, TargetNullValue=暂无截图文件}" />
 
-                        <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="备注" />
-                        <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.UpdatedAtText, StringFormat=本地更新时间：{0}}" />
-                        <TextBlock Margin="0,10,0,0" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Text="{Binding SelectedDetail.Remark}" />
-                    </StackPanel>
+                            <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="坐标与平台" />
+                            <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoordinateSourceText, StringFormat=当前坐标来源：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoordinateStatusText, StringFormat=坐标状态：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LongitudeText, StringFormat=当前显示经度：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LatitudeText, StringFormat=当前显示纬度：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.PlatformCoordinateText, StringFormat=平台原始坐标：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.ManualCoordinateText, StringFormat=本地手工坐标：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.PlatformStatusSummary, StringFormat=平台连接：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.ProductAccessNumber, StringFormat=接入号：{0}}" />
+
+                            <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="维护信息" />
+                            <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.MaintenanceUnit, StringFormat=单位：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.MaintainerName, StringFormat=维护人：{0}}" />
+                            <TextBlock Margin="0,6,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.MaintainerPhone, StringFormat=电话：{0}}" />
+
+                            <TextBlock Margin="0,18,0,0" Style="{StaticResource SectionTitleTextStyle}" Text="备注" />
+                            <TextBlock Margin="0,10,0,0" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.UpdatedAtText, StringFormat=本地更新时间：{0}}" />
+                            <TextBlock Margin="0,10,0,0" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Text="{Binding SelectedDetail.Remark}" />
+                        </StackPanel>
+                    </ScrollViewer>
 
                     <UniformGrid Grid.Row="2" Columns="2">
                         <Button Margin="0,0,8,0"
@@ -255,11 +284,33 @@
                                         Command="{Binding DataContext.SelectAlertCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                         CommandParameter="{Binding}"
                                         Style="{StaticResource AlertSelectButtonStyle}">
-                                    <StackPanel>
-                                        <TextBlock FontWeight="SemiBold" Text="{Binding PointDisplayName}" />
-                                        <TextBlock Margin="0,4,0,0" Style="{StaticResource CaptionTextStyle}" Text="{Binding IssueLabel}" />
-                                        <TextBlock Margin="0,6,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding OccurredAtText, StringFormat=最近变化：{0}}" />
-                                    </StackPanel>
+                                    <Grid Width="220">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="88" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Border Width="76"
+                                                Height="48"
+                                                CornerRadius="8"
+                                                BorderBrush="{StaticResource SubtleBorderBrush}"
+                                                BorderThickness="1"
+                                                Background="{StaticResource PanelAltBrush}">
+                                            <Image Stretch="UniformToFill"
+                                                   Source="{Binding SnapshotPath}" />
+                                        </Border>
+
+                                        <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                            <TextBlock FontWeight="SemiBold" Text="{Binding PointDisplayName}" />
+                                            <TextBlock Margin="0,4,0,0" Style="{StaticResource CaptionTextStyle}" Text="{Binding IssueLabel}" />
+                                            <TextBlock Margin="0,4,0,0"
+                                                       MaxWidth="112"
+                                                       TextWrapping="Wrap"
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       Text="{Binding RuntimeSummary}" />
+                                            <TextBlock Margin="0,6,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding OccurredAtText, StringFormat=最近变化：{0}}" />
+                                        </StackPanel>
+                                    </Grid>
                                 </Button>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

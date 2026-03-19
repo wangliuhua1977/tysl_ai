@@ -1,0 +1,6 @@
+deviceCode=3DZDB190259NA7L-000
+displayName=通道0
+capturedAt=2026-03-19T10:38:23.9138770+00:00
+previewResolveState=Resolved
+faultCode=None
+summary=Online; preview resolved; snapshot trace updated; runtime healthy

@@ -1,0 +1,6 @@
+deviceCode=3KSCP284337JYTK
+displayName=峨眉山市桂花桥镇矿机厂烧烤
+capturedAt=2026-03-19T10:38:24.8815475+00:00
+previewResolveState=Resolved
+faultCode=None
+summary=Online; preview resolved; snapshot trace updated; runtime healthy

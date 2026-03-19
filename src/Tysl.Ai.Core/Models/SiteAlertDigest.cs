@@ -9,4 +9,8 @@ public sealed record SiteAlertDigest
     public required string IssueLabel { get; init; }
 
     public required string OccurredAtText { get; init; }
+
+    public string? RuntimeSummary { get; init; }
+
+    public string? SnapshotPath { get; init; }
 }

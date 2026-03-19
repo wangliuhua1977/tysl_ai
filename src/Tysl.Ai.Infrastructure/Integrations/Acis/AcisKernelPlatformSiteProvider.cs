@@ -48,6 +48,8 @@ public sealed class AcisKernelPlatformSiteProvider :
 
     public PlatformConnectionState GetCurrentState() => currentState;
 
+    public bool IsReady => kernel is not null;
+
     public async Task<IReadOnlyList<PlatformSiteSnapshot>> ListAsync(CancellationToken cancellationToken = default)
     {
         if (kernel is null)
@@ -116,6 +118,36 @@ public sealed class AcisKernelPlatformSiteProvider :
     {
         refreshSync.Dispose();
         kernel?.Dispose();
+    }
+
+    public Task<PreviewResolution> ResolveInspectionPreviewAsync(
+        string deviceCode,
+        CancellationToken cancellationToken = default)
+    {
+        if (kernel is null)
+        {
+            return Task.FromResult(
+                PreviewResolution.Failure(
+                    deviceCode,
+                    string.Empty,
+                    Array.Empty<string>(),
+                    string.Empty,
+                    -1,
+                    "ACIS configuration unavailable.",
+                    "preview unavailable",
+                    PreviewFailureCategory.ProtocolFallbackStillFailed,
+                    "ACIS configuration unavailable."));
+        }
+
+        return kernel.ResolvePreviewAsync(deviceCode, AcisPreviewIntent.Inspection, cancellationToken);
+    }
+
+    public Task WriteDiagnosticAsync(
+        string category,
+        string message,
+        CancellationToken cancellationToken = default)
+    {
+        return TryWriteDiagnosticAsync(category, message, cancellationToken);
     }
 
     private async Task<PlatformLoadResult> LoadSnapshotsAsync(CancellationToken cancellationToken)

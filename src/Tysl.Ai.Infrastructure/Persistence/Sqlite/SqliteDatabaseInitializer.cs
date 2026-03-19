@@ -21,6 +21,9 @@ public sealed class SqliteDatabaseInitializer
         await pragmaCommand.ExecuteNonQueryAsync(cancellationToken);
 
         await CreateSiteLocalProfileTableAsync(connection, cancellationToken);
+        await CreateSiteRuntimeStateTableAsync(connection, cancellationToken);
+        await CreateSnapshotRecordTableAsync(connection, cancellationToken);
+        await CreateInspectionSettingsTableAsync(connection, cancellationToken);
 
         if (await TableExistsAsync(connection, "site_profile", cancellationToken))
         {
@@ -30,6 +33,8 @@ public sealed class SqliteDatabaseInitializer
             dropLegacyTableCommand.CommandText = "DROP TABLE IF EXISTS site_profile;";
             await dropLegacyTableCommand.ExecuteNonQueryAsync(cancellationToken);
         }
+
+        await SeedInspectionSettingsAsync(connection, cancellationToken);
 
         await using var countCommand = connection.CreateCommand();
         countCommand.CommandText = "SELECT COUNT(1) FROM site_local_profile;";
@@ -65,6 +70,80 @@ public sealed class SqliteDatabaseInitializer
                 maintainer_name TEXT NULL,
                 maintainer_phone TEXT NULL,
                 created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """;
+
+        await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task CreateSiteRuntimeStateTableAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var createTableCommand = connection.CreateCommand();
+        createTableCommand.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS site_runtime_state (
+                device_code TEXT PRIMARY KEY NOT NULL,
+                last_inspection_at TEXT NULL,
+                last_online_state INTEGER NOT NULL,
+                last_product_state TEXT NULL,
+                last_preview_resolve_state INTEGER NOT NULL,
+                last_snapshot_path TEXT NULL,
+                last_snapshot_at TEXT NULL,
+                last_fault_code INTEGER NOT NULL,
+                last_fault_summary TEXT NULL,
+                consecutive_failure_count INTEGER NOT NULL,
+                last_inspection_run_state INTEGER NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """;
+
+        await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task CreateSnapshotRecordTableAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var createTableCommand = connection.CreateCommand();
+        createTableCommand.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS snapshot_record (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_code TEXT NOT NULL,
+                snapshot_path TEXT NOT NULL,
+                captured_at TEXT NOT NULL,
+                is_placeholder INTEGER NOT NULL,
+                summary_text TEXT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_snapshot_record_device_captured_at
+            ON snapshot_record (device_code, captured_at DESC);
+            """;
+
+        await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task CreateInspectionSettingsTableAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var createTableCommand = connection.CreateCommand();
+        createTableCommand.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS inspection_settings (
+                id INTEGER PRIMARY KEY NOT NULL,
+                enabled INTEGER NOT NULL,
+                start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL,
+                interval_minutes INTEGER NOT NULL,
+                snapshot_retention_count INTEGER NOT NULL,
+                preview_resolve_enabled INTEGER NOT NULL,
+                snapshot_enabled INTEGER NOT NULL,
+                max_points_per_cycle INTEGER NOT NULL,
+                detail_batch_size INTEGER NOT NULL,
                 updated_at TEXT NOT NULL
             );
             """;
@@ -133,6 +212,65 @@ public sealed class SqliteDatabaseInitializer
             """;
 
         await migrateCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task SeedInspectionSettingsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var countCommand = connection.CreateCommand();
+        countCommand.CommandText = "SELECT COUNT(1) FROM inspection_settings WHERE id = 1;";
+        var existingCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken));
+        if (existingCount > 0)
+        {
+            return;
+        }
+
+        var defaults = InspectionSettings.Default;
+
+        await using var insertCommand = connection.CreateCommand();
+        insertCommand.CommandText =
+            """
+            INSERT INTO inspection_settings (
+                id,
+                enabled,
+                start_time,
+                end_time,
+                interval_minutes,
+                snapshot_retention_count,
+                preview_resolve_enabled,
+                snapshot_enabled,
+                max_points_per_cycle,
+                detail_batch_size,
+                updated_at
+            )
+            VALUES (
+                1,
+                $enabled,
+                $startTime,
+                $endTime,
+                $intervalMinutes,
+                $snapshotRetentionCount,
+                $previewResolveEnabled,
+                $snapshotEnabled,
+                $maxPointsPerCycle,
+                $detailBatchSize,
+                $updatedAt
+            );
+            """;
+
+        insertCommand.Parameters.AddWithValue("$enabled", defaults.Enabled ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$startTime", defaults.StartTime.ToString("HH:mm"));
+        insertCommand.Parameters.AddWithValue("$endTime", defaults.EndTime.ToString("HH:mm"));
+        insertCommand.Parameters.AddWithValue("$intervalMinutes", defaults.IntervalMinutes);
+        insertCommand.Parameters.AddWithValue("$snapshotRetentionCount", defaults.SnapshotRetentionCount);
+        insertCommand.Parameters.AddWithValue("$previewResolveEnabled", defaults.PreviewResolveEnabled ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$snapshotEnabled", defaults.SnapshotEnabled ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$maxPointsPerCycle", defaults.MaxPointsPerCycle);
+        insertCommand.Parameters.AddWithValue("$detailBatchSize", defaults.DetailBatchSize);
+        insertCommand.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.UtcDateTime.ToString("O"));
+
+        await insertCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task InsertSeedAsync(
