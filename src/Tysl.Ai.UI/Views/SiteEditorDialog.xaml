@@ -21,7 +21,7 @@
                        Text="{Binding Title}" />
             <TextBlock Margin="0,6,0,0"
                        Style="{StaticResource CaptionTextStyle}"
-                       Text="主档字段保存到本地 SQLite，坐标拾取为主界面地图占位演示。" />
+                       Text="这里只保存本地补充信息。平台设备编码与设备名称只读，坐标拾取仅回填手工坐标。" />
         </StackPanel>
 
         <Border Grid.Row="1"
@@ -35,67 +35,57 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Margin="0,0,10,0">
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="设备编码" ToolTip="用于站点唯一识别的本地编码" />
-                        <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding DeviceCode, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="设备编码" ToolTip="平台设备编码，作为本地补充信息主键" />
+                        <TextBox Style="{StaticResource DialogTextBoxStyle}" IsReadOnly="True" Text="{Binding DeviceCode}" />
 
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="设备名称" ToolTip="点位原始设备名称" />
-                        <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding DeviceName, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="设备名称" ToolTip="平台返回的设备名称，只读展示" />
+                        <TextBox Style="{StaticResource DialogTextBoxStyle}" IsReadOnly="True" Text="{Binding DeviceName}" />
 
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="别名" ToolTip="地图优先展示别名，留空时回退设备名称" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="别名" ToolTip="地图与详情优先展示别名" />
                         <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding Alias, UpdateSourceTrigger=PropertyChanged}" />
 
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="维护单位" ToolTip="站点对应维护单位" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="维护单位" ToolTip="本地补充维护单位信息" />
                         <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding MaintenanceUnit, UpdateSourceTrigger=PropertyChanged}" />
 
                         <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="维护人员" ToolTip="当前维护责任人" />
                         <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding MaintainerName, UpdateSourceTrigger=PropertyChanged}" />
 
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="手机号" ToolTip="维护人员联系电话" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="联系电话" ToolTip="维护人员联系电话" />
                         <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding MaintainerPhone, UpdateSourceTrigger=PropertyChanged}" />
 
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="地址文本" ToolTip="站点对应的本地地址描述" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="地址文本" ToolTip="本地点位地址补充描述" />
                         <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding AddressText, UpdateSourceTrigger=PropertyChanged}" />
                     </StackPanel>
 
                     <StackPanel Grid.Column="1" Margin="10,0,0,0">
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="产品接入号" ToolTip="本地演示使用的接入号字段" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="接入号" ToolTip="本地保存的产品接入号字段" />
                         <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding ProductAccessNumber, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Style="{StaticResource DialogCheckBoxStyle}"
                                   IsChecked="{Binding IsMonitored}"
-                                  ToolTip="切换是否纳入监测"
+                                  ToolTip="切换当前点位是否纳入监测"
                                   Content="纳入监测" />
 
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="经度" ToolTip="支持手工录入本地坐标" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="手工经度" ToolTip="仅作为平台坐标缺失时的兜底坐标" />
                         <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding LongitudeText, UpdateSourceTrigger=PropertyChanged}" />
 
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="纬度" ToolTip="支持手工录入本地坐标" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="手工纬度" ToolTip="仅作为平台坐标缺失时的兜底坐标" />
                         <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding LatitudeText, UpdateSourceTrigger=PropertyChanged}" />
 
                         <Button Margin="0,10,0,0"
                                 HorizontalAlignment="Left"
                                 Command="{Binding BeginCoordinatePickCommand}"
                                 Style="{StaticResource FlatActionButtonStyle}"
-                                ToolTip="开始主界面地图区域的演示坐标拾取"
-                                Content="演示坐标拾取" />
+                                ToolTip="开始在主界面地图占位区拾取手工坐标"
+                                Content="拾取手工坐标" />
                         <TextBlock Margin="0,8,0,0"
                                    Style="{StaticResource CaptionTextStyle}"
                                    TextWrapping="Wrap"
                                    Text="{Binding CoordinatePickSummary}" />
-
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="演示状态" ToolTip="用于异常筛选和点位着色" />
-                        <ComboBox Style="{StaticResource DialogComboBoxStyle}"
-                                  ItemsSource="{Binding DemoStatusOptions}"
-                                  SelectedItem="{Binding SelectedDemoStatus}" />
-
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="演示派单状态" ToolTip="用于已派单筛选和状态表达" />
-                        <ComboBox Style="{StaticResource DialogComboBoxStyle}"
-                                  ItemsSource="{Binding DispatchStatusOptions}"
-                                  SelectedItem="{Binding SelectedDispatchStatus}" />
                     </StackPanel>
 
                     <StackPanel Grid.ColumnSpan="2" Margin="0,12,0,0">
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="备注" ToolTip="本地点位附加说明" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="备注" ToolTip="补充说明仅保存在本地补充信息表" />
                         <TextBox Style="{StaticResource DialogMultilineTextBoxStyle}" Text="{Binding Remark, UpdateSourceTrigger=PropertyChanged}" />
                     </StackPanel>
                 </Grid>
@@ -106,8 +96,8 @@
             <Button Margin="0,0,8,0"
                     Command="{Binding SaveCommand}"
                     Style="{StaticResource AccentActionButtonStyle}"
-                    ToolTip="保存到本地 SQLite 并刷新主界面"
-                    Content="保存点位" />
+                    ToolTip="保存本地补充信息并刷新主界面"
+                    Content="保存补充信息" />
             <Button Command="{Binding CancelCommand}"
                     Style="{StaticResource FlatActionButtonStyle}"
                     ToolTip="关闭当前弹窗，不保存修改"

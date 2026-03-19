@@ -10,7 +10,7 @@ public interface ISiteMapQueryService
         string? searchText,
         CancellationToken cancellationToken = default);
 
-    Task<SiteDetailSnapshot?> GetSiteDetailAsync(Guid siteId, CancellationToken cancellationToken = default);
+    Task<SiteMergedView?> GetSiteDetailAsync(string deviceCode, CancellationToken cancellationToken = default);
 
     DemoCoordinate CreateDemoCoordinate(double relativeX, double relativeY);
 }

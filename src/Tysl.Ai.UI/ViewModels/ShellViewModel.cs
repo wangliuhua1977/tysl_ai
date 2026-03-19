@@ -1,31 +1,32 @@
 using System.Collections.ObjectModel;
 using Tysl.Ai.Core.Enums;
 using Tysl.Ai.Core.Interfaces;
-using Tysl.Ai.Core.Models;
 
 namespace Tysl.Ai.UI.ViewModels;
 
 public sealed class ShellViewModel : ObservableObject
 {
-    private readonly ISiteManagementService siteManagementService;
+    private readonly ISiteLocalProfileService siteLocalProfileService;
     private readonly ISiteMapQueryService siteMapQueryService;
     private SiteEditorViewModel? activeEditor;
     private int dispatchedCount;
     private int faultCount;
     private bool isCoordinatePickActive;
     private bool isFilterPanelExpanded = true;
-    private string mapInteractionHint = "地图点位由本地 SQLite 驱动。";
+    private string mapInteractionHint = "地图点位由平台设备快照驱动，坐标拾取仅用于手工补录坐标。";
     private int monitoredCount;
     private int pointCount;
     private string searchText = string.Empty;
     private DashboardFilterOption selectedFilter;
     private SiteDetailViewModel? selectedDetail;
     private SiteMapPointViewModel? selectedPoint;
+    private string? selectedPointDeviceCode;
 
-    public ShellViewModel(ISiteMapQueryService siteMapQueryService, ISiteManagementService siteManagementService)
+    public ShellViewModel(ISiteMapQueryService siteMapQueryService, ISiteLocalProfileService siteLocalProfileService)
     {
         this.siteMapQueryService = siteMapQueryService;
-        this.siteManagementService = siteManagementService;
+        this.siteLocalProfileService = siteLocalProfileService;
+
         Filters =
         [
             new DashboardFilterOption("全部", SiteDashboardFilter.All),
@@ -33,13 +34,13 @@ public sealed class ShellViewModel : ObservableObject
             new DashboardFilterOption("已监测", SiteDashboardFilter.Monitored),
             new DashboardFilterOption("已派单", SiteDashboardFilter.Dispatched)
         ];
+
         selectedFilter = Filters[0];
         VisiblePoints = [];
         VisibleAlerts = [];
         ToggleFilterPanelCommand = new RelayCommand(() => IsFilterPanelExpanded = !IsFilterPanelExpanded);
-        CreateSiteCommand = new AsyncRelayCommand(OpenCreateEditorAsync);
-        EditSelectedSiteCommand = new AsyncRelayCommand(OpenEditEditorAsync, () => SelectedPoint is not null);
-        ToggleMonitoringCommand = new AsyncRelayCommand(ToggleMonitoringAsync, () => SelectedPoint is not null);
+        EditSelectedSiteCommand = new AsyncRelayCommand(OpenEditEditorAsync, () => SelectedDetail is not null);
+        ToggleMonitoringCommand = new AsyncRelayCommand(ToggleMonitoringAsync, () => SelectedDetail is not null);
         SelectPointCommand = new RelayCommand<SiteMapPointViewModel>(SelectPoint);
         SelectAlertCommand = new RelayCommand<SiteAlertDigestViewModel>(SelectAlert);
 
@@ -84,8 +85,6 @@ public sealed class ShellViewModel : ObservableObject
 
     public RelayCommand ToggleFilterPanelCommand { get; }
 
-    public AsyncRelayCommand CreateSiteCommand { get; }
-
     public AsyncRelayCommand EditSelectedSiteCommand { get; }
 
     public AsyncRelayCommand ToggleMonitoringCommand { get; }
@@ -107,7 +106,7 @@ public sealed class ShellViewModel : ObservableObject
         {
             if (SetProperty(ref searchText, value))
             {
-                _ = LoadDashboardAsync(SelectedPoint?.Id);
+                _ = LoadDashboardAsync(selectedPointDeviceCode);
             }
         }
     }
@@ -119,7 +118,7 @@ public sealed class ShellViewModel : ObservableObject
         {
             if (SetProperty(ref selectedFilter, value))
             {
-                _ = LoadDashboardAsync(SelectedPoint?.Id);
+                _ = LoadDashboardAsync(selectedPointDeviceCode);
             }
         }
     }
@@ -139,17 +138,25 @@ public sealed class ShellViewModel : ObservableObject
                 point.IsSelected = point == value;
             }
 
-            EditSelectedSiteCommand.NotifyCanExecuteChanged();
-            ToggleMonitoringCommand.NotifyCanExecuteChanged();
-            OnPropertyChanged(nameof(MonitorToggleText));
-            _ = LoadSelectedSiteDetailAsync(value?.Id);
+            selectedPointDeviceCode = value?.DeviceCode;
+            _ = LoadSelectedSiteDetailAsync(selectedPointDeviceCode);
         }
     }
 
     public SiteDetailViewModel? SelectedDetail
     {
         get => selectedDetail;
-        private set => SetProperty(ref selectedDetail, value);
+        private set
+        {
+            if (!SetProperty(ref selectedDetail, value))
+            {
+                return;
+            }
+
+            EditSelectedSiteCommand.NotifyCanExecuteChanged();
+            ToggleMonitoringCommand.NotifyCanExecuteChanged();
+            OnPropertyChanged(nameof(MonitorToggleText));
+        }
     }
 
     public bool IsCoordinatePickActive
@@ -164,7 +171,7 @@ public sealed class ShellViewModel : ObservableObject
         private set => SetProperty(ref mapInteractionHint, value);
     }
 
-    public string MonitorToggleText => SelectedDetail?.IsMonitored == false ? "纳入监测" : "停用监测";
+    public string MonitorToggleText => SelectedDetail?.IsMonitored == false ? "纳入监测" : "暂停监测";
 
     public void HandleMapSurfaceClick(double relativeX, double relativeY)
     {
@@ -190,7 +197,7 @@ public sealed class ShellViewModel : ObservableObject
         editor.CoordinatePickRequested -= HandleEditorCoordinatePickRequested;
     }
 
-    private async Task LoadDashboardAsync(Guid? preferredSelectionId = null)
+    private async Task LoadDashboardAsync(string? preferredSelectionDeviceCode = null)
     {
         try
         {
@@ -215,15 +222,27 @@ public sealed class ShellViewModel : ObservableObject
                 VisibleAlerts.Add(alert);
             }
 
-            var targetPoint = preferredSelectionId.HasValue
-                ? VisiblePoints.FirstOrDefault(point => point.Id == preferredSelectionId.Value)
-                : null;
+            var targetDeviceCode = preferredSelectionDeviceCode ?? selectedPointDeviceCode;
+            var targetPoint = !string.IsNullOrWhiteSpace(targetDeviceCode)
+                ? VisiblePoints.FirstOrDefault(point => point.DeviceCode.Equals(targetDeviceCode, StringComparison.OrdinalIgnoreCase))
+                : VisiblePoints.FirstOrDefault();
 
-            SelectedPoint = targetPoint ?? VisiblePoints.FirstOrDefault();
-            if (SelectedPoint is null)
+            if (targetPoint is not null)
             {
-                SelectedDetail = null;
+                SelectedPoint = targetPoint;
+                return;
             }
+
+            SelectedPoint = null;
+
+            if (!string.IsNullOrWhiteSpace(targetDeviceCode))
+            {
+                selectedPointDeviceCode = targetDeviceCode;
+                await LoadSelectedSiteDetailAsync(targetDeviceCode);
+                return;
+            }
+
+            SelectedDetail = null;
         }
         catch (Exception ex)
         {
@@ -231,9 +250,9 @@ public sealed class ShellViewModel : ObservableObject
         }
     }
 
-    private async Task LoadSelectedSiteDetailAsync(Guid? siteId)
+    private async Task LoadSelectedSiteDetailAsync(string? deviceCode)
     {
-        if (!siteId.HasValue)
+        if (string.IsNullOrWhiteSpace(deviceCode))
         {
             SelectedDetail = null;
             return;
@@ -241,9 +260,8 @@ public sealed class ShellViewModel : ObservableObject
 
         try
         {
-            var detail = await siteMapQueryService.GetSiteDetailAsync(siteId.Value);
+            var detail = await siteMapQueryService.GetSiteDetailAsync(deviceCode);
             SelectedDetail = detail is null ? null : SiteDetailViewModel.FromSnapshot(detail);
-            OnPropertyChanged(nameof(MonitorToggleText));
         }
         catch (Exception ex)
         {
@@ -251,72 +269,29 @@ public sealed class ShellViewModel : ObservableObject
         }
     }
 
-    private Task OpenCreateEditorAsync()
+    private Task OpenEditEditorAsync()
     {
-        OpenEditor(SiteEditorViewModel.CreateForNew());
+        if (SelectedDetail is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        OpenEditor(SelectedDetail.CreateEditorViewModel());
         return Task.CompletedTask;
-    }
-
-    private async Task OpenEditEditorAsync()
-    {
-        if (SelectedPoint is null)
-        {
-            return;
-        }
-
-        try
-        {
-            var site = await siteManagementService.GetByIdAsync(SelectedPoint.Id);
-            if (site is null)
-            {
-                Notify("编辑失败", "未找到当前点位。");
-                return;
-            }
-
-            OpenEditor(SiteEditorViewModel.CreateForEdit(site));
-        }
-        catch (Exception ex)
-        {
-            Notify("编辑失败", ex.Message);
-        }
     }
 
     private async Task ToggleMonitoringAsync()
     {
-        if (SelectedPoint is null)
+        if (SelectedDetail is null)
         {
             return;
         }
 
         try
         {
-            var site = await siteManagementService.GetByIdAsync(SelectedPoint.Id);
-            if (site is null)
-            {
-                Notify("操作失败", "未找到当前点位。");
-                return;
-            }
-
-            var updated = await siteManagementService.UpdateAsync(new SiteProfileInput
-            {
-                Id = site.Id,
-                DeviceCode = site.DeviceCode,
-                DeviceName = site.DeviceName,
-                Alias = site.Alias,
-                Remark = site.Remark,
-                IsMonitored = !site.IsMonitored,
-                Longitude = site.Longitude,
-                Latitude = site.Latitude,
-                AddressText = site.AddressText,
-                ProductAccessNumber = site.ProductAccessNumber,
-                MaintenanceUnit = site.MaintenanceUnit,
-                MaintainerName = site.MaintainerName,
-                MaintainerPhone = site.MaintainerPhone,
-                DemoStatus = site.DemoStatus,
-                DemoDispatchStatus = site.DemoDispatchStatus
-            });
-
-            await LoadDashboardAsync(updated.Id);
+            var input = SelectedDetail.CreateLocalProfileInput(!SelectedDetail.IsMonitored);
+            await siteLocalProfileService.UpsertAsync(input);
+            await LoadDashboardAsync(SelectedDetail.DeviceCode);
         }
         catch (Exception ex)
         {
@@ -346,18 +321,22 @@ public sealed class ShellViewModel : ObservableObject
         }
     }
 
-    private void SelectAlert(SiteAlertDigestViewModel? alert)
+    private async void SelectAlert(SiteAlertDigestViewModel? alert)
     {
         if (alert is null)
         {
             return;
         }
 
-        var point = VisiblePoints.FirstOrDefault(item => item.Id == alert.PointId);
+        selectedPointDeviceCode = alert.PointId;
+        var point = VisiblePoints.FirstOrDefault(item => item.DeviceCode.Equals(alert.PointId, StringComparison.OrdinalIgnoreCase));
         if (point is not null)
         {
             SelectedPoint = point;
+            return;
         }
+
+        await LoadSelectedSiteDetailAsync(alert.PointId);
     }
 
     private async void HandleEditorSaveRequested(object? sender, EventArgs e)
@@ -375,12 +354,9 @@ public sealed class ShellViewModel : ObservableObject
 
         try
         {
-            SiteProfile savedSite = editor.IsEditMode
-                ? await siteManagementService.UpdateAsync(input!)
-                : await siteManagementService.CreateAsync(input!);
-
+            await siteLocalProfileService.UpsertAsync(input!);
             editor.RequestClose();
-            await LoadDashboardAsync(savedSite.Id);
+            await LoadDashboardAsync(input!.DeviceCode);
         }
         catch (Exception ex)
         {
@@ -408,14 +384,14 @@ public sealed class ShellViewModel : ObservableObject
 
         activeEditor = editor;
         IsCoordinatePickActive = true;
-        MapInteractionHint = "演示坐标拾取中，点击地图占位区域回填经纬度。";
+        MapInteractionHint = "手工坐标补录中，请点击地图占位区回填经纬度。";
         editor.MarkCoordinatePickPending();
     }
 
     private void ClearCoordinatePick()
     {
         IsCoordinatePickActive = false;
-        MapInteractionHint = "地图点位由本地 SQLite 驱动。";
+        MapInteractionHint = "地图点位由平台设备快照驱动，坐标拾取仅用于手工补录坐标。";
     }
 
     private void Notify(string title, string message)

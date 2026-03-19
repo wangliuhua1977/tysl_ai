@@ -1,5 +1,4 @@
 using System.Globalization;
-using Tysl.Ai.Core.Enums;
 using Tysl.Ai.Core.Models;
 
 namespace Tysl.Ai.UI.ViewModels;
@@ -9,53 +8,44 @@ public sealed class SiteEditorViewModel : ObservableObject
     private string addressText;
     private string alias;
     private string coordinatePickSummary;
-    private string deviceCode;
-    private string deviceName;
     private bool isMonitored;
     private string latitudeText;
-    private string longitudeText;
     private string maintainerName;
     private string maintainerPhone;
     private string maintenanceUnit;
+    private string longitudeText;
     private string productAccessNumber;
     private string remark;
-    private DispatchDemoStatus selectedDispatchStatus;
-    private PointDemoStatus selectedDemoStatus;
 
     private SiteEditorViewModel(
-        Guid? id,
         string deviceCode,
         string deviceName,
+        bool hasLocalProfile,
         string alias,
         string remark,
         bool isMonitored,
-        double longitude,
-        double latitude,
+        double? manualLongitude,
+        double? manualLatitude,
         string addressText,
         string productAccessNumber,
         string maintenanceUnit,
         string maintainerName,
-        string maintainerPhone,
-        PointDemoStatus demoStatus,
-        DispatchDemoStatus dispatchStatus)
+        string maintainerPhone)
     {
-        Id = id;
-        IsEditMode = id.HasValue && id.Value != Guid.Empty;
-        this.deviceCode = deviceCode;
-        this.deviceName = deviceName;
+        DeviceCode = deviceCode;
+        DeviceName = deviceName;
+        HasLocalProfile = hasLocalProfile;
         this.alias = alias;
         this.remark = remark;
         this.isMonitored = isMonitored;
-        longitudeText = longitude.ToString("F6", CultureInfo.InvariantCulture);
-        latitudeText = latitude.ToString("F6", CultureInfo.InvariantCulture);
+        longitudeText = manualLongitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
+        latitudeText = manualLatitude?.ToString("F6", CultureInfo.InvariantCulture) ?? string.Empty;
         this.addressText = addressText;
         this.productAccessNumber = productAccessNumber;
         this.maintenanceUnit = maintenanceUnit;
         this.maintainerName = maintainerName;
         this.maintainerPhone = maintainerPhone;
-        selectedDemoStatus = demoStatus;
-        selectedDispatchStatus = dispatchStatus;
-        coordinatePickSummary = "演示坐标拾取：点击主界面地图占位区域后回填经纬度。";
+        coordinatePickSummary = "坐标拾取只用于补录本地手工坐标，不会新增平台设备。";
 
         SaveCommand = new RelayCommand(() => SaveRequested?.Invoke(this, EventArgs.Empty));
         CancelCommand = new RelayCommand(() => CancelRequested?.Invoke(this, EventArgs.Empty));
@@ -70,33 +60,19 @@ public sealed class SiteEditorViewModel : ObservableObject
 
     public event EventHandler? CloseRequested;
 
-    public Guid? Id { get; }
+    public string DeviceCode { get; }
 
-    public bool IsEditMode { get; }
+    public string DeviceName { get; }
 
-    public string Title => IsEditMode ? "编辑点位" : "新增点位";
+    public bool HasLocalProfile { get; }
 
-    public IReadOnlyList<PointDemoStatus> DemoStatusOptions { get; } = Enum.GetValues<PointDemoStatus>();
-
-    public IReadOnlyList<DispatchDemoStatus> DispatchStatusOptions { get; } = Enum.GetValues<DispatchDemoStatus>();
+    public string Title => HasLocalProfile ? "编辑本地补充信息" : "补录本地补充信息";
 
     public RelayCommand SaveCommand { get; }
 
     public RelayCommand CancelCommand { get; }
 
     public RelayCommand BeginCoordinatePickCommand { get; }
-
-    public string DeviceCode
-    {
-        get => deviceCode;
-        set => SetProperty(ref deviceCode, value);
-    }
-
-    public string DeviceName
-    {
-        get => deviceName;
-        set => SetProperty(ref deviceName, value);
-    }
 
     public string Alias
     {
@@ -158,122 +134,78 @@ public sealed class SiteEditorViewModel : ObservableObject
         set => SetProperty(ref maintainerPhone, value);
     }
 
-    public PointDemoStatus SelectedDemoStatus
-    {
-        get => selectedDemoStatus;
-        set => SetProperty(ref selectedDemoStatus, value);
-    }
-
-    public DispatchDemoStatus SelectedDispatchStatus
-    {
-        get => selectedDispatchStatus;
-        set => SetProperty(ref selectedDispatchStatus, value);
-    }
-
     public string CoordinatePickSummary
     {
         get => coordinatePickSummary;
         private set => SetProperty(ref coordinatePickSummary, value);
     }
 
-    public static SiteEditorViewModel CreateForNew()
+    public static SiteEditorViewModel CreateFromSite(SiteMergedView site)
     {
         return new SiteEditorViewModel(
-            null,
-            string.Empty,
-            string.Empty,
-            string.Empty,
-            string.Empty,
-            true,
-            120.600000D,
-            30.010000D,
-            string.Empty,
-            string.Empty,
-            string.Empty,
-            string.Empty,
-            string.Empty,
-            PointDemoStatus.Normal,
-            DispatchDemoStatus.None);
-    }
-
-    public static SiteEditorViewModel CreateForEdit(SiteProfile siteProfile)
-    {
-        return new SiteEditorViewModel(
-            siteProfile.Id,
-            siteProfile.DeviceCode,
-            siteProfile.DeviceName,
-            siteProfile.Alias ?? string.Empty,
-            siteProfile.Remark ?? string.Empty,
-            siteProfile.IsMonitored,
-            siteProfile.Longitude,
-            siteProfile.Latitude,
-            siteProfile.AddressText ?? string.Empty,
-            siteProfile.ProductAccessNumber ?? string.Empty,
-            siteProfile.MaintenanceUnit ?? string.Empty,
-            siteProfile.MaintainerName ?? string.Empty,
-            siteProfile.MaintainerPhone ?? string.Empty,
-            siteProfile.DemoStatus,
-            siteProfile.DemoDispatchStatus);
+            site.DeviceCode,
+            site.DeviceName,
+            site.HasLocalProfile,
+            site.Alias ?? string.Empty,
+            site.Remark ?? string.Empty,
+            site.IsMonitored,
+            site.ManualLongitude,
+            site.ManualLatitude,
+            site.AddressText ?? string.Empty,
+            site.ProductAccessNumber ?? string.Empty,
+            site.MaintenanceUnit ?? string.Empty,
+            site.MaintainerName ?? string.Empty,
+            site.MaintainerPhone ?? string.Empty);
     }
 
     public void MarkCoordinatePickPending()
     {
-        CoordinatePickSummary = "演示坐标拾取中：请点击主界面地图占位区域。";
+        CoordinatePickSummary = "手工坐标补录中，请点击主界面地图占位区。";
     }
 
     public void ApplyPickedCoordinate(DemoCoordinate coordinate)
     {
         LongitudeText = coordinate.Longitude.ToString("F6", CultureInfo.InvariantCulture);
         LatitudeText = coordinate.Latitude.ToString("F6", CultureInfo.InvariantCulture);
-        CoordinatePickSummary = $"已回填演示坐标：{LongitudeText}, {LatitudeText}";
+        CoordinatePickSummary = $"已回填手工坐标：{LongitudeText}, {LatitudeText}";
     }
 
-    public bool TryBuildInput(out SiteProfileInput? input, out string? errorMessage)
+    public bool TryBuildInput(out SiteLocalProfileInput? input, out string? errorMessage)
     {
         input = null;
         errorMessage = null;
 
-        if (string.IsNullOrWhiteSpace(DeviceCode))
-        {
-            errorMessage = "设备编码不能为空。";
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(DeviceName))
-        {
-            errorMessage = "设备名称不能为空。";
-            return false;
-        }
-
         if (!TryParseCoordinate(LongitudeText, out var longitude))
         {
-            errorMessage = "经度格式不正确。";
+            errorMessage = "手工经度格式不正确。";
             return false;
         }
 
         if (!TryParseCoordinate(LatitudeText, out var latitude))
         {
-            errorMessage = "纬度格式不正确。";
+            errorMessage = "手工纬度格式不正确。";
             return false;
         }
 
-        input = new SiteProfileInput
+        if (longitude.HasValue != latitude.HasValue)
         {
-            Id = Id,
-            DeviceCode = DeviceCode.Trim(),
-            DeviceName = DeviceName.Trim(),
+            errorMessage = "手工坐标必须同时填写经度和纬度，或同时留空。";
+            return false;
+        }
+
+        input = new SiteLocalProfileInput
+        {
+            DeviceCode = DeviceCode,
             Alias = Alias,
             Remark = Remark,
             IsMonitored = IsMonitored,
-            Longitude = longitude,
-            Latitude = latitude,
+            ManualLongitude = longitude,
+            ManualLatitude = latitude,
             AddressText = AddressText,
             ProductAccessNumber = ProductAccessNumber,
             MaintenanceUnit = MaintenanceUnit,
             MaintainerName = MaintainerName,
-            MaintainerPhone = MaintainerPhone,
-            DemoStatus = SelectedDemoStatus,
-            DemoDispatchStatus = SelectedDispatchStatus
+            MaintainerPhone = MaintainerPhone
         };
 
         return true;
@@ -284,9 +216,21 @@ public sealed class SiteEditorViewModel : ObservableObject
         CloseRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private static bool TryParseCoordinate(string value, out double coordinate)
+    private static bool TryParseCoordinate(string value, out double? coordinate)
     {
-        return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out coordinate)
-            || double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out coordinate);
+        coordinate = null;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var invariantValue)
+            || double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out invariantValue))
+        {
+            coordinate = invariantValue;
+            return true;
+        }
+
+        return false;
     }
 }

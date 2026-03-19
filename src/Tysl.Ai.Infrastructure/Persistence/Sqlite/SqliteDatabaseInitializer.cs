@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using Tysl.Ai.Core.Enums;
 using Tysl.Ai.Core.Models;
 
 namespace Tysl.Ai.Infrastructure.Persistence.Sqlite;
@@ -16,62 +15,106 @@ public sealed class SqliteDatabaseInitializer
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await connectionFactory.CreateOpenConnectionAsync(cancellationToken);
+
         await using var pragmaCommand = connection.CreateCommand();
         pragmaCommand.CommandText = "PRAGMA journal_mode = WAL;";
         await pragmaCommand.ExecuteNonQueryAsync(cancellationToken);
 
-        await using var createTableCommand = connection.CreateCommand();
-        createTableCommand.CommandText =
-            """
-            CREATE TABLE IF NOT EXISTS site_profile (
-                id TEXT PRIMARY KEY NOT NULL,
-                device_code TEXT NOT NULL,
-                device_name TEXT NOT NULL,
-                alias TEXT NULL,
-                remark TEXT NULL,
-                is_monitored INTEGER NOT NULL,
-                longitude REAL NOT NULL,
-                latitude REAL NOT NULL,
-                address_text TEXT NULL,
-                product_access_number TEXT NULL,
-                maintenance_unit TEXT NULL,
-                maintainer_name TEXT NULL,
-                maintainer_phone TEXT NULL,
-                demo_status INTEGER NOT NULL,
-                demo_dispatch_status INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            """;
+        await CreateSiteLocalProfileTableAsync(connection, cancellationToken);
 
-        await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+        if (await TableExistsAsync(connection, "site_profile", cancellationToken))
+        {
+            await MigrateLegacySiteProfileAsync(connection, cancellationToken);
+
+            await using var dropLegacyTableCommand = connection.CreateCommand();
+            dropLegacyTableCommand.CommandText = "DROP TABLE IF EXISTS site_profile;";
+            await dropLegacyTableCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
 
         await using var countCommand = connection.CreateCommand();
-        countCommand.CommandText = "SELECT COUNT(1) FROM site_profile;";
+        countCommand.CommandText = "SELECT COUNT(1) FROM site_local_profile;";
         var existingCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken));
         if (existingCount > 0)
         {
             return;
         }
 
-        foreach (var seedSite in GetSeedProfiles())
+        foreach (var profile in GetSeedProfiles())
         {
-            await InsertSeedAsync(connection, seedSite, cancellationToken);
+            await InsertSeedAsync(connection, profile, cancellationToken);
         }
     }
 
-    private static async Task InsertSeedAsync(
+    private static async Task CreateSiteLocalProfileTableAsync(
         SqliteConnection connection,
-        SiteProfile seedSite,
         CancellationToken cancellationToken)
     {
-        await using var insertCommand = connection.CreateCommand();
-        insertCommand.CommandText =
+        await using var createTableCommand = connection.CreateCommand();
+        createTableCommand.CommandText =
             """
-            INSERT INTO site_profile (
-                id,
+            CREATE TABLE IF NOT EXISTS site_local_profile (
+                device_code TEXT PRIMARY KEY NOT NULL,
+                alias TEXT NULL,
+                remark TEXT NULL,
+                is_monitored INTEGER NOT NULL,
+                manual_longitude REAL NULL,
+                manual_latitude REAL NULL,
+                address_text TEXT NULL,
+                product_access_number TEXT NULL,
+                maintenance_unit TEXT NULL,
+                maintainer_name TEXT NULL,
+                maintainer_phone TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """;
+
+        await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<bool> TableExistsAsync(
+        SqliteConnection connection,
+        string tableName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT COUNT(1)
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = $tableName;
+            """;
+        command.Parameters.AddWithValue("$tableName", tableName);
+
+        var count = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
+        return count > 0;
+    }
+
+    private static async Task MigrateLegacySiteProfileAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var migrateCommand = connection.CreateCommand();
+        migrateCommand.CommandText =
+            """
+            INSERT OR REPLACE INTO site_local_profile (
                 device_code,
-                device_name,
+                alias,
+                remark,
+                is_monitored,
+                manual_longitude,
+                manual_latitude,
+                address_text,
+                product_access_number,
+                maintenance_unit,
+                maintainer_name,
+                maintainer_phone,
+                created_at,
+                updated_at
+            )
+            SELECT
+                device_code,
                 alias,
                 remark,
                 is_monitored,
@@ -82,198 +125,120 @@ public sealed class SqliteDatabaseInitializer
                 maintenance_unit,
                 maintainer_name,
                 maintainer_phone,
-                demo_status,
-                demo_dispatch_status,
+                created_at,
+                updated_at
+            FROM site_profile
+            WHERE device_code IS NOT NULL
+              AND TRIM(device_code) <> '';
+            """;
+
+        await migrateCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task InsertSeedAsync(
+        SqliteConnection connection,
+        SiteLocalProfile profile,
+        CancellationToken cancellationToken)
+    {
+        await using var insertCommand = connection.CreateCommand();
+        insertCommand.CommandText =
+            """
+            INSERT INTO site_local_profile (
+                device_code,
+                alias,
+                remark,
+                is_monitored,
+                manual_longitude,
+                manual_latitude,
+                address_text,
+                product_access_number,
+                maintenance_unit,
+                maintainer_name,
+                maintainer_phone,
                 created_at,
                 updated_at
             )
             VALUES (
-                $id,
                 $deviceCode,
-                $deviceName,
                 $alias,
                 $remark,
                 $isMonitored,
-                $longitude,
-                $latitude,
+                $manualLongitude,
+                $manualLatitude,
                 $addressText,
                 $productAccessNumber,
                 $maintenanceUnit,
                 $maintainerName,
                 $maintainerPhone,
-                $demoStatus,
-                $demoDispatchStatus,
                 $createdAt,
                 $updatedAt
             );
             """;
 
-        insertCommand.Parameters.AddWithValue("$id", seedSite.Id.ToString());
-        insertCommand.Parameters.AddWithValue("$deviceCode", seedSite.DeviceCode);
-        insertCommand.Parameters.AddWithValue("$deviceName", seedSite.DeviceName);
-        insertCommand.Parameters.AddWithValue("$alias", (object?)seedSite.Alias ?? DBNull.Value);
-        insertCommand.Parameters.AddWithValue("$remark", (object?)seedSite.Remark ?? DBNull.Value);
-        insertCommand.Parameters.AddWithValue("$isMonitored", seedSite.IsMonitored ? 1 : 0);
-        insertCommand.Parameters.AddWithValue("$longitude", seedSite.Longitude);
-        insertCommand.Parameters.AddWithValue("$latitude", seedSite.Latitude);
-        insertCommand.Parameters.AddWithValue("$addressText", (object?)seedSite.AddressText ?? DBNull.Value);
-        insertCommand.Parameters.AddWithValue("$productAccessNumber", (object?)seedSite.ProductAccessNumber ?? DBNull.Value);
-        insertCommand.Parameters.AddWithValue("$maintenanceUnit", (object?)seedSite.MaintenanceUnit ?? DBNull.Value);
-        insertCommand.Parameters.AddWithValue("$maintainerName", (object?)seedSite.MaintainerName ?? DBNull.Value);
-        insertCommand.Parameters.AddWithValue("$maintainerPhone", (object?)seedSite.MaintainerPhone ?? DBNull.Value);
-        insertCommand.Parameters.AddWithValue("$demoStatus", (int)seedSite.DemoStatus);
-        insertCommand.Parameters.AddWithValue("$demoDispatchStatus", (int)seedSite.DemoDispatchStatus);
-        insertCommand.Parameters.AddWithValue("$createdAt", seedSite.CreatedAt.UtcDateTime.ToString("O"));
-        insertCommand.Parameters.AddWithValue("$updatedAt", seedSite.UpdatedAt.UtcDateTime.ToString("O"));
+        insertCommand.Parameters.AddWithValue("$deviceCode", profile.DeviceCode);
+        insertCommand.Parameters.AddWithValue("$alias", (object?)profile.Alias ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$remark", (object?)profile.Remark ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$isMonitored", profile.IsMonitored ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$manualLongitude", (object?)profile.ManualLongitude ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$manualLatitude", (object?)profile.ManualLatitude ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$addressText", (object?)profile.AddressText ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$productAccessNumber", (object?)profile.ProductAccessNumber ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$maintenanceUnit", (object?)profile.MaintenanceUnit ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$maintainerName", (object?)profile.MaintainerName ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$maintainerPhone", (object?)profile.MaintainerPhone ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$createdAt", profile.CreatedAt.UtcDateTime.ToString("O"));
+        insertCommand.Parameters.AddWithValue("$updatedAt", profile.UpdatedAt.UtcDateTime.ToString("O"));
 
         await insertCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static IReadOnlyList<SiteProfile> GetSeedProfiles()
+    private static IReadOnlyList<SiteLocalProfile> GetSeedProfiles()
     {
-        var createdAt = DateTimeOffset.UtcNow.AddDays(-7);
+        var createdAt = DateTimeOffset.UtcNow.AddDays(-3);
 
         return
         [
-            new SiteProfile
+            new SiteLocalProfile
             {
-                Id = Guid.Parse("6A7F596C-9F93-4EAB-A381-0C39F4F3A001"),
-                DeviceCode = "SX-A-001",
-                DeviceName = "环城北路隧道东口枪机",
-                Alias = "环城北路隧道",
-                Remark = "夜间车流量高，保留为首屏故障演示点。",
-                IsMonitored = true,
-                Longitude = 120.5958,
-                Latitude = 30.0125,
-                AddressText = "绍兴越城区环城北路隧道东口",
-                ProductAccessNumber = "3306020001001",
-                MaintenanceUnit = "越城北片区维护组",
-                MaintainerName = "周工",
-                MaintainerPhone = "13800000001",
-                DemoStatus = PointDemoStatus.Fault,
-                DemoDispatchStatus = DispatchDemoStatus.None,
-                CreatedAt = createdAt,
-                UpdatedAt = createdAt.AddHours(3)
-            },
-            new SiteProfile
-            {
-                Id = Guid.Parse("6A7F596C-9F93-4EAB-A381-0C39F4F3A002"),
-                DeviceCode = "SX-B-003",
-                DeviceName = "高铁站前广场全景枪机",
+                DeviceCode = "ACIS-DEMO-002",
                 Alias = "高铁站前广场",
-                Remark = "模拟已派单点位。",
+                Remark = "保留别名与维护信息，演示平台快照与本地补充信息合并。",
                 IsMonitored = true,
-                Longitude = 120.6462,
-                Latitude = 30.0442,
                 AddressText = "绍兴北站南广场",
-                ProductAccessNumber = "3306020001002",
+                ProductAccessNumber = "3306020002002",
                 MaintenanceUnit = "客运枢纽联保组",
                 MaintainerName = "沈工",
                 MaintainerPhone = "13800000002",
-                DemoStatus = PointDemoStatus.Warning,
-                DemoDispatchStatus = DispatchDemoStatus.Dispatched,
-                CreatedAt = createdAt.AddMinutes(20),
+                CreatedAt = createdAt,
                 UpdatedAt = createdAt.AddHours(2)
             },
-            new SiteProfile
+            new SiteLocalProfile
             {
-                Id = Guid.Parse("6A7F596C-9F93-4EAB-A381-0C39F4F3A003"),
-                DeviceCode = "SX-C-007",
-                DeviceName = "滨江公园南栈桥水岸枪机",
-                Alias = "滨江公园南栈桥",
-                Remark = "模拟冷却中异常点位。",
-                IsMonitored = true,
-                Longitude = 120.6211,
-                Latitude = 29.9852,
-                AddressText = "滨江公园南栈桥亲水平台",
-                ProductAccessNumber = "3306020001003",
-                MaintenanceUnit = "滨江巡检组",
-                MaintainerName = "何工",
-                MaintainerPhone = "13800000003",
-                DemoStatus = PointDemoStatus.Warning,
-                DemoDispatchStatus = DispatchDemoStatus.Cooling,
-                CreatedAt = createdAt.AddMinutes(40),
-                UpdatedAt = createdAt.AddHours(5)
-            },
-            new SiteProfile
-            {
-                Id = Guid.Parse("6A7F596C-9F93-4EAB-A381-0C39F4F3A004"),
-                DeviceCode = "SX-D-005",
-                DeviceName = "区政务中心东门门岗枪机",
+                DeviceCode = "ACIS-DEMO-004",
                 Alias = "政务中心东门",
-                Remark = "稳定点位。",
-                IsMonitored = true,
-                Longitude = 120.5739,
-                Latitude = 30.0288,
+                Remark = "演示本地监测开关关闭时的视图状态。",
+                IsMonitored = false,
                 AddressText = "越城区政务中心东门",
-                ProductAccessNumber = "3306020001004",
                 MaintenanceUnit = "政务中心值守组",
                 MaintainerName = "李工",
                 MaintainerPhone = "13800000004",
-                DemoStatus = PointDemoStatus.Normal,
-                DemoDispatchStatus = DispatchDemoStatus.None,
                 CreatedAt = createdAt.AddHours(1),
                 UpdatedAt = createdAt.AddHours(1)
             },
-            new SiteProfile
+            new SiteLocalProfile
             {
-                Id = Guid.Parse("6A7F596C-9F93-4EAB-A381-0C39F4F3A005"),
-                DeviceCode = "SX-E-009",
-                DeviceName = "江心洲泵站周界球机",
-                Alias = null,
-                Remark = "演示别名为空时回退设备名。",
-                IsMonitored = true,
-                Longitude = 120.5534,
-                Latitude = 29.9981,
-                AddressText = "江心洲泵站外场",
-                ProductAccessNumber = "3306020001005",
-                MaintenanceUnit = "水务保障组",
-                MaintainerName = "徐工",
-                MaintainerPhone = "13800000005",
-                DemoStatus = PointDemoStatus.Idle,
-                DemoDispatchStatus = DispatchDemoStatus.None,
-                CreatedAt = createdAt.AddHours(2),
-                UpdatedAt = createdAt.AddHours(6)
-            },
-            new SiteProfile
-            {
-                Id = Guid.Parse("6A7F596C-9F93-4EAB-A381-0C39F4F3A006"),
-                DeviceCode = "SX-F-012",
-                DeviceName = "科创园一期西门半球",
+                DeviceCode = "ACIS-DEMO-006",
                 Alias = "科创园一期西门",
-                Remark = "未纳入监测的演示点位。",
-                IsMonitored = false,
-                Longitude = 120.6678,
-                Latitude = 30.0084,
+                Remark = "平台暂无坐标，依赖本地手工补录坐标兜底展示。",
+                IsMonitored = true,
+                ManualLongitude = 120.6678,
+                ManualLatitude = 30.0084,
                 AddressText = "科创园一期西门",
-                ProductAccessNumber = "3306020001006",
                 MaintenanceUnit = "园区联保组",
                 MaintainerName = "顾工",
                 MaintainerPhone = "13800000006",
-                DemoStatus = PointDemoStatus.Normal,
-                DemoDispatchStatus = DispatchDemoStatus.None,
-                CreatedAt = createdAt.AddHours(3),
-                UpdatedAt = createdAt.AddHours(3)
-            },
-            new SiteProfile
-            {
-                Id = Guid.Parse("6A7F596C-9F93-4EAB-A381-0C39F4F3A007"),
-                DeviceCode = "SX-G-016",
-                DeviceName = "迪荡湖公园北侧枪机",
-                Alias = "迪荡湖公园北侧",
-                Remark = "用于补齐常态监测点位分布。",
-                IsMonitored = true,
-                Longitude = 120.6354,
-                Latitude = 30.0219,
-                AddressText = "迪荡湖公园北侧步道",
-                ProductAccessNumber = "3306020001007",
-                MaintenanceUnit = "景观带保障组",
-                MaintainerName = "王工",
-                MaintainerPhone = "13800000007",
-                DemoStatus = PointDemoStatus.Normal,
-                DemoDispatchStatus = DispatchDemoStatus.None,
-                CreatedAt = createdAt.AddHours(4),
-                UpdatedAt = createdAt.AddHours(4)
+                CreatedAt = createdAt.AddHours(2),
+                UpdatedAt = createdAt.AddHours(2)
             }
         ];
     }

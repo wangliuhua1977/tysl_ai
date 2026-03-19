@@ -8,5 +8,6 @@ public enum SiteVisualState
     Idle = 3,
     Cooling = 4,
     Dispatched = 5,
-    Unmonitored = 6
+    Unmonitored = 6,
+    Offline = 7
 }

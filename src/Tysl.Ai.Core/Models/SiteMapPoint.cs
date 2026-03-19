@@ -4,8 +4,6 @@ namespace Tysl.Ai.Core.Models;
 
 public sealed record SiteMapPoint
 {
-    public required Guid Id { get; init; }
-
     public required string DeviceCode { get; init; }
 
     public required string DeviceName { get; init; }
@@ -27,6 +25,10 @@ public sealed record SiteMapPoint
     public required double Longitude { get; init; }
 
     public required double Latitude { get; init; }
+
+    public required string CoordinateSourceText { get; init; }
+
+    public required DemoOnlineState DemoOnlineState { get; init; }
 
     public required PointDemoStatus DemoStatus { get; init; }
 

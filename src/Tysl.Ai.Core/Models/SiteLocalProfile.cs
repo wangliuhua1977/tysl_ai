@@ -1,15 +1,8 @@
-using Tysl.Ai.Core.Abstractions;
-using Tysl.Ai.Core.Enums;
-
 namespace Tysl.Ai.Core.Models;
 
-public sealed class SiteProfile : IEntity
+public sealed class SiteLocalProfile
 {
-    public Guid Id { get; set; }
-
     public string DeviceCode { get; set; } = string.Empty;
-
-    public string DeviceName { get; set; } = string.Empty;
 
     public string? Alias { get; set; }
 
@@ -17,9 +10,9 @@ public sealed class SiteProfile : IEntity
 
     public bool IsMonitored { get; set; }
 
-    public double Longitude { get; set; }
+    public double? ManualLongitude { get; set; }
 
-    public double Latitude { get; set; }
+    public double? ManualLatitude { get; set; }
 
     public string? AddressText { get; set; }
 
@@ -30,10 +23,6 @@ public sealed class SiteProfile : IEntity
     public string? MaintainerName { get; set; }
 
     public string? MaintainerPhone { get; set; }
-
-    public PointDemoStatus DemoStatus { get; set; }
-
-    public DispatchDemoStatus DemoDispatchStatus { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 

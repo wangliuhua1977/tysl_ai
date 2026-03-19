@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using Tysl.Ai.Core.Interfaces;
+using Tysl.Ai.Infrastructure.Integrations.Acis;
 using Tysl.Ai.Infrastructure.Persistence.Sqlite;
 using Tysl.Ai.Services.Sites;
 using Tysl.Ai.UI.ViewModels;
@@ -19,11 +20,12 @@ public partial class App : Application
         var databaseInitializer = new SqliteDatabaseInitializer(connectionFactory);
         databaseInitializer.InitializeAsync().GetAwaiter().GetResult();
 
-        ISiteProfileRepository repository = new SiteProfileRepository(connectionFactory);
-        ISiteManagementService siteManagementService = new SiteManagementService(repository);
-        ISiteMapQueryService siteMapQueryService = new SiteMapQueryService(repository);
+        IPlatformSiteProvider platformSiteProvider = new StubPlatformSiteProvider();
+        ISiteLocalProfileRepository repository = new SiteLocalProfileRepository(connectionFactory);
+        ISiteLocalProfileService siteLocalProfileService = new SiteLocalProfileService(repository);
+        ISiteMapQueryService siteMapQueryService = new SiteMapQueryService(platformSiteProvider, repository);
 
-        var shellViewModel = new ShellViewModel(siteMapQueryService, siteManagementService);
+        var shellViewModel = new ShellViewModel(siteMapQueryService, siteLocalProfileService);
         var shellWindow = new ShellWindow
         {
             DataContext = shellViewModel

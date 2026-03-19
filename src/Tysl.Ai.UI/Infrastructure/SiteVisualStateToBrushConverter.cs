@@ -19,6 +19,7 @@ public sealed class SiteVisualStateToBrushConverter : IValueConverter
             SiteVisualState.Idle => $"Status.Idle.{suffix}",
             SiteVisualState.Cooling => $"Status.Cooling.{suffix}",
             SiteVisualState.Dispatched => $"Status.Dispatched.{suffix}",
+            SiteVisualState.Offline => $"Status.Offline.{suffix}",
             SiteVisualState.Unmonitored => $"Status.Unmonitored.{suffix}",
             _ => $"Status.Normal.{suffix}"
         };

@@ -5,31 +5,44 @@ namespace Tysl.Ai.UI.ViewModels;
 
 public sealed class SiteDetailViewModel
 {
-    private SiteDetailViewModel(SiteDetailSnapshot detail)
+    private readonly SiteMergedView detail;
+
+    private SiteDetailViewModel(SiteMergedView detail)
     {
-        Id = detail.Id;
+        this.detail = detail;
+
         DeviceCode = detail.DeviceCode;
         DeviceName = detail.DeviceName;
         DisplayName = detail.DisplayName;
         Alias = string.IsNullOrWhiteSpace(detail.Alias) ? "未设置别名" : detail.Alias!;
-        Remark = string.IsNullOrWhiteSpace(detail.Remark) ? "暂无备注信息。" : detail.Remark!;
+        Remark = string.IsNullOrWhiteSpace(detail.Remark) ? "暂无补充说明。" : detail.Remark!;
         IsMonitored = detail.IsMonitored;
-        MonitoringText = detail.IsMonitored ? "纳入监测" : "未纳入监测";
-        LongitudeText = detail.Longitude.ToString("F6");
-        LatitudeText = detail.Latitude.ToString("F6");
+        MonitoringText = detail.IsMonitored ? "已纳入监测" : "未纳入监测";
+        OnlineStateText = detail.DemoOnlineState switch
+        {
+            DemoOnlineState.Online => "在线",
+            DemoOnlineState.Offline => "离线",
+            _ => "未知"
+        };
+        CoordinateSourceText = detail.CoordinateSourceText;
+        LongitudeText = detail.Longitude?.ToString("F6") ?? "暂无";
+        LatitudeText = detail.Latitude?.ToString("F6") ?? "暂无";
+        PlatformCoordinateText = detail.PlatformLongitude.HasValue && detail.PlatformLatitude.HasValue
+            ? $"{detail.PlatformLongitude.Value:F6}, {detail.PlatformLatitude.Value:F6}"
+            : "平台未返回";
+        ManualCoordinateText = detail.ManualLongitude.HasValue && detail.ManualLatitude.HasValue
+            ? $"{detail.ManualLongitude.Value:F6}, {detail.ManualLatitude.Value:F6}"
+            : "尚未补录";
         AddressText = string.IsNullOrWhiteSpace(detail.AddressText) ? "地址待补充" : detail.AddressText!;
         ProductAccessNumber = string.IsNullOrWhiteSpace(detail.ProductAccessNumber) ? "未配置" : detail.ProductAccessNumber!;
         MaintenanceUnit = string.IsNullOrWhiteSpace(detail.MaintenanceUnit) ? "维护单位待补充" : detail.MaintenanceUnit!;
-        MaintainerName = string.IsNullOrWhiteSpace(detail.MaintainerName) ? "维护人员待补充" : detail.MaintainerName!;
+        MaintainerName = string.IsNullOrWhiteSpace(detail.MaintainerName) ? "维护人待补充" : detail.MaintainerName!;
         MaintainerPhone = string.IsNullOrWhiteSpace(detail.MaintainerPhone) ? "联系电话待补充" : detail.MaintainerPhone!;
-        DemoStatus = detail.DemoStatus;
-        DemoDispatchStatus = detail.DemoDispatchStatus;
+        LocalProfileStatusText = detail.HasLocalProfile ? "已保存本地补充信息" : "尚未保存本地补充信息";
         VisualState = detail.VisualState;
         StatusText = detail.StatusText;
-        UpdatedAtText = detail.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+        UpdatedAtText = detail.UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "尚未保存";
     }
-
-    public Guid Id { get; }
 
     public string DeviceCode { get; }
 
@@ -45,9 +58,17 @@ public sealed class SiteDetailViewModel
 
     public string MonitoringText { get; }
 
+    public string OnlineStateText { get; }
+
+    public string CoordinateSourceText { get; }
+
     public string LongitudeText { get; }
 
     public string LatitudeText { get; }
+
+    public string PlatformCoordinateText { get; }
+
+    public string ManualCoordinateText { get; }
 
     public string AddressText { get; }
 
@@ -59,9 +80,7 @@ public sealed class SiteDetailViewModel
 
     public string MaintainerPhone { get; }
 
-    public PointDemoStatus DemoStatus { get; }
-
-    public DispatchDemoStatus DemoDispatchStatus { get; }
+    public string LocalProfileStatusText { get; }
 
     public SiteVisualState VisualState { get; }
 
@@ -69,8 +88,31 @@ public sealed class SiteDetailViewModel
 
     public string UpdatedAtText { get; }
 
-    public static SiteDetailViewModel FromSnapshot(SiteDetailSnapshot detail)
+    public static SiteDetailViewModel FromSnapshot(SiteMergedView detail)
     {
         return new SiteDetailViewModel(detail);
+    }
+
+    public SiteLocalProfileInput CreateLocalProfileInput(bool? overrideIsMonitored = null)
+    {
+        return new SiteLocalProfileInput
+        {
+            DeviceCode = detail.DeviceCode,
+            Alias = detail.Alias,
+            Remark = detail.Remark,
+            IsMonitored = overrideIsMonitored ?? detail.IsMonitored,
+            ManualLongitude = detail.ManualLongitude,
+            ManualLatitude = detail.ManualLatitude,
+            AddressText = detail.AddressText,
+            ProductAccessNumber = detail.ProductAccessNumber,
+            MaintenanceUnit = detail.MaintenanceUnit,
+            MaintainerName = detail.MaintainerName,
+            MaintainerPhone = detail.MaintainerPhone
+        };
+    }
+
+    public SiteEditorViewModel CreateEditorViewModel()
+    {
+        return SiteEditorViewModel.CreateFromSite(detail);
     }
 }

@@ -2,7 +2,7 @@ namespace Tysl.Ai.Core.Models;
 
 public sealed record SiteAlertDigest
 {
-    public required Guid PointId { get; init; }
+    public required string PointId { get; init; }
 
     public required string PointDisplayName { get; init; }
 

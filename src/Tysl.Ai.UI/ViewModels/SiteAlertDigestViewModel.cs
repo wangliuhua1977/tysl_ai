@@ -12,7 +12,7 @@ public sealed class SiteAlertDigestViewModel
         OccurredAtText = alertDigest.OccurredAtText;
     }
 
-    public Guid PointId { get; }
+    public string PointId { get; }
 
     public string PointDisplayName { get; }
 

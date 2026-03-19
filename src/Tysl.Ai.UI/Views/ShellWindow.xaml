@@ -4,7 +4,7 @@
         xmlns:controls="clr-namespace:Tysl.Ai.UI.Controls"
         xmlns:infrastructure="clr-namespace:Tysl.Ai.UI.Infrastructure"
         Style="{StaticResource ShellWindowStyle}"
-        Title="天翼视联 AI 巡检系统"
+        Title="天枢视联 AI 巡检系统"
         Width="1600"
         Height="960"
         MinWidth="1280"
@@ -34,27 +34,21 @@
                 <StackPanel>
                     <TextBlock FontSize="26"
                                FontWeight="SemiBold"
-                               Text="天翼视联 AI 巡检系统" />
+                               Text="天枢视联 AI 巡检系统" />
                     <TextBlock Margin="0,6,0,0"
                                Style="{StaticResource CaptionTextStyle}"
-                               Text="本地点位主档 / SQLite 驱动态势图" />
+                               Text="地图主视图持续承载平台设备快照，右侧抽屉只查看与维护补充信息。" />
                 </StackPanel>
 
                 <StackPanel Grid.Column="1"
                             Orientation="Horizontal"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Center">
-                    <controls:StatCard Title="点位数" Value="{Binding PointCount}" Hint="本地 SQLite 中的点位总数" />
-                    <controls:StatCard Title="纳管数" Value="{Binding MonitoredCount}" Hint="当前纳入监测的点位数量" />
-                    <controls:StatCard Title="异常数" Value="{Binding FaultCount}" Hint="基于演示状态字段的关注点位数量" />
-                    <controls:StatCard Title="已派单" Value="{Binding DispatchedCount}" Hint="基于演示派单状态的点位数量" />
+                    <controls:StatCard Title="点位数" Value="{Binding PointCount}" Hint="当前平台设备快照中的点位总数" />
+                    <controls:StatCard Title="已监测" Value="{Binding MonitoredCount}" Hint="当前纳入监测的点位数量" />
+                    <controls:StatCard Title="异常数" Value="{Binding FaultCount}" Hint="异常、离线、派单或长时空闲点位数量" />
+                    <controls:StatCard Title="已派单" Value="{Binding DispatchedCount}" Hint="当前处于派单状态的点位数量" />
                     <controls:StatCard Title="最后刷新" Value="{Binding LastRefreshText}" Hint="当前地图查询刷新时间" />
-                    <Button Margin="8,0,0,0"
-                            MinWidth="96"
-                            Command="{Binding CreateSiteCommand}"
-                            Style="{StaticResource AccentActionButtonStyle}"
-                            ToolTip="新增点位并写入本地 SQLite"
-                            Content="新增点位" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -103,7 +97,7 @@
                              Margin="0,14,0,16"
                              Style="{StaticResource SearchTextBoxStyle}"
                              Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                             ToolTip="按点位别名、设备名、设备编码或地址过滤"
+                             ToolTip="按别名、设备名、设备编码或维护信息筛选"
                              Visibility="{Binding IsFilterPanelExpanded, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                     <ListBox Grid.Row="2"
@@ -114,7 +108,7 @@
                             <DataTemplate>
                                 <TextBlock Text="{Binding Label}"
                                            Foreground="{StaticResource TextPrimaryBrush}"
-                                           ToolTip="切换地图与底部缩略条的显示范围" />
+                                           ToolTip="切换地图与异常缩略条的显示范围" />
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
@@ -170,7 +164,7 @@
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Top"
                                        Style="{StaticResource CaptionTextStyle}"
-                                       Text="静态点位承载区" />
+                                       Text="平台设备点位承载区" />
 
                             <Viewbox Margin="12,44,12,12"
                                      Stretch="Fill"
@@ -191,11 +185,11 @@
                                             </ItemsControl.ItemContainerStyle>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Button Width="170"
+                                                    <Button Width="178"
                                                             Command="{Binding DataContext.SelectPointCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                             CommandParameter="{Binding}"
                                                             Style="{StaticResource MapMarkerButtonStyle}"
-                                                            ToolTip="点击切换右侧详情；坐标拾取模式下请点击地图背景">
+                                                            ToolTip="点击切换右侧详情">
                                                         <Grid>
                                                             <Border x:Name="MarkerBorder"
                                                                     Background="{Binding VisualState, Converter={StaticResource SiteVisualStateToBrushConverter}, ConverterParameter=FillBrush}"
@@ -272,7 +266,7 @@
                                     CornerRadius="12"
                                     Visibility="{Binding IsCoordinatePickActive, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <TextBlock Style="{StaticResource CaptionTextStyle}"
-                                           Text="演示坐标拾取中，请点击地图占位区域。" />
+                                           Text="手工坐标补录中，请点击地图占位区。" />
                             </Border>
                         </Grid>
                     </Border>
@@ -324,9 +318,10 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
-                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="主档信息" />
+                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="主档与补充信息" />
                                 <TextBlock Grid.Row="1"
                                            Margin="0,10,0,0"
                                            Style="{StaticResource DetailValueTextStyle}"
@@ -334,17 +329,43 @@
                                 <TextBlock Grid.Row="2"
                                            Margin="0,6,0,0"
                                            Style="{StaticResource DetailValueTextStyle}"
-                                           Text="{Binding SelectedDetail.MonitoringText, StringFormat=监测状态：{0}}" />
+                                           Text="{Binding SelectedDetail.OnlineStateText, StringFormat=在线状态：{0}}" />
                                 <TextBlock Grid.Row="3"
                                            Margin="0,6,0,0"
                                            Style="{StaticResource DetailValueTextStyle}"
-                                           Text="{Binding SelectedDetail.AddressText, StringFormat=地址：{0}}" />
+                                           Text="{Binding SelectedDetail.MonitoringText, StringFormat=监测状态：{0}}" />
                                 <TextBlock Grid.Row="4"
                                            Margin="0,6,0,0"
                                            Style="{StaticResource DetailValueTextStyle}"
-                                           Text="{Binding SelectedDetail.ProductAccessNumber, StringFormat=接入号：{0}}" />
+                                           Text="{Binding SelectedDetail.LocalProfileStatusText}" />
+                                <TextBlock Grid.Row="5"
+                                           Margin="0,6,0,0"
+                                           Style="{StaticResource DetailValueTextStyle}"
+                                           Text="{Binding SelectedDetail.AddressText, StringFormat=地址：{0}}" />
                             </Grid>
                         </Border>
+
+                        <TextBlock Margin="0,18,0,0"
+                                   Style="{StaticResource SectionTitleTextStyle}"
+                                   Text="坐标与接入" />
+                        <TextBlock Margin="0,10,0,0"
+                                   Style="{StaticResource DetailValueTextStyle}"
+                                   Text="{Binding SelectedDetail.CoordinateSourceText, StringFormat=当前坐标来源：{0}}" />
+                        <TextBlock Margin="0,6,0,0"
+                                   Style="{StaticResource DetailValueTextStyle}"
+                                   Text="{Binding SelectedDetail.LongitudeText, StringFormat=当前经度：{0}}" />
+                        <TextBlock Margin="0,6,0,0"
+                                   Style="{StaticResource DetailValueTextStyle}"
+                                   Text="{Binding SelectedDetail.LatitudeText, StringFormat=当前纬度：{0}}" />
+                        <TextBlock Margin="0,6,0,0"
+                                   Style="{StaticResource DetailValueTextStyle}"
+                                   Text="{Binding SelectedDetail.PlatformCoordinateText, StringFormat=平台坐标：{0}}" />
+                        <TextBlock Margin="0,6,0,0"
+                                   Style="{StaticResource DetailValueTextStyle}"
+                                   Text="{Binding SelectedDetail.ManualCoordinateText, StringFormat=手工坐标：{0}}" />
+                        <TextBlock Margin="0,6,0,0"
+                                   Style="{StaticResource DetailValueTextStyle}"
+                                   Text="{Binding SelectedDetail.ProductAccessNumber, StringFormat=接入号：{0}}" />
 
                         <TextBlock Margin="0,18,0,0"
                                    Style="{StaticResource SectionTitleTextStyle}"
@@ -360,16 +381,10 @@
                                    Text="{Binding SelectedDetail.MaintainerPhone, StringFormat=电话：{0}}" />
                         <TextBlock Margin="0,18,0,0"
                                    Style="{StaticResource SectionTitleTextStyle}"
-                                   Text="备注与坐标" />
+                                   Text="备注" />
                         <TextBlock Margin="0,10,0,0"
                                    Style="{StaticResource DetailValueTextStyle}"
-                                   Text="{Binding SelectedDetail.LongitudeText, StringFormat=经度：{0}}" />
-                        <TextBlock Margin="0,6,0,0"
-                                   Style="{StaticResource DetailValueTextStyle}"
-                                   Text="{Binding SelectedDetail.LatitudeText, StringFormat=纬度：{0}}" />
-                        <TextBlock Margin="0,6,0,0"
-                                   Style="{StaticResource DetailValueTextStyle}"
-                                   Text="{Binding SelectedDetail.UpdatedAtText, StringFormat=更新：{0}}" />
+                                   Text="{Binding SelectedDetail.UpdatedAtText, StringFormat=本地更新时间：{0}}" />
                         <TextBlock Margin="0,10,0,0"
                                    Foreground="{StaticResource TextMutedBrush}"
                                    TextWrapping="Wrap"
@@ -380,8 +395,8 @@
                         <Button Margin="0,0,8,0"
                                 Command="{Binding EditSelectedSiteCommand}"
                                 Style="{StaticResource FlatActionButtonStyle}"
-                                ToolTip="打开弹窗编辑当前点位"
-                                Content="编辑点位" />
+                                ToolTip="打开弹窗维护当前点位的本地补充信息"
+                                Content="编辑补充信息" />
                         <Button Command="{Binding ToggleMonitoringCommand}"
                                 Style="{StaticResource AccentActionButtonStyle}"
                                 ToolTip="切换当前点位是否纳入监测"

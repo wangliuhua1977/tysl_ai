@@ -9,7 +9,6 @@ public sealed class SiteMapPointViewModel : ObservableObject
 
     public SiteMapPointViewModel(SiteMapPoint point)
     {
-        Id = point.Id;
         DeviceCode = point.DeviceCode;
         DeviceName = point.DeviceName;
         DisplayName = point.DisplayName;
@@ -18,13 +17,13 @@ public sealed class SiteMapPointViewModel : ObservableObject
         IsMonitored = point.IsMonitored;
         MapX = point.MapX;
         MapY = point.MapY;
+        CoordinateSourceText = point.CoordinateSourceText;
         AddressText = string.IsNullOrWhiteSpace(point.AddressText) ? "地址待补充" : point.AddressText!;
-        MaintenanceLine = string.IsNullOrWhiteSpace(point.MaintainerName)
-            ? "维护信息待补充"
-            : $"维护：{point.MaintainerName}";
-    }
 
-    public Guid Id { get; }
+        var maintenanceUnit = string.IsNullOrWhiteSpace(point.MaintenanceUnit) ? "维护单位待补充" : point.MaintenanceUnit!;
+        var maintainerName = string.IsNullOrWhiteSpace(point.MaintainerName) ? "维护人待补充" : point.MaintainerName!;
+        MaintenanceLine = $"{maintenanceUnit} / {maintainerName}";
+    }
 
     public string DeviceCode { get; }
 
@@ -41,6 +40,8 @@ public sealed class SiteMapPointViewModel : ObservableObject
     public double MapX { get; }
 
     public double MapY { get; }
+
+    public string CoordinateSourceText { get; }
 
     public string AddressText { get; }
 
