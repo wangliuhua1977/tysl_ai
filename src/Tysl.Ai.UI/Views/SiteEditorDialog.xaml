@@ -19,7 +19,7 @@
             <TextBlock FontSize="24" FontWeight="SemiBold" Text="{Binding Title}" />
             <TextBlock Margin="0,6,0,0"
                        Style="{StaticResource CaptionTextStyle}"
-                       Text="仅维护本地补充信息。设备编码和设备名称只读，地图点选只回填手工坐标。" />
+                       Text="本地补充信息用于坐标治理。设备编码和设备名称只读，手工坐标仅在点击“保存补充信息”后写入本地。" />
         </StackPanel>
 
         <Border Grid.Row="1" Margin="0,18,0,18" Style="{StaticResource PanelCardStyle}">

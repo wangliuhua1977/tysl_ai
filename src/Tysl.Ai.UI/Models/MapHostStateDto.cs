@@ -6,5 +6,7 @@ public sealed record MapHostStateDto
 
     public string? SelectedDeviceCode { get; init; }
 
+    public MapHostCandidateCoordinateDto? CandidateCoordinate { get; init; }
+
     public required bool CoordinatePickActive { get; init; }
 }

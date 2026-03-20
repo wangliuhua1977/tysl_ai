@@ -29,23 +29,28 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private readonly IMapStylePreferenceStore mapStylePreferenceStore;
     private readonly DispatcherTimer refreshTimer;
     private readonly bool isMapHostConfigured;
+    private DemoCoordinate? coordinatePickCandidate;
     private readonly Dictionary<string, DemoCoordinate> renderedPointCoordinates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ISiteLocalProfileService siteLocalProfileService;
     private readonly ISiteMapQueryService siteMapQueryService;
     private SiteEditorViewModel? activeEditor;
+    private int currentMapVisibleCount;
     private int dispatchedCount;
     private string dispatchOverviewDetail = "当前无派单中的点位。";
     private string dispatchOverviewText = "派单待命";
     private int faultCount;
+    private bool hasUnmappedPoints;
     private bool hasVisiblePoints;
     private string inspectionStatusDetail = "当前无纳入静默巡检的点位。";
     private string inspectionStatusText = "巡检待机";
     private bool isCoordinatePickActive;
     private bool isDisposed;
     private bool isFilterPanelExpanded = true;
+    private string mapCoverageDetailText = "“全部”包含全部点位；仅具备可用显示坐标的点位会落图。";
     private string mapEmptyStateText;
-    private string mapHostStateJson = "{\"points\":[],\"coordinatePickActive\":false}";
+    private string mapHostStateJson = "{\"points\":[],\"candidateCoordinate\":null,\"coordinatePickActive\":false}";
     private string mapInteractionHint;
+    private int mappedPointCount;
     private int monitoredCount;
     private int pointCount;
     private string platformStatusDetail = "正在准备平台设备源。";
@@ -57,6 +62,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private string selectedMapStyleKey;
     private SiteMapPointViewModel? selectedPoint;
     private string? selectedPointDeviceCode;
+    private int unmappedPointCount;
 
     public ShellViewModel(
         ISiteMapQueryService siteMapQueryService,
@@ -78,28 +84,30 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         mapEmptyStateText = isMapHostConfigured
             ? "正在等待平台点位。"
             : "地图未配置。请准备 amap-js.json 后重启。";
-        mapInteractionHint = isMapHostConfigured
-            ? "点位默认只显示图标和单行名称，单击联动右侧详情。"
-            : "地图未配置，暂不支持坐标补录。";
+        mapInteractionHint = ResolveDefaultMapInteractionHint();
 
         Filters =
         [
             new DashboardFilterOption("全部", SiteDashboardFilter.All),
             new DashboardFilterOption("异常", SiteDashboardFilter.Fault),
             new DashboardFilterOption("已纳管", SiteDashboardFilter.Monitored),
-            new DashboardFilterOption("处理中", SiteDashboardFilter.Dispatched)
+            new DashboardFilterOption("已处置", SiteDashboardFilter.Disposed),
+            new DashboardFilterOption("未落图", SiteDashboardFilter.Unmapped)
         ];
 
         selectedFilter = Filters[0];
         MapStyleOptions = BuiltInMapStyleOptions;
         VisiblePoints = [];
         VisibleAlerts = [];
+        UnmappedPoints = [];
         ToggleFilterPanelCommand = new RelayCommand(() => IsFilterPanelExpanded = !IsFilterPanelExpanded);
         EditSelectedSiteCommand = new AsyncRelayCommand(OpenEditEditorAsync, () => SelectedDetail is not null);
         ToggleMonitoringCommand = new AsyncRelayCommand(ToggleMonitoringAsync, () => SelectedDetail is not null);
         ConfirmRecoveryCommand = new AsyncRelayCommand(ConfirmRecoveryAsync, () => SelectedDetail?.CanConfirmRecovery == true);
         SelectPointCommand = new RelayCommand<SiteMapPointViewModel>(SelectPoint);
         SelectAlertCommand = new RelayCommand<SiteAlertDigestViewModel>(SelectAlert);
+        SelectUnmappedPointCommand = new RelayCommand<UnmappedPointDigestViewModel>(SelectUnmappedPoint);
+        EditUnmappedPointCommand = new RelayCommand<UnmappedPointDigestViewModel>(EditUnmappedPoint);
 
         refreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -127,6 +135,18 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref monitoredCount, value);
     }
 
+    public int MappedPointCount
+    {
+        get => mappedPointCount;
+        private set => SetProperty(ref mappedPointCount, value);
+    }
+
+    public int UnmappedPointCount
+    {
+        get => unmappedPointCount;
+        private set => SetProperty(ref unmappedPointCount, value);
+    }
+
     public int FaultCount
     {
         get => faultCount;
@@ -139,6 +159,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref dispatchedCount, value);
     }
 
+    public int CurrentMapVisibleCount
+    {
+        get => currentMapVisibleCount;
+        private set => SetProperty(ref currentMapVisibleCount, value);
+    }
+
     public string LastRefreshText { get; private set; } = "--:--:--";
 
     public IReadOnlyList<DashboardFilterOption> Filters { get; }
@@ -148,6 +174,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public ObservableCollection<SiteMapPointViewModel> VisiblePoints { get; }
 
     public ObservableCollection<SiteAlertDigestViewModel> VisibleAlerts { get; }
+
+    public ObservableCollection<UnmappedPointDigestViewModel> UnmappedPoints { get; }
 
     public RelayCommand ToggleFilterPanelCommand { get; }
 
@@ -160,6 +188,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public RelayCommand<SiteMapPointViewModel> SelectPointCommand { get; }
 
     public RelayCommand<SiteAlertDigestViewModel> SelectAlertCommand { get; }
+
+    public RelayCommand<UnmappedPointDigestViewModel> SelectUnmappedPointCommand { get; }
+
+    public RelayCommand<UnmappedPointDigestViewModel> EditUnmappedPointCommand { get; }
 
     public bool IsFilterPanelExpanded
     {
@@ -289,6 +321,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref hasVisiblePoints, value);
     }
 
+    public bool HasUnmappedPoints
+    {
+        get => hasUnmappedPoints;
+        private set => SetProperty(ref hasUnmappedPoints, value);
+    }
+
     public string MapEmptyStateText
     {
         get => mapEmptyStateText;
@@ -318,6 +356,18 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     public string MonitorToggleText => SelectedDetail?.IsMonitored == false ? "纳入巡检" : "暂停巡检";
 
+    public string MapCoverageText => $"当前地图显示 {CurrentMapVisibleCount} / 总点位 {PointCount}";
+
+    public string MapCoverageDetailText
+    {
+        get => mapCoverageDetailText;
+        private set => SetProperty(ref mapCoverageDetailText, value);
+    }
+
+    public string UnmappedSectionTitle => $"未落图治理 {UnmappedPointCount}";
+
+    public string UnmappedSectionDetail => "点击条目联动详情，可直接进入编辑补充信息。";
+
     public void HandleMapClicked(double longitude, double latitude)
     {
         if (!IsCoordinatePickActive || activeEditor is null)
@@ -325,17 +375,19 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _ = WriteDiagnosticAsync(
-            "map-host-interaction-end",
-            $"deviceCode={activeEditor.DeviceCode}, longitude={longitude:F6}, latitude={latitude:F6}");
-
-        activeEditor.ApplyPickedCoordinate(new DemoCoordinate
+        var candidate = new DemoCoordinate
         {
             Longitude = Math.Round(longitude, 6),
             Latitude = Math.Round(latitude, 6)
-        });
+        };
+        _ = WriteDiagnosticAsync(
+            "map-host-candidate-updated",
+            $"deviceCode={activeEditor.DeviceCode}, longitude={candidate.Longitude:F6}, latitude={candidate.Latitude:F6}");
 
-        ClearCoordinatePick();
+        activeEditor.ApplyPickedCoordinate(candidate);
+        coordinatePickCandidate = candidate;
+        MapInteractionHint = BuildCoordinatePickHint(coordinatePickCandidate);
+        RefreshMapHostState();
     }
 
     public void HandleMapPointSelected(string deviceCode)
@@ -345,16 +397,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var point = VisiblePoints.FirstOrDefault(item => item.DeviceCode.Equals(deviceCode, StringComparison.OrdinalIgnoreCase));
-        if (point is not null)
-        {
-            SelectedPoint = point;
-            return;
-        }
-
-        selectedPointDeviceCode = deviceCode;
-        RefreshMapHostState();
-        _ = LoadSelectedSiteDetailAsync(deviceCode);
+        _ = SelectDeviceAsync(deviceCode.Trim());
     }
 
     public void HandleMapPointsRendered(IReadOnlyList<MapHostRenderedPointDto> points)
@@ -419,14 +462,20 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
             PlatformStatusText = snapshot.PlatformStatusText;
             PlatformStatusDetail = snapshot.PlatformStatusDetailText ?? "平台状态正常。";
-            PointCount = snapshot.PointCount;
+            PointCount = snapshot.CoverageSummary.TotalPointCount;
+            MappedPointCount = snapshot.CoverageSummary.MappedPointCount;
+            UnmappedPointCount = snapshot.CoverageSummary.UnmappedPointCount;
             MonitoredCount = snapshot.MonitoredCount;
             FaultCount = snapshot.FaultCount;
             DispatchedCount = snapshot.DispatchedCount;
+            CurrentMapVisibleCount = snapshot.CoverageSummary.CurrentVisiblePointCount;
+            MapCoverageDetailText = BuildMapCoverageDetailText(snapshot.CoverageSummary);
             UpdateOverviewStatus(snapshot);
 
             LastRefreshText = snapshot.LastRefreshedAt.ToLocalTime().ToString("HH:mm:ss");
             OnPropertyChanged(nameof(LastRefreshText));
+            OnPropertyChanged(nameof(MapCoverageText));
+            OnPropertyChanged(nameof(UnmappedSectionTitle));
 
             renderedPointCoordinates.Clear();
             VisiblePoints.Clear();
@@ -441,32 +490,41 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 VisibleAlerts.Add(alert);
             }
 
+            UnmappedPoints.Clear();
+            foreach (var unmappedPoint in snapshot.UnmappedPoints.Select(point => new UnmappedPointDigestViewModel(point)))
+            {
+                UnmappedPoints.Add(unmappedPoint);
+            }
+
             HasVisiblePoints = VisiblePoints.Count > 0;
-            MapEmptyStateText = ResolveMapEmptyStateText(isMapHostConfigured, snapshot.IsPlatformConnected, snapshot.PlatformStatusText);
+            HasUnmappedPoints = UnmappedPoints.Count > 0;
+            MapEmptyStateText = ResolveMapEmptyStateText(isMapHostConfigured, snapshot.IsPlatformConnected, snapshot.PlatformStatusText, snapshot.CoverageSummary);
 
             var targetDeviceCode = preferredSelectionDeviceCode ?? selectedPointDeviceCode;
-            var targetPoint = !string.IsNullOrWhiteSpace(targetDeviceCode)
-                ? VisiblePoints.FirstOrDefault(point => point.DeviceCode.Equals(targetDeviceCode, StringComparison.OrdinalIgnoreCase))
-                : VisiblePoints.FirstOrDefault();
-
-            if (targetPoint is not null)
+            if (!string.IsNullOrWhiteSpace(targetDeviceCode))
             {
-                SelectedPoint = targetPoint;
+                await SelectDeviceAsync(targetDeviceCode, notifyOnError);
+                return;
+            }
+
+            var firstVisiblePoint = VisiblePoints.FirstOrDefault();
+            if (firstVisiblePoint is not null)
+            {
+                SelectedPoint = firstVisiblePoint;
+                return;
+            }
+
+            if (UnmappedPoints.FirstOrDefault() is { } firstUnmappedPoint)
+            {
+                await SelectDeviceAsync(firstUnmappedPoint.DeviceCode, notifyOnError);
                 return;
             }
 
             SelectedPoint = null;
-            RefreshMapHostState();
-
-            if (!string.IsNullOrWhiteSpace(targetDeviceCode))
-            {
-                selectedPointDeviceCode = targetDeviceCode;
-                await LoadSelectedSiteDetailAsync(targetDeviceCode, notifyOnError);
-                return;
-            }
-
+            selectedPointDeviceCode = null;
             selectedDetailSource = null;
             SelectedDetail = null;
+            RefreshMapHostState();
         }
         catch (Exception ex)
         {
@@ -636,16 +694,49 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
-        selectedPointDeviceCode = alert.PointId;
-        var point = VisiblePoints.FirstOrDefault(item => item.DeviceCode.Equals(alert.PointId, StringComparison.OrdinalIgnoreCase));
+        await SelectDeviceAsync(alert.PointId);
+    }
+
+    private async void SelectUnmappedPoint(UnmappedPointDigestViewModel? point)
+    {
+        if (point is null)
+        {
+            return;
+        }
+
+        await SelectDeviceAsync(point.DeviceCode);
+    }
+
+    private async void EditUnmappedPoint(UnmappedPointDigestViewModel? point)
+    {
+        if (point is null)
+        {
+            return;
+        }
+
+        await SelectDeviceAsync(point.DeviceCode, true);
+        await OpenEditEditorAsync();
+    }
+
+    private async Task SelectDeviceAsync(string deviceCode, bool notifyOnError = false)
+    {
+        if (string.IsNullOrWhiteSpace(deviceCode))
+        {
+            return;
+        }
+
+        selectedPointDeviceCode = deviceCode.Trim();
+        var point = VisiblePoints.FirstOrDefault(item => item.DeviceCode.Equals(selectedPointDeviceCode, StringComparison.OrdinalIgnoreCase));
         if (point is not null)
         {
             SelectedPoint = point;
             return;
         }
 
+        SelectedPoint = null;
+        selectedPointDeviceCode = deviceCode.Trim();
         RefreshMapHostState();
-        await LoadSelectedSiteDetailAsync(alert.PointId);
+        await LoadSelectedSiteDetailAsync(selectedPointDeviceCode, notifyOnError);
     }
 
     private async void HandleEditorSaveRequested(object? sender, EventArgs e)
@@ -669,7 +760,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
             await siteLocalProfileService.UpsertAsync(input!);
             editor.RequestClose();
-            await LoadDashboardAsync(input!.DeviceCode, true);
+            await LoadDashboardAsync(input.DeviceCode, true);
 
             _ = WriteDiagnosticAsync(
                 "save-end",
@@ -713,7 +804,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         activeEditor = editor;
         IsCoordinatePickActive = true;
-        MapInteractionHint = "坐标补录中，请在地图上点选位置。";
+        MapInteractionHint = BuildCoordinatePickHint(coordinatePickCandidate);
         _ = WriteDiagnosticAsync(
             "map-host-interaction-start",
             $"deviceCode={editor.DeviceCode}, action=coordinate-pick");
@@ -729,10 +820,15 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 $"deviceCode={activeEditor.DeviceCode}, action=coordinate-pick-cleared");
         }
 
+        var stateChanged = IsCoordinatePickActive;
+        coordinatePickCandidate = null;
         IsCoordinatePickActive = false;
-        MapInteractionHint = isMapHostConfigured
-            ? "点位默认只显示图标和单行名称，单击联动右侧详情。"
-            : "地图未配置，暂不支持坐标补录。";
+        if (!stateChanged)
+        {
+            RefreshMapHostState();
+        }
+
+        MapInteractionHint = ResolveDefaultMapInteractionHint();
     }
 
     private DemoCoordinate? GetRenderedCoordinate(string deviceCode)
@@ -748,6 +844,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         {
             Points = VisiblePoints.Select(point => point.ToMapHostPoint()).ToList(),
             SelectedDeviceCode = SelectedPoint?.DeviceCode,
+            CandidateCoordinate = IsCoordinatePickActive && coordinatePickCandidate is not null
+                ? new MapHostCandidateCoordinateDto
+                {
+                    Longitude = coordinatePickCandidate.Longitude,
+                    Latitude = coordinatePickCandidate.Latitude
+                }
+                : null,
             CoordinatePickActive = IsCoordinatePickActive
         };
 
@@ -778,6 +881,11 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             InspectionStatusText = "巡检待机";
             InspectionStatusDetail = "当前无纳入静默巡检的点位。";
         }
+        else if (snapshot.CoverageSummary.UnmappedPointCount > 0)
+        {
+            InspectionStatusText = "坐标治理中";
+            InspectionStatusDetail = $"共 {snapshot.CoverageSummary.UnmappedPointCount} 个点位未落图，可通过本地补充信息继续治理。";
+        }
         else
         {
             InspectionStatusText = "巡检运行";
@@ -801,10 +909,21 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
     }
 
+    private static string BuildMapCoverageDetailText(MapCoverageSummary coverageSummary)
+    {
+        if (coverageSummary.FilteredPointCount <= 0)
+        {
+            return "“全部”包含全部点位；仅具备可用显示坐标的点位会落图。";
+        }
+
+        return $"“全部”包含全部点位；当前筛选命中 {coverageSummary.FilteredPointCount} 个点位，其中 {coverageSummary.FilteredUnmappedPointCount} 个未落图。";
+    }
+
     private static string ResolveMapEmptyStateText(
         bool isMapHostConfigured,
         bool isPlatformConnected,
-        string platformStatusText)
+        string platformStatusText,
+        MapCoverageSummary coverageSummary)
     {
         if (!isMapHostConfigured)
         {
@@ -816,7 +935,31 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return $"{platformStatusText}。请补充 ACIS 配置后重试。";
         }
 
+        if (coverageSummary.FilteredPointCount <= 0)
+        {
+            return "当前筛选条件下暂无点位。";
+        }
+
+        if (coverageSummary.FilteredUnmappedPointCount > 0)
+        {
+            return $"当前筛选命中 {coverageSummary.FilteredPointCount} 个点位，其中 {coverageSummary.FilteredUnmappedPointCount} 个未落图。请在下方未落图治理区补录坐标。";
+        }
+
         return "当前筛选条件下暂无可展示点位。";
+    }
+
+    private string ResolveDefaultMapInteractionHint()
+    {
+        return isMapHostConfigured
+            ? "点位默认只显示小图标和单行名称，单击联动右侧详情。"
+            : "地图未配置，暂不支持坐标补录。";
+    }
+
+    private static string BuildCoordinatePickHint(DemoCoordinate? coordinate)
+    {
+        return coordinate is null
+            ? "请在地图上连续点击选择位置，确认后再保存。"
+            : $"当前候选手工坐标：{coordinate.Longitude:F6}, {coordinate.Latitude:F6}。确认后点击“保存补充信息”。";
     }
 
     private async Task PersistSelectedMapStyleAsync(string mapStyleKey)

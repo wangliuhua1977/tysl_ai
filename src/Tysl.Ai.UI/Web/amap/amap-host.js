@@ -4,6 +4,7 @@
     const hostState = {
         config: window.__TYSL_AMAP_CONFIG__ || {},
         currentMapStyle: DEFAULT_MAP_STYLE,
+        candidateMarker: null,
         map: null,
         markers: new Map(),
         points: [],
@@ -141,27 +142,19 @@
         const groups = new Map();
 
         for (const point of points || []) {
-            const hasManualCoordinate = typeof point.manualLongitude === "number" && typeof point.manualLatitude === "number";
+            const hasDisplayCoordinate = typeof point.displayLongitude === "number" && typeof point.displayLatitude === "number";
             const hasPlatformCoordinate = typeof point.platformRawLongitude === "number" && typeof point.platformRawLatitude === "number";
 
-            if (hasManualCoordinate && !hasPlatformCoordinate) {
+            if (hasDisplayCoordinate) {
                 direct.push({
                     point: point,
-                    latitude: point.manualLatitude,
-                    longitude: point.manualLongitude
+                    latitude: point.displayLatitude,
+                    longitude: point.displayLongitude
                 });
                 continue;
             }
 
             if (!hasPlatformCoordinate) {
-                if (hasManualCoordinate) {
-                    direct.push({
-                        point: point,
-                        latitude: point.manualLatitude,
-                        longitude: point.manualLongitude
-                    });
-                }
-
                 continue;
             }
 
@@ -210,6 +203,96 @@
         hostState.markers.clear();
     }
 
+    function buildCandidateMarkerContent() {
+        return [
+            "<div class=\"candidate-marker\">",
+            "  <span class=\"candidate-marker__icon\">",
+            "    <span class=\"candidate-marker__pulse\"></span>",
+            "    <span class=\"candidate-marker__pin\"></span>",
+            "  </span>",
+            "  <span class=\"candidate-marker__label\">候选手工坐标</span>",
+            "</div>"
+        ].join("");
+    }
+
+    function clearCandidateMarker() {
+        if (!hostState.candidateMarker || !hostState.map) {
+            hostState.candidateMarker = null;
+            return;
+        }
+
+        hostState.map.remove(hostState.candidateMarker);
+        hostState.candidateMarker = null;
+    }
+
+    function syncCandidateMarker(candidateCoordinate) {
+        if (!hostState.map) {
+            return;
+        }
+
+        const hasCandidate = candidateCoordinate
+            && typeof candidateCoordinate.longitude === "number"
+            && typeof candidateCoordinate.latitude === "number";
+
+        if (!hasCandidate) {
+            clearCandidateMarker();
+            return;
+        }
+
+        const position = new AMap.LngLat(candidateCoordinate.longitude, candidateCoordinate.latitude);
+        if (!hostState.candidateMarker) {
+            hostState.candidateMarker = new AMap.Marker({
+                anchor: "bottom-center",
+                content: buildCandidateMarkerContent(),
+                position: position,
+                zIndex: 260
+            });
+            hostState.map.add(hostState.candidateMarker);
+            return;
+        }
+
+        hostState.candidateMarker.setPosition(position);
+    }
+
+    function createOffsetSequence(index, count) {
+        if (count <= 1) {
+            return { x: 0, y: 0 };
+        }
+
+        const radius = count <= 4 ? 18 : 24;
+        const angle = (Math.PI * 2 * index) / count;
+        return {
+            x: Math.round(Math.cos(angle) * radius),
+            y: Math.round(Math.sin(angle) * radius) - 6
+        };
+    }
+
+    function calculateMarkerOffsets(points) {
+        const groups = new Map();
+        const offsets = new Map();
+
+        points.forEach((item) => {
+            const key = `${item.longitude.toFixed(5)}:${item.latitude.toFixed(5)}`;
+            if (!groups.has(key)) {
+                groups.set(key, []);
+            }
+
+            groups.get(key).push(item);
+        });
+
+        groups.forEach((group) => {
+            if (group.length <= 1) {
+                return;
+            }
+
+            group.forEach((item, index) => {
+                offsets.set(item.point.deviceCode, createOffsetSequence(index, group.length));
+            });
+        });
+
+        return offsets;
+    }
+
     async function renderState(state) {
         if (!hostState.map) {
             return;
@@ -223,8 +306,10 @@
         hostState.points = hostState.renderedState.points || [];
         hostState.selectedDeviceCode = hostState.renderedState.selectedDeviceCode || null;
         updateMapCursor(hostState.renderedState.coordinatePickActive);
+        syncCandidateMarker(hostState.renderedState.candidateCoordinate || null);
 
         const resolvedPoints = await normalizePoints(hostState.points);
+        const markerOffsets = calculateMarkerOffsets(resolvedPoints);
         clearMarkers();
 
         const renderedPoints = [];
@@ -234,10 +319,11 @@
             const point = item.point;
             const position = new AMap.LngLat(item.longitude, item.latitude);
             const selected = point.deviceCode === hostState.selectedDeviceCode;
+            const markerOffset = markerOffsets.get(point.deviceCode) || { x: 0, y: 0 };
             const marker = new AMap.Marker({
                 anchor: "bottom-center",
                 content: buildMarkerContent(point, selected),
-                offset: new AMap.Pixel(0, 0),
+                offset: new AMap.Pixel(markerOffset.x, markerOffset.y),
                 position: position,
                 zIndex: selected ? 160 : 120
             });
@@ -329,6 +415,7 @@
             return;
         }
 
+        clearCandidateMarker();
         clearMarkers();
         hostState.map.destroy();
         hostState.map = null;

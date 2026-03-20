@@ -33,6 +33,7 @@ public sealed class AcisApiKernel : IDisposable
     private static readonly TimeSpan DeviceDetailCacheLifetime = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan DeviceDetailPartialCacheLifetime = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan DeviceDetailFailureCacheLifetime = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan DeviceDetailEndpointCooldownLifetime = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DeviceAlertCacheLifetime = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan DeviceAlertFailureCacheLifetime = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PreviewSuccessCacheLifetime = TimeSpan.FromSeconds(30);
@@ -45,6 +46,7 @@ public sealed class AcisApiKernel : IDisposable
     private readonly ConcurrentDictionary<string, CacheItem<DeviceDetailResult>> _deviceDetailCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CacheItem<DeviceAlertBatchResult>> _deviceAlertCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CacheItem<PreviewResolution>> _previewCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _endpointCooldowns = new(StringComparer.OrdinalIgnoreCase);
     private TokenCacheEntry? _token;
 
     public AcisApiKernel(AcisKernelOptions options, HttpClient? httpClient = null, IAcisKernelLogger? logger = null)
@@ -304,25 +306,29 @@ public sealed class AcisApiKernel : IDisposable
         }
 
         var token = await GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
-        var candidateEndpoints = new[]
-        {
-            Options.Ctyun.Endpoints.GetCusDeviceByDeviceCode,
-            Options.Ctyun.Endpoints.ShowDevice,
-            Options.Ctyun.Endpoints.GetDeviceInfoByDeviceCode
-        };
+        var candidateEndpoints = BuildDeviceDetailEndpoints().ToArray();
 
         var snapshots = new List<DeviceDetailSnapshot>();
-        DeviceDetailSnapshot? best = null;
+        DeviceDetailSnapshot? merged = null;
 
         foreach (var endpoint in candidateEndpoints)
         {
-            if (string.Equals(endpoint, Options.Ctyun.Endpoints.GetDeviceInfoByDeviceCode, StringComparison.OrdinalIgnoreCase)
-                && snapshots.Any(snapshot => snapshot.IsSuccess))
+            if (TryGetEndpointCooldown(endpoint, out var cooldownUntil))
             {
-                _logger.Info(
+                snapshots.Add(new DeviceDetailSnapshot(
+                    endpoint,
+                    false,
+                    30041,
+                    "详情接口冷却中",
+                    null,
+                    null,
+                    null,
+                    null,
+                    string.Empty));
+                _logger.Warn(
                     "PointDetail",
-                    $"Skipping fallback endpoint after prior success: deviceCode={cacheKey}, endpoint={endpoint}, snapshotCount={snapshots.Count}");
-                break;
+                    $"Skipping endpoint during cooldown: deviceCode={cacheKey}, endpoint={endpoint}, cooldownUntil={cooldownUntil:yyyy-MM-dd HH:mm:ss}");
+                continue;
             }
 
             var response = await PostProtectedJsonAsync(
@@ -337,6 +343,11 @@ public sealed class AcisApiKernel : IDisposable
 
             if (!response.IsSuccess)
             {
+                if (ShouldCooldownEndpoint(endpoint, response.ResponseCode))
+                {
+                    PutEndpointCooldown(endpoint, DeviceDetailEndpointCooldownLifetime);
+                }
+
                 snapshots.Add(new DeviceDetailSnapshot(endpoint, false, response.ResponseCode, response.ResponseMessage, null, null, null, null, response.RawResponse));
                 continue;
             }
@@ -357,21 +368,9 @@ public sealed class AcisApiKernel : IDisposable
 
             snapshots.Add(snapshot);
 
-            if (best is null)
-            {
-                best = snapshot;
-            }
-            else
-            {
-                var bestScore = ScoreSnapshot(best);
-                var currentScore = ScoreSnapshot(snapshot);
-                if (currentScore > bestScore)
-                {
-                    best = snapshot;
-                }
-            }
+            merged = merged is null ? snapshot : MergeSnapshot(merged, snapshot);
 
-            if (best.Longitude.HasValue && best.Latitude.HasValue && best.IsOnline.HasValue)
+            if (HasUsableDetail(merged))
             {
                 break;
             }
@@ -379,14 +378,14 @@ public sealed class AcisApiKernel : IDisposable
 
         var final = new DeviceDetailResult
         {
-            DeviceCode = best?.DeviceCode ?? cacheKey,
-            DeviceName = best?.DeviceName,
-            Longitude = best?.Longitude,
-            Latitude = best?.Latitude,
-            IsOnline = best?.IsOnline,
-            LastSyncTime = best?.LastSyncTime,
+            DeviceCode = merged?.DeviceCode ?? cacheKey,
+            DeviceName = merged?.DeviceName,
+            Longitude = merged?.Longitude,
+            Latitude = merged?.Latitude,
+            IsOnline = merged?.IsOnline,
+            LastSyncTime = merged?.LastSyncTime,
             Snapshots = snapshots,
-            RawResponse = best?.RawResponse ?? snapshots.LastOrDefault()?.RawResponse ?? string.Empty
+            RawResponse = merged?.RawResponse ?? snapshots.LastOrDefault()?.RawResponse ?? string.Empty
         };
 
         var ttl = final.HasCoordinate ? DeviceDetailCacheLifetime
@@ -873,14 +872,150 @@ public sealed class AcisApiKernel : IDisposable
                && token.AccessTokenExpiresAtUtc > now.AddSeconds(Math.Max(0, reuseBeforeExpirySeconds));
     }
 
-    private static int ScoreSnapshot(DeviceDetailSnapshot snapshot)
+    private IEnumerable<string> BuildDeviceDetailEndpoints()
     {
-        var score = 0;
-        if (snapshot.IsSuccess) score += 10;
-        if (snapshot.Longitude.HasValue && snapshot.Latitude.HasValue) score += 5;
-        if (snapshot.IsOnline.HasValue) score += 3;
-        if (!string.IsNullOrWhiteSpace(snapshot.LastSyncTime)) score += 1;
-        return score;
+        var deduplicated = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var endpoints = new[]
+        {
+            Options.Ctyun.Endpoints.GetCusDeviceByDeviceCode,
+            Options.Ctyun.Endpoints.ShowDevice,
+            Options.Ctyun.Endpoints.GetDeviceInfoByDeviceCode
+        };
+
+        foreach (var endpoint in endpoints)
+        {
+            var normalized = endpoint?.Trim();
+            if (string.IsNullOrWhiteSpace(normalized) || !deduplicated.Add(normalized))
+            {
+                continue;
+            }
+
+            yield return normalized;
+        }
+    }
+
+    private static DeviceDetailSnapshot MergeSnapshot(DeviceDetailSnapshot current, DeviceDetailSnapshot candidate)
+    {
+        var currentHasCoordinate = current.Longitude.HasValue && current.Latitude.HasValue;
+        var candidateHasCoordinate = candidate.Longitude.HasValue && candidate.Latitude.HasValue;
+
+        return new DeviceDetailSnapshot(
+            candidate.Endpoint,
+            current.IsSuccess || candidate.IsSuccess,
+            candidate.IsSuccess ? candidate.ResponseCode : current.ResponseCode,
+            candidate.IsSuccess ? candidate.ResponseMessage : current.ResponseMessage,
+            PreferNonEmpty(current.DeviceCode, candidate.DeviceCode),
+            PreferDetailName(current.DeviceName, candidate.DeviceName),
+            SelectCoordinate(current.Longitude, current.Latitude, candidate.Longitude, candidate.Latitude, isLongitude: true),
+            SelectCoordinate(current.Longitude, current.Latitude, candidate.Longitude, candidate.Latitude, isLongitude: false),
+            SelectRawResponse(current.RawResponse, candidate.RawResponse, currentHasCoordinate, candidateHasCoordinate),
+            current.IsOnline ?? candidate.IsOnline,
+            PreferNonEmpty(current.LastSyncTime, candidate.LastSyncTime));
+    }
+
+    private static bool HasUsableDetail(DeviceDetailSnapshot snapshot)
+    {
+        return !string.IsNullOrWhiteSpace(snapshot.DeviceName)
+            && snapshot.Longitude.HasValue
+            && snapshot.Latitude.HasValue;
+    }
+
+    private static decimal? SelectCoordinate(
+        decimal? currentLongitude,
+        decimal? currentLatitude,
+        decimal? candidateLongitude,
+        decimal? candidateLatitude,
+        bool isLongitude)
+    {
+        var currentHasPair = currentLongitude.HasValue && currentLatitude.HasValue;
+        var candidateHasPair = candidateLongitude.HasValue && candidateLatitude.HasValue;
+
+        if (candidateHasPair)
+        {
+            return isLongitude ? candidateLongitude : candidateLatitude;
+        }
+
+        if (currentHasPair)
+        {
+            return isLongitude ? currentLongitude : currentLatitude;
+        }
+
+        return isLongitude
+            ? candidateLongitude ?? currentLongitude
+            : candidateLatitude ?? currentLatitude;
+    }
+
+    private static string PreferDetailName(string? current, string? candidate)
+    {
+        var normalizedCurrent = NormalizeText(current);
+        var normalizedCandidate = NormalizeText(candidate);
+
+        if (string.IsNullOrWhiteSpace(normalizedCurrent))
+        {
+            return normalizedCandidate ?? string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedCandidate))
+        {
+            return normalizedCurrent;
+        }
+
+        return normalizedCandidate.Length > normalizedCurrent.Length
+            ? normalizedCandidate
+            : normalizedCurrent;
+    }
+
+    private static string PreferNonEmpty(string? current, string? candidate)
+    {
+        return NormalizeText(current) ?? NormalizeText(candidate) ?? string.Empty;
+    }
+
+    private static string SelectRawResponse(
+        string current,
+        string candidate,
+        bool currentHasCoordinate,
+        bool candidateHasCoordinate)
+    {
+        if (candidateHasCoordinate && !currentHasCoordinate)
+        {
+            return candidate;
+        }
+
+        return string.IsNullOrWhiteSpace(current) ? candidate : current;
+    }
+
+    private static string? NormalizeText(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private bool TryGetEndpointCooldown(string endpoint, out DateTimeOffset cooldownUntil)
+    {
+        cooldownUntil = default;
+        if (!_endpointCooldowns.TryGetValue(endpoint, out var expiresAt))
+        {
+            return false;
+        }
+
+        if (expiresAt <= DateTimeOffset.UtcNow)
+        {
+            _endpointCooldowns.TryRemove(endpoint, out _);
+            return false;
+        }
+
+        cooldownUntil = expiresAt;
+        return true;
+    }
+
+    private void PutEndpointCooldown(string endpoint, TimeSpan lifetime)
+    {
+        _endpointCooldowns[endpoint] = DateTimeOffset.UtcNow.Add(lifetime);
+    }
+
+    private static bool ShouldCooldownEndpoint(string endpoint, int responseCode)
+    {
+        return responseCode == 30041
+            && endpoint.Contains("getDeviceInfoByDeviceCode", StringComparison.OrdinalIgnoreCase);
     }
 
     private static PreviewResolution ChoosePreferred(PreviewResolution? current, PreviewResolution candidate)

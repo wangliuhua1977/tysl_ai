@@ -45,7 +45,7 @@ public sealed class SiteEditorViewModel : ObservableObject
         this.maintenanceUnit = maintenanceUnit;
         this.maintainerName = maintainerName;
         this.maintainerPhone = maintainerPhone;
-        coordinatePickSummary = "仅维护本地补充信息，地图点选只回填手工坐标。";
+        coordinatePickSummary = "可补录手工坐标；保存后，未落图点位会重新参与落图。";
 
         SaveCommand = new RelayCommand(() => SaveRequested?.Invoke(this, EventArgs.Empty));
         CancelCommand = new RelayCommand(() => CancelRequested?.Invoke(this, EventArgs.Empty));
@@ -66,7 +66,7 @@ public sealed class SiteEditorViewModel : ObservableObject
 
     public bool HasLocalProfile { get; }
 
-    public string Title => HasLocalProfile ? "编辑本地补充信息" : "补录本地补充信息";
+    public string Title => HasLocalProfile ? "编辑补充信息 / 补坐标" : "补录补充信息 / 补坐标";
 
     public RelayCommand SaveCommand { get; }
 
@@ -160,14 +160,14 @@ public sealed class SiteEditorViewModel : ObservableObject
 
     public void MarkCoordinatePickPending()
     {
-        CoordinatePickSummary = "坐标补录中，请在主界面地图上点选位置。";
+        CoordinatePickSummary = "请在地图上连续点击选择位置，确认后再保存。";
     }
 
     public void ApplyPickedCoordinate(DemoCoordinate coordinate)
     {
         LongitudeText = coordinate.Longitude.ToString("F6", CultureInfo.InvariantCulture);
         LatitudeText = coordinate.Latitude.ToString("F6", CultureInfo.InvariantCulture);
-        CoordinatePickSummary = $"已回填手工坐标：{LongitudeText}, {LatitudeText}";
+        CoordinatePickSummary = $"当前候选手工坐标：{LongitudeText}, {LatitudeText}。确认后点击“保存补充信息”。";
     }
 
     public bool TryBuildInput(out SiteLocalProfileInput? input, out string? errorMessage)

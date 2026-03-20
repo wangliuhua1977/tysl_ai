@@ -1,4 +1,5 @@
 using Tysl.Ai.Core.Enums;
+using Tysl.Ai.Core.Map;
 using Tysl.Ai.Core.Models;
 
 namespace Tysl.Ai.UI.ViewModels;
@@ -24,8 +25,11 @@ public sealed class SiteDetailViewModel
             DemoOnlineState.Offline => "离线",
             _ => "未知"
         };
+        CoordinateDisplayStatusText = detail.CoordinateDisplayStatusText;
         CoordinateSourceText = detail.CoordinateSourceText;
         CoordinateStatusText = BuildCoordinateStatusText(detail, displayCoordinateOverride);
+        UnmappedReasonText = detail.UnmappedReasonText;
+        CoordinateGovernanceHintText = detail.CoordinateGovernanceHintText;
         PlatformStatusSummary = detail.PlatformStatusSummary;
         RuntimeSummaryText = string.IsNullOrWhiteSpace(detail.RuntimeSummary) ? "尚未产生运行态摘要。" : detail.RuntimeSummary!;
         LastInspectionAtText = detail.LastInspectionAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未巡检";
@@ -53,10 +57,14 @@ public sealed class SiteDetailViewModel
         var displayCoordinate = ResolveCurrentDisplayCoordinate(detail, displayCoordinateOverride);
         LongitudeText = displayCoordinate?.Longitude.ToString("F6") ?? ResolveDisplayCoordinateFallback(detail);
         LatitudeText = displayCoordinate?.Latitude.ToString("F6") ?? ResolveDisplayCoordinateFallback(detail);
+        CurrentDisplayCoordinateText = displayCoordinate is null
+            ? ResolveDisplayCoordinateFallback(detail)
+            : $"{displayCoordinate.Longitude:F6}, {displayCoordinate.Latitude:F6}";
 
         PlatformCoordinateText = detail.PlatformRawLongitude.HasValue && detail.PlatformRawLatitude.HasValue
             ? $"{detail.PlatformRawLongitude.Value:F6}, {detail.PlatformRawLatitude.Value:F6}"
             : "平台未返回";
+        PlatformRawCoordinateTypeText = CoordinateTypeCatalog.GetDisplayLabel(detail.PlatformRawCoordinateType);
         ManualCoordinateText = detail.ManualLongitude.HasValue && detail.ManualLatitude.HasValue
             ? $"{detail.ManualLongitude.Value:F6}, {detail.ManualLatitude.Value:F6}"
             : "尚未补录";
@@ -87,9 +95,15 @@ public sealed class SiteDetailViewModel
 
     public string OnlineStateText { get; }
 
+    public string CoordinateDisplayStatusText { get; }
+
     public string CoordinateSourceText { get; }
 
     public string CoordinateStatusText { get; }
+
+    public string UnmappedReasonText { get; }
+
+    public string CoordinateGovernanceHintText { get; }
 
     public string PlatformStatusSummary { get; }
 
@@ -137,7 +151,11 @@ public sealed class SiteDetailViewModel
 
     public string LatitudeText { get; }
 
+    public string CurrentDisplayCoordinateText { get; }
+
     public string PlatformCoordinateText { get; }
+
+    public string PlatformRawCoordinateTypeText { get; }
 
     public string ManualCoordinateText { get; }
 
@@ -258,16 +276,24 @@ public sealed class SiteDetailViewModel
 
     private static string BuildCoordinateStatusText(SiteMergedView detail, DemoCoordinate? displayCoordinateOverride)
     {
-        return detail.CoordinateSource switch
+        if (!detail.HasMapPoint)
         {
-            CoordinateSource.PlatformRaw when displayCoordinateOverride is not null
-                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），已由地图宿主转换显示",
-            CoordinateSource.PlatformRaw when RequiresFrontendConversion(detail.PlatformRawCoordinateType)
-                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），等待地图宿主转换",
-            CoordinateSource.PlatformRaw
-                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），当前按 GCJ-02 直接显示",
-            CoordinateSource.ManualOverride => "当前使用本地手工坐标（GCJ-02）",
-            _ => "当前暂无可显示坐标"
+            return $"未落图：{detail.UnmappedReasonText}";
+        }
+
+        var detailSuffix = detail.IsPlatformCoordinateEnrichedFromDetail
+            ? "，坐标已由平台详情补全"
+            : string.Empty;
+
+        return detail.CoordinateDisplayStatus switch
+        {
+            CoordinateDisplayStatus.RequiresMapHostConversion when displayCoordinateOverride is not null
+                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），已由地图宿主转换后落图{detailSuffix}",
+            CoordinateDisplayStatus.RequiresMapHostConversion
+                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），等待地图宿主转换后落图{detailSuffix}",
+            _ when detail.CoordinateSource == CoordinateSource.ManualOverride
+                => "当前使用本地手工坐标（GCJ-02）落图",
+            _ => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），当前按 GCJ-02 直接落图{detailSuffix}"
         };
     }
 
@@ -280,62 +306,36 @@ public sealed class SiteDetailViewModel
             return displayCoordinateOverride;
         }
 
-        return detail.CoordinateSource switch
+        if (detail.DisplayLongitude.HasValue && detail.DisplayLatitude.HasValue)
         {
-            CoordinateSource.ManualOverride when detail.ManualLongitude.HasValue && detail.ManualLatitude.HasValue
-                => new DemoCoordinate
-                {
-                    Longitude = detail.ManualLongitude.Value,
-                    Latitude = detail.ManualLatitude.Value
-                },
-            CoordinateSource.PlatformRaw when !RequiresFrontendConversion(detail.PlatformRawCoordinateType)
-                                               && detail.PlatformRawLongitude.HasValue
-                                               && detail.PlatformRawLatitude.HasValue
-                => new DemoCoordinate
-                {
-                    Longitude = detail.PlatformRawLongitude.Value,
-                    Latitude = detail.PlatformRawLatitude.Value
-                },
-            _ => null
-        };
+            return new DemoCoordinate
+            {
+                Longitude = detail.DisplayLongitude.Value,
+                Latitude = detail.DisplayLatitude.Value
+            };
+        }
+
+        return null;
     }
 
     private static string ResolveDisplayCoordinateFallback(SiteMergedView detail)
     {
-        if (detail.CoordinateSource == CoordinateSource.PlatformRaw
-            && RequiresFrontendConversion(detail.PlatformRawCoordinateType))
+        if (detail.CoordinateDisplayStatus == CoordinateDisplayStatus.RequiresMapHostConversion)
         {
             return "等待地图转换";
         }
 
-        return "暂无";
+        return detail.HasMapPoint ? "待同步" : "暂无";
     }
 
     private static bool RequiresFrontendConversion(string coordinateType)
     {
-        return coordinateType.ToLowerInvariant() switch
-        {
-            "bd09" => true,
-            "baidu" => true,
-            "wgs84" => true,
-            "gps" => true,
-            "mapbar" => true,
-            _ => false
-        };
+        return CoordinateTypeCatalog.RequiresMapHostConversion(coordinateType);
     }
 
     private static string ResolveCoordinateTypeLabel(string coordinateType)
     {
-        return coordinateType.ToLowerInvariant() switch
-        {
-            "bd09" => "bd09",
-            "baidu" => "bd09",
-            "gcj02" => "gcj02",
-            "wgs84" => "wgs84",
-            "gps" => "wgs84/gps",
-            "mapbar" => "mapbar",
-            _ => "未知"
-        };
+        return CoordinateTypeCatalog.GetDisplayLabel(coordinateType);
     }
 
     private static string ResolveInspectionRunStateText(InspectionRunState state)

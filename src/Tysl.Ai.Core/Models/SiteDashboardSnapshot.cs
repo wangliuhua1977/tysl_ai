@@ -16,9 +16,13 @@ public sealed record SiteDashboardSnapshot
 
     public required int DispatchedCount { get; init; }
 
+    public required MapCoverageSummary CoverageSummary { get; init; }
+
     public required DateTimeOffset LastRefreshedAt { get; init; }
 
     public required IReadOnlyList<SiteMapPoint> VisiblePoints { get; init; }
 
     public required IReadOnlyList<SiteAlertDigest> VisibleAlerts { get; init; }
+
+    public required IReadOnlyList<UnmappedPointDigest> UnmappedPoints { get; init; }
 }

@@ -14,6 +14,8 @@ public sealed record PlatformSiteSnapshot
 
     public required string RawCoordinateType { get; init; }
 
+    public required bool IsCoordinateEnrichedFromDetail { get; init; }
+
     public required DemoOnlineState DemoOnlineState { get; init; }
 
     public required PointDemoStatus DemoStatus { get; init; }

@@ -15,6 +15,7 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
             RawLongitude = 120.5958,
             RawLatitude = 30.0125,
             RawCoordinateType = "gcj02",
+            IsCoordinateEnrichedFromDetail = false,
             DemoOnlineState = DemoOnlineState.Online,
             DemoStatus = PointDemoStatus.Fault,
             DemoDispatchStatus = DispatchDemoStatus.None
@@ -26,6 +27,7 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
             RawLongitude = 120.6462,
             RawLatitude = 30.0442,
             RawCoordinateType = "gcj02",
+            IsCoordinateEnrichedFromDetail = false,
             DemoOnlineState = DemoOnlineState.Online,
             DemoStatus = PointDemoStatus.Warning,
             DemoDispatchStatus = DispatchDemoStatus.Dispatched
@@ -37,6 +39,7 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
             RawLongitude = 120.6211,
             RawLatitude = 29.9852,
             RawCoordinateType = "gcj02",
+            IsCoordinateEnrichedFromDetail = false,
             DemoOnlineState = DemoOnlineState.Online,
             DemoStatus = PointDemoStatus.Warning,
             DemoDispatchStatus = DispatchDemoStatus.Cooling
@@ -48,6 +51,7 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
             RawLongitude = 120.5739,
             RawLatitude = 30.0288,
             RawCoordinateType = "gcj02",
+            IsCoordinateEnrichedFromDetail = false,
             DemoOnlineState = DemoOnlineState.Online,
             DemoStatus = PointDemoStatus.Normal,
             DemoDispatchStatus = DispatchDemoStatus.None
@@ -59,6 +63,7 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
             RawLongitude = 120.5534,
             RawLatitude = 29.9981,
             RawCoordinateType = "gcj02",
+            IsCoordinateEnrichedFromDetail = false,
             DemoOnlineState = DemoOnlineState.Offline,
             DemoStatus = PointDemoStatus.Normal,
             DemoDispatchStatus = DispatchDemoStatus.None
@@ -70,6 +75,7 @@ public sealed class StubPlatformSiteProvider : IPlatformSiteProvider
             RawLongitude = null,
             RawLatitude = null,
             RawCoordinateType = "unknown",
+            IsCoordinateEnrichedFromDetail = false,
             DemoOnlineState = DemoOnlineState.Online,
             DemoStatus = PointDemoStatus.Idle,
             DemoDispatchStatus = DispatchDemoStatus.None
