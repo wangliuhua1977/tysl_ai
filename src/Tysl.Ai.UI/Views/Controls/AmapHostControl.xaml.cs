@@ -7,7 +7,7 @@ using Tysl.Ai.UI.Models;
 
 namespace Tysl.Ai.UI.Views.Controls;
 
-public partial class AmapHostControl : UserControl
+public partial class AmapHostControl : UserControl, IDisposable
 {
     private const string HostName = "amap.tysl.local";
     private const string HostUrl = $"https://{HostName}/index.html";
@@ -24,11 +24,20 @@ public partial class AmapHostControl : UserControl
             typeof(AmapHostControl),
             new PropertyMetadata(null, HandleStateJsonChanged));
 
+    public static readonly DependencyProperty SelectedMapStyleKeyProperty =
+        DependencyProperty.Register(
+            nameof(SelectedMapStyleKey),
+            typeof(string),
+            typeof(AmapHostControl),
+            new PropertyMetadata(null, HandleSelectedMapStyleKeyChanged));
+
     private bool browserReady;
     private bool hasShownRuntimeFailure;
+    private bool isApplyingMapStyle;
     private bool isApplyingState;
     private bool isDisposed;
     private bool isInitializing;
+    private string? pendingMapStyleKey;
     private string? pendingStateJson;
     private AmapHostConfiguration configuration = new()
     {
@@ -62,6 +71,7 @@ public partial class AmapHostControl : UserControl
                 Center = [120.585316, 30.028105]
             };
 
+            pendingMapStyleKey = SelectedMapStyleKey ?? configuration.MapStyle;
             _ = EnsureInitializedAsync();
         }
     }
@@ -70,6 +80,12 @@ public partial class AmapHostControl : UserControl
     {
         get => (string?)GetValue(StateJsonProperty);
         set => SetValue(StateJsonProperty, value);
+    }
+
+    public string? SelectedMapStyleKey
+    {
+        get => (string?)GetValue(SelectedMapStyleKeyProperty);
+        set => SetValue(SelectedMapStyleKeyProperty, value);
     }
 
     private static void HandleStateJsonChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -83,6 +99,17 @@ public partial class AmapHostControl : UserControl
         _ = control.ApplyPendingStateAsync();
     }
 
+    private static void HandleSelectedMapStyleKeyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not AmapHostControl control)
+        {
+            return;
+        }
+
+        control.pendingMapStyleKey = e.NewValue as string;
+        _ = control.ApplyPendingMapStyleAsync();
+    }
+
     private async void HandleLoaded(object sender, RoutedEventArgs e)
     {
         await EnsureInitializedAsync();
@@ -90,13 +117,7 @@ public partial class AmapHostControl : UserControl
 
     private void HandleUnloaded(object sender, RoutedEventArgs e)
     {
-        isDisposed = true;
-
-        if (Browser.CoreWebView2 is not null)
-        {
-            Browser.CoreWebView2.WebMessageReceived -= HandleWebMessageReceived;
-            Browser.CoreWebView2.NavigationCompleted -= HandleNavigationCompleted;
-        }
+        Dispose();
     }
 
     private async Task EnsureInitializedAsync()
@@ -147,6 +168,7 @@ public partial class AmapHostControl : UserControl
                 CoreWebView2HostResourceAccessKind.Allow);
 
             await Browser.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(BuildBootstrapScript(configuration));
+            pendingMapStyleKey = SelectedMapStyleKey ?? configuration.MapStyle;
 
             Browser.CoreWebView2.WebMessageReceived += HandleWebMessageReceived;
             Browser.CoreWebView2.NavigationCompleted += HandleNavigationCompleted;
@@ -191,6 +213,35 @@ public partial class AmapHostControl : UserControl
         }
     }
 
+    private async Task ApplyPendingMapStyleAsync()
+    {
+        if (isDisposed || !browserReady || Browser.CoreWebView2 is null || isApplyingMapStyle)
+        {
+            return;
+        }
+
+        isApplyingMapStyle = true;
+        try
+        {
+            while (!string.IsNullOrWhiteSpace(pendingMapStyleKey))
+            {
+                var mapStyleKey = pendingMapStyleKey;
+                pendingMapStyleKey = null;
+
+                var styleLiteral = JsonSerializer.Serialize(mapStyleKey);
+                await Browser.ExecuteScriptAsync($"window.TyslAmapHost?.applyMapStyle({styleLiteral});");
+            }
+        }
+        catch
+        {
+            ShowFailureState();
+        }
+        finally
+        {
+            isApplyingMapStyle = false;
+        }
+    }
+
     private void HandleNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
     {
         if (!e.IsSuccess)
@@ -219,6 +270,7 @@ public partial class AmapHostControl : UserControl
                     browserReady = true;
                     Browser.Visibility = Visibility.Visible;
                     ShowOverlay(null);
+                    _ = ApplyPendingMapStyleAsync();
                     _ = ApplyPendingStateAsync();
                     break;
                 case "marker-click":
@@ -339,6 +391,46 @@ public partial class AmapHostControl : UserControl
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path => Path.GetFullPath(path!))
             .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public void Dispose()
+    {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        isDisposed = true;
+        browserReady = false;
+        Loaded -= HandleLoaded;
+        Unloaded -= HandleUnloaded;
+
+        if (Browser.CoreWebView2 is not null)
+        {
+            Browser.CoreWebView2.WebMessageReceived -= HandleWebMessageReceived;
+            Browser.CoreWebView2.NavigationCompleted -= HandleNavigationCompleted;
+
+            try
+            {
+                Browser.CoreWebView2.Stop();
+                Browser.CoreWebView2.ClearVirtualHostNameToFolderMapping(HostName);
+            }
+            catch
+            {
+                // Best effort shutdown only.
+            }
+        }
+
+        try
+        {
+            Browser.Source = null;
+        }
+        catch
+        {
+            // Best effort shutdown only.
+        }
+
+        GC.SuppressFinalize(this);
     }
 }
 

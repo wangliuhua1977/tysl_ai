@@ -208,7 +208,7 @@ public sealed class SilentInspectionService : ISilentInspectionService
                 LastSnapshotPath = previousState?.LastSnapshotPath,
                 LastSnapshotAt = previousState?.LastSnapshotAt,
                 LastFaultCode = RuntimeFaultCode.InspectionExecutionFailed,
-                LastFaultSummary = "Inspection execution failed. Review local diagnostics.",
+                LastFaultSummary = "巡检失败。",
                 ConsecutiveFailureCount = (previousState?.ConsecutiveFailureCount ?? 0) + 1,
                 LastInspectionRunState = InspectionRunState.Failed,
                 UpdatedAt = inspectedAt
@@ -291,41 +291,41 @@ public sealed class SilentInspectionService : ISilentInspectionService
         RuntimeFaultCode faultCode,
         bool snapshotWritten)
     {
-        var segments = new List<string>
+        if (faultCode == RuntimeFaultCode.Offline || onlineState == DemoOnlineState.Offline)
         {
-            onlineState switch
-            {
-                DemoOnlineState.Online => "Online",
-                DemoOnlineState.Offline => "Offline",
-                _ => "Online state unknown"
-            }
-        };
-
-        segments.Add(previewResolveState switch
-        {
-            PreviewResolveState.Resolved => "preview resolved",
-            PreviewResolveState.Failed => "preview resolve failed",
-            PreviewResolveState.Skipped => "preview skipped",
-            _ => "preview not ready"
-        });
-
-        segments.Add(snapshotWritten ? "snapshot trace updated" : "snapshot trace unchanged");
-
-        if (faultCode == RuntimeFaultCode.None)
-        {
-            segments.Add("runtime healthy");
+            return "设备离线。";
         }
 
-        return string.Join("; ", segments);
+        if (faultCode == RuntimeFaultCode.InspectionExecutionFailed)
+        {
+            return "巡检失败。";
+        }
+
+        if (previewResolveState == PreviewResolveState.Failed)
+        {
+            return "预览解析失败。";
+        }
+
+        if (faultCode == RuntimeFaultCode.SnapshotFailed)
+        {
+            return "截图留痕失败。";
+        }
+
+        if (previewResolveState == PreviewResolveState.Skipped)
+        {
+            return snapshotWritten ? "巡检完成，截图已更新。" : "巡检完成。";
+        }
+
+        return snapshotWritten ? "巡检正常，截图已更新。" : "巡检正常。";
     }
 
     private static string BuildProductState(DemoOnlineState onlineState)
     {
         return onlineState switch
         {
-            DemoOnlineState.Online => "Online",
-            DemoOnlineState.Offline => "Offline",
-            _ => "Unknown"
+            DemoOnlineState.Online => "在线",
+            DemoOnlineState.Offline => "离线",
+            _ => "未知"
         };
     }
 

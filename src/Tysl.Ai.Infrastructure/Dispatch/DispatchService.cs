@@ -366,7 +366,7 @@ public sealed class DispatchService : IDispatchService
             nameof(RuntimeFaultCode.Offline) => "设备离线",
             nameof(RuntimeFaultCode.PreviewResolveFailed) => "预览解析失败",
             nameof(RuntimeFaultCode.SnapshotFailed) => "截图留痕失败",
-            nameof(RuntimeFaultCode.InspectionExecutionFailed) => "巡检执行失败",
+            nameof(RuntimeFaultCode.InspectionExecutionFailed) => "巡检失败",
             _ => "运行态异常"
         };
     }

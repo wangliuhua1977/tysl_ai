@@ -26,6 +26,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
 
         var databasePath = GetDatabasePath();
         var connectionFactory = new SqliteConnectionFactory(databasePath);
@@ -85,7 +86,9 @@ public partial class App : Application
             siteLocalProfileService,
             dispatchService,
             diagnosticService,
-            amapLoadResult.IsReady);
+            amapOptionsProvider,
+            amapLoadResult.IsReady,
+            amapLoadResult.Options?.MapStyle);
         var shellWindow = new ShellWindow(
             BuildMapHostConfiguration(amapLoadResult),
             diagnosticService)
@@ -168,7 +171,7 @@ public partial class App : Application
             IsConfigured = loadResult.IsReady,
             Key = options?.Key,
             SecurityJsCode = options?.SecurityJsCode,
-            MapStyle = string.IsNullOrWhiteSpace(options?.MapStyle) ? "amap://styles/darkblue" : options.MapStyle,
+            MapStyle = string.IsNullOrWhiteSpace(options?.MapStyle) ? "default" : options.MapStyle,
             Zoom = options?.Zoom is > 0 and <= 20 ? options.Zoom : 11,
             Center = options?.Center is { Length: 2 }
                 ? options.Center

@@ -11,6 +11,7 @@ public sealed class SiteMapPointViewModel : ObservableObject
     public SiteMapPointViewModel(SiteMapPoint point)
     {
         DeviceCode = point.DeviceCode;
+        Alias = point.Alias;
         DeviceName = point.DeviceName;
         DisplayName = point.DisplayName;
         VisualState = point.VisualState;
@@ -28,9 +29,10 @@ public sealed class SiteMapPointViewModel : ObservableObject
         DispatchStateText = ResolveDispatchStateText(point);
         StatusText = ResolveStatusText(point);
         RuntimeSummaryText = string.IsNullOrWhiteSpace(point.RuntimeSummaryText)
-            ? BuildCoordinateSummary(point)
+            ? BuildFallbackSummary(point)
             : point.RuntimeSummaryText!;
         SummaryText = RuntimeSummaryText;
+        StatusBadges = BuildStatusBadges(StatusText, DispatchStateText);
         LastInspectionAtText = point.LastInspectionAt?.ToLocalTime().ToString("HH:mm:ss") ?? "--:--:--";
         LastSnapshotPath = point.LastSnapshotPath;
         HasSnapshot = !string.IsNullOrWhiteSpace(point.LastSnapshotPath);
@@ -41,6 +43,8 @@ public sealed class SiteMapPointViewModel : ObservableObject
     }
 
     public string DeviceCode { get; }
+
+    public string? Alias { get; }
 
     public string DeviceName { get; }
 
@@ -70,6 +74,8 @@ public sealed class SiteMapPointViewModel : ObservableObject
 
     public string MonitoringText { get; }
 
+    public IReadOnlyList<string> StatusBadges { get; }
+
     public string SummaryText { get; }
 
     public string RuntimeSummaryText { get; }
@@ -97,12 +103,14 @@ public sealed class SiteMapPointViewModel : ObservableObject
         return new MapHostPointDto
         {
             DeviceCode = DeviceCode,
+            Alias = Alias,
             DisplayName = DisplayName,
             DeviceName = DeviceName,
             StatusText = StatusText,
             VisualState = VisualState.ToString().ToLowerInvariant(),
             OnlineStateText = OnlineStateText,
             MonitoringText = MonitoringText,
+            StatusBadges = StatusBadges,
             SummaryText = SummaryText,
             DispatchStateKey = DispatchStateKey,
             DispatchStateText = DispatchStateText,
@@ -123,7 +131,7 @@ public sealed class SiteMapPointViewModel : ObservableObject
 
         if (point.RecoveryStatus == RecoveryStatus.PendingConfirmation)
         {
-            return "待确认恢复";
+            return "待恢复确认";
         }
 
         if (point.RecoveryStatus is RecoveryStatus.Recovered or RecoveryStatus.NotificationFailed)
@@ -141,11 +149,11 @@ public sealed class SiteMapPointViewModel : ObservableObject
             DispatchStatus.PendingDispatch => "待派单",
             DispatchStatus.Dispatched => "已派单",
             DispatchStatus.SendFailed => "发送失败",
-            DispatchStatus.WebhookNotConfigured => "未配置 webhook",
+            DispatchStatus.WebhookNotConfigured => "待发送",
             DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.Offline => "设备离线",
             DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.PreviewResolveFailed => "预览解析失败",
             DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.SnapshotFailed => "截图留痕失败",
-            DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.InspectionExecutionFailed => "巡检执行失败",
+            DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.InspectionExecutionFailed => "巡检失败",
             _ => point.DemoOnlineState == DemoOnlineState.Offline ? "设备离线" : "正常"
         };
     }
@@ -154,7 +162,7 @@ public sealed class SiteMapPointViewModel : ObservableObject
     {
         if (point.RecoveryStatus == RecoveryStatus.PendingConfirmation)
         {
-            return "待确认恢复";
+            return "待恢复确认";
         }
 
         if (point.RecoveryStatus is RecoveryStatus.Recovered or RecoveryStatus.NotificationFailed)
@@ -172,23 +180,73 @@ public sealed class SiteMapPointViewModel : ObservableObject
             DispatchStatus.PendingDispatch => "待派单",
             DispatchStatus.Dispatched => "已派单",
             DispatchStatus.SendFailed => "发送失败",
-            DispatchStatus.WebhookNotConfigured => "未配置 webhook",
+            DispatchStatus.WebhookNotConfigured => "待发送",
             _ => "未处置"
         };
     }
 
-    private static string BuildCoordinateSummary(SiteMapPoint point)
+    private static string BuildFallbackSummary(SiteMapPoint point)
     {
         if (!point.IsMonitored)
         {
-            return "当前未纳入静默巡检。";
+            return "当前点位未纳入静默巡检。";
         }
 
-        return point.CoordinatePayload.CoordinateSource switch
+        if (point.RecoveryStatus == RecoveryStatus.PendingConfirmation)
         {
-            CoordinateSource.ManualOverride => "当前使用本地手工坐标。",
-            CoordinateSource.PlatformRaw => "当前使用平台原始坐标。",
-            _ => "当前暂无可用坐标。"
+            return "已派单，待恢复确认。";
+        }
+
+        if (point.RecoveryStatus is RecoveryStatus.Recovered or RecoveryStatus.NotificationFailed)
+        {
+            return "运行态已恢复。";
+        }
+
+        if (point.IsDispatchCooling)
+        {
+            return "已派单，处理中。";
+        }
+
+        return point.DispatchStatus switch
+        {
+            DispatchStatus.PendingDispatch => "异常已识别，待派单。",
+            DispatchStatus.Dispatched => "已派单，待现场处置。",
+            DispatchStatus.SendFailed => "异常已识别，待重试派单。",
+            DispatchStatus.WebhookNotConfigured => "异常已识别，待发送派单。",
+            DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.Offline => "设备离线。",
+            DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.PreviewResolveFailed => "预览解析失败。",
+            DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.SnapshotFailed => "截图留痕失败。",
+            DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.InspectionExecutionFailed => "巡检失败。",
+            _ => "等待首次巡检。"
         };
+    }
+
+    private static IReadOnlyList<string> BuildStatusBadges(string statusText, string dispatchStateText)
+    {
+        var badges = new List<string>(2);
+        TryAddBadge(badges, statusText);
+
+        if (!string.Equals(dispatchStateText, "未处置", StringComparison.Ordinal))
+        {
+            TryAddBadge(badges, dispatchStateText);
+        }
+
+        return badges;
+    }
+
+    private static void TryAddBadge(ICollection<string> badges, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var normalized = value.Trim();
+        if (badges.Contains(normalized) || badges.Count >= 2)
+        {
+            return;
+        }
+
+        badges.Add(normalized);
     }
 }

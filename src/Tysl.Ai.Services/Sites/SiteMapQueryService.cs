@@ -508,7 +508,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
         if (dispatchPresentation.CanConfirmRecovery)
         {
-            return "待人工恢复";
+            return "待恢复确认";
         }
 
         if (dispatchPresentation.IsRecovered)
@@ -528,7 +528,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
                 RuntimeFaultCode.Offline => "设备离线",
                 RuntimeFaultCode.PreviewResolveFailed => "预览解析失败",
                 RuntimeFaultCode.SnapshotFailed => "截图留痕失败",
-                RuntimeFaultCode.InspectionExecutionFailed => "巡检执行失败",
+                RuntimeFaultCode.InspectionExecutionFailed => "巡检失败",
                 _ => runtimeState.LastInspectionRunState switch
                 {
                     InspectionRunState.Succeeded => "巡检正常",
@@ -562,7 +562,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
     {
         if (site.CanConfirmRecovery)
         {
-            return "待人工恢复";
+            return "待恢复确认";
         }
 
         if (IsRecentlyRecovered(site))
@@ -580,56 +580,51 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             RuntimeFaultCode.Offline => "设备离线",
             RuntimeFaultCode.PreviewResolveFailed => "预览解析失败",
             RuntimeFaultCode.SnapshotFailed => "截图留痕失败",
-            RuntimeFaultCode.InspectionExecutionFailed => "巡检执行失败",
+            RuntimeFaultCode.InspectionExecutionFailed => "巡检失败",
             _ => site.StatusText
         };
     }
 
     private static string ResolveRuntimeSummary(SiteMergedView site)
     {
+        if (!site.IsMonitored)
+        {
+            return "当前点位未纳入静默巡检。";
+        }
+
         if (site.CanConfirmRecovery)
         {
-            return string.IsNullOrWhiteSpace(site.RecoverySummary)
-                ? "运行态已恢复，待人工确认"
-                : site.RecoverySummary!;
+            return "已派单，待恢复确认。";
         }
 
         if (IsRecentlyRecovered(site))
         {
-            return string.IsNullOrWhiteSpace(site.RecoverySummary)
-                ? "故障已恢复"
-                : site.RecoverySummary!;
+            return "运行态已恢复。";
         }
 
         if (HasActiveDispatch(site))
         {
-            var parts = new[]
-            {
-                ResolveDispatchStateText(site),
-                site.DispatchFaultSummary,
-                site.RuntimeSummary
-            }.Where(item => !string.IsNullOrWhiteSpace(item)).Distinct().ToArray();
-
-            return parts.Length == 0 ? site.StatusText : string.Join("；", parts);
+            return BuildDispatchSummary(site);
         }
 
-        if (!string.IsNullOrWhiteSpace(site.RuntimeSummary))
+        if (ResolveRuntimeIssueText(site) is string issueText)
         {
-            return site.RuntimeSummary!;
+            return $"{issueText}。";
         }
 
         if (site.LastInspectionAt.HasValue)
         {
             return site.LastInspectionRunState switch
             {
-                InspectionRunState.Succeeded => "最近巡检完成，当前未发现异常。",
-                InspectionRunState.SucceededWithFault => "最近巡检完成，运行态存在异常。",
-                InspectionRunState.Failed => "最近巡检失败，请查看本地日志。",
-                _ => "最近巡检已记录。"
+                InspectionRunState.Succeeded => "巡检正常。",
+                InspectionRunState.SucceededWithFault => "巡检发现异常。",
+                InspectionRunState.Failed => "巡检失败。",
+                InspectionRunState.Skipped => "当前巡检已跳过。",
+                _ => "等待下一次巡检。"
             };
         }
 
-        return site.IsMonitored ? "尚未产生运行态记录。" : "当前点位未纳入静默巡检。";
+        return "等待首次巡检。";
     }
 
     private static string ResolveDispatchStateKey(SiteMergedView site)
@@ -673,7 +668,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
         if (site.CanConfirmRecovery)
         {
-            return "待人工恢复";
+            return "待恢复确认";
         }
 
         if (site.RecoveredAt.HasValue)
@@ -754,10 +749,42 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
     {
         return record.RecoveryStatus switch
         {
-            RecoveryStatus.PendingConfirmation => "待人工确认恢复",
+            RecoveryStatus.PendingConfirmation => "待恢复确认",
             RecoveryStatus.Recovered => "已恢复",
             RecoveryStatus.NotificationFailed => "已恢复（通知未发送）",
             _ => record.RecoveredAt.HasValue ? "已恢复" : "未恢复"
+        };
+    }
+
+    private static string BuildDispatchSummary(SiteMergedView site)
+    {
+        var issueText = ResolveRuntimeIssueText(site);
+
+        return site.DispatchStatus switch
+        {
+            DispatchStatus.PendingDispatch => issueText is null ? "异常已识别，待派单。" : $"{issueText}，待派单。",
+            DispatchStatus.Dispatched when site.IsDispatchCooling => issueText is null ? "已派单，处理中。" : $"已派单，{issueText}。",
+            DispatchStatus.Dispatched => issueText is null ? "已派单，待现场处置。" : $"已派单，{issueText}。",
+            DispatchStatus.SendFailed => issueText is null ? "异常已识别，待重试派单。" : $"{issueText}，待重试派单。",
+            DispatchStatus.WebhookNotConfigured => issueText is null ? "异常已识别，待发送派单。" : $"{issueText}，待发送派单。",
+            _ => issueText is null ? "异常已识别，处理中。" : $"{issueText}。"
+        };
+    }
+
+    private static string? ResolveRuntimeIssueText(SiteMergedView site)
+    {
+        return site.RuntimeFaultCode switch
+        {
+            RuntimeFaultCode.Offline => "设备离线",
+            RuntimeFaultCode.PreviewResolveFailed => "预览解析失败",
+            RuntimeFaultCode.SnapshotFailed => "截图留痕失败",
+            RuntimeFaultCode.InspectionExecutionFailed => "巡检失败",
+            _ => site.LastInspectionRunState switch
+            {
+                InspectionRunState.Failed => "巡检失败",
+                InspectionRunState.SucceededWithFault => "巡检发现异常",
+                _ => null
+            }
         };
     }
 

@@ -196,7 +196,7 @@ public sealed class SiteDetailViewModel
 
         if (detail.CanConfirmRecovery)
         {
-            return "待确认恢复";
+            return "待恢复确认";
         }
 
         if (detail.RecoveryStatus is RecoveryStatus.Recovered or RecoveryStatus.NotificationFailed)
@@ -214,11 +214,11 @@ public sealed class SiteDetailViewModel
             DispatchStatus.PendingDispatch => "待派单",
             DispatchStatus.Dispatched => "已派单",
             DispatchStatus.SendFailed => "发送失败",
-            DispatchStatus.WebhookNotConfigured => "未配置 webhook",
+            DispatchStatus.WebhookNotConfigured => "待发送",
             DispatchStatus.None when detail.RuntimeFaultCode == RuntimeFaultCode.Offline => "设备离线",
             DispatchStatus.None when detail.RuntimeFaultCode == RuntimeFaultCode.PreviewResolveFailed => "预览解析失败",
             DispatchStatus.None when detail.RuntimeFaultCode == RuntimeFaultCode.SnapshotFailed => "截图留痕失败",
-            DispatchStatus.None when detail.RuntimeFaultCode == RuntimeFaultCode.InspectionExecutionFailed => "巡检执行失败",
+            DispatchStatus.None when detail.RuntimeFaultCode == RuntimeFaultCode.InspectionExecutionFailed => "巡检失败",
             _ => detail.DemoOnlineState == DemoOnlineState.Offline ? "设备离线" : "正常"
         };
     }
@@ -240,7 +240,7 @@ public sealed class SiteDetailViewModel
             DispatchStatus.PendingDispatch => "待派单",
             DispatchStatus.Dispatched => "已派单",
             DispatchStatus.SendFailed => "发送失败",
-            DispatchStatus.WebhookNotConfigured => "未配置 webhook",
+            DispatchStatus.WebhookNotConfigured => "待发送",
             _ => "未触发派单"
         };
     }
@@ -249,7 +249,7 @@ public sealed class SiteDetailViewModel
     {
         return detail.RecoveryStatus switch
         {
-            RecoveryStatus.PendingConfirmation => "待人工确认恢复",
+            RecoveryStatus.PendingConfirmation => "待恢复确认",
             RecoveryStatus.Recovered => "已恢复",
             RecoveryStatus.NotificationFailed => "已恢复（通知未发送）",
             _ => detail.RecoveredAt.HasValue ? "已恢复" : "未恢复"
@@ -334,7 +334,7 @@ public sealed class SiteDetailViewModel
             "wgs84" => "wgs84",
             "gps" => "wgs84/gps",
             "mapbar" => "mapbar",
-            _ => "unknown"
+            _ => "未知"
         };
     }
 

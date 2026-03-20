@@ -19,9 +19,11 @@ public sealed class AcisKernelPlatformSiteProvider :
     private const int MaxDetailConcurrency = 2;
     private const string UnknownCoordinateType = "unknown";
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan DetailCacheLifetime = TimeSpan.FromMinutes(3);
 
     private readonly AcisApiKernel? kernel;
     private readonly string? configPath;
+    private readonly ConcurrentDictionary<string, DetailCacheEntry> detailCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim refreshSync = new(1, 1);
     private PlatformCacheEntry? cacheEntry;
     private PlatformConnectionState currentState;
@@ -231,31 +233,46 @@ public sealed class AcisKernelPlatformSiteProvider :
     {
         ArgumentNullException.ThrowIfNull(kernel);
 
-        var detailCodes = candidates
-            .OrderByDescending(NeedsDetail)
-            .ThenBy(candidate => candidate.DeviceCode, StringComparer.OrdinalIgnoreCase)
-            .Select(candidate => candidate.DeviceCode)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+        var detailCandidates = candidates
+            .Where(NeedsDetail)
+            .OrderBy(candidate => candidate.DeviceCode, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(candidate => candidate.DeviceCode, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
             .Take(Math.Min(MaxDetailRequests, candidates.Count))
             .ToArray();
 
         var details = new ConcurrentDictionary<string, DeviceDetailResult>(StringComparer.OrdinalIgnoreCase);
 
+        foreach (var candidate in detailCandidates)
+        {
+            if (TryGetCachedDetail(candidate.DeviceCode, out var cachedDetail))
+            {
+                details[candidate.DeviceCode] = cachedDetail;
+            }
+        }
+
+        var uncachedCandidates = detailCandidates
+            .Where(candidate => !details.ContainsKey(candidate.DeviceCode))
+            .ToArray();
+
         await Parallel.ForEachAsync(
-            detailCodes,
+            uncachedCandidates,
             new ParallelOptions
             {
                 CancellationToken = cancellationToken,
                 MaxDegreeOfParallelism = MaxDetailConcurrency
             },
-            async (deviceCode, token) =>
+            async (candidate, token) =>
             {
                 try
                 {
-                    var detail = await kernel.GetDeviceDetailAsync(deviceCode, token);
+                    var detail = await kernel.GetDeviceDetailAsync(candidate.DeviceCode, token);
                     if (detail.Snapshots.Any(snapshot => snapshot.IsSuccess))
                     {
-                        details[deviceCode] = detail;
+                        details[candidate.DeviceCode] = detail;
+                        detailCache[candidate.DeviceCode] = new DetailCacheEntry(
+                            detail,
+                            DateTimeOffset.UtcNow.Add(DetailCacheLifetime));
                     }
                 }
                 catch (OperationCanceledException)
@@ -264,7 +281,7 @@ public sealed class AcisKernelPlatformSiteProvider :
                 }
                 catch (Exception ex)
                 {
-                    await TryWriteDiagnosticAsync("PlatformDetail", $"设备详情补拉失败：deviceCode={deviceCode}, reason={ex.Message}", token);
+                    await TryWriteDiagnosticAsync("PlatformDetail", $"设备详情补拉失败：deviceCode={candidate.DeviceCode}, reason={ex.Message}", token);
                 }
             });
 
@@ -320,8 +337,32 @@ public sealed class AcisKernelPlatformSiteProvider :
 
     private static bool NeedsDetail(CatalogCandidate candidate)
     {
+        if (string.IsNullOrWhiteSpace(candidate.DeviceName))
+        {
+            return true;
+        }
+
         return !candidate.RawLongitude.HasValue
-            || !candidate.RawLatitude.HasValue;
+            || !candidate.RawLatitude.HasValue
+            || !candidate.IsOnline.HasValue;
+    }
+
+    private bool TryGetCachedDetail(string deviceCode, out DeviceDetailResult detail)
+    {
+        detail = default!;
+        if (!detailCache.TryGetValue(deviceCode, out var cacheEntry))
+        {
+            return false;
+        }
+
+        if (cacheEntry.ExpiresAt <= DateTimeOffset.UtcNow)
+        {
+            detailCache.TryRemove(deviceCode, out _);
+            return false;
+        }
+
+        detail = cacheEntry.Detail;
+        return true;
     }
 
     private static PlatformConnectionState CreateState(
@@ -558,6 +599,10 @@ public sealed class AcisKernelPlatformSiteProvider :
 
     private sealed record PlatformCacheEntry(
         IReadOnlyList<PlatformSiteSnapshot> Snapshots,
+        DateTimeOffset ExpiresAt);
+
+    private sealed record DetailCacheEntry(
+        DeviceDetailResult Detail,
         DateTimeOffset ExpiresAt);
 
     private sealed record PlatformLoadResult(

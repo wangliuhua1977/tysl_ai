@@ -15,9 +15,18 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
+    private static readonly IReadOnlyList<MapStyleOption> BuiltInMapStyleOptions =
+    [
+        new("default", "默认地图"),
+        new("amap://styles/darkblue", "深色科技风"),
+        new("amap://styles/whitesmoke", "简洁浅色风"),
+        new("amap://styles/grey", "灰阶监控风")
+    ];
+
     private readonly SemaphoreSlim dashboardLoadLock = new(1, 1);
     private readonly IDispatchService dispatchService;
     private readonly ILocalDiagnosticService diagnosticService;
+    private readonly IMapStylePreferenceStore mapStylePreferenceStore;
     private readonly DispatcherTimer refreshTimer;
     private readonly bool isMapHostConfigured;
     private readonly Dictionary<string, DemoCoordinate> renderedPointCoordinates = new(StringComparer.OrdinalIgnoreCase);
@@ -45,6 +54,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private SiteDetailViewModel? selectedDetail;
     private SiteMergedView? selectedDetailSource;
     private DashboardFilterOption selectedFilter;
+    private string selectedMapStyleKey;
     private SiteMapPointViewModel? selectedPoint;
     private string? selectedPointDeviceCode;
 
@@ -53,19 +63,23 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         ISiteLocalProfileService siteLocalProfileService,
         IDispatchService dispatchService,
         ILocalDiagnosticService diagnosticService,
-        bool isMapHostConfigured)
+        IMapStylePreferenceStore mapStylePreferenceStore,
+        bool isMapHostConfigured,
+        string? initialMapStyleKey)
     {
         this.siteMapQueryService = siteMapQueryService;
         this.siteLocalProfileService = siteLocalProfileService;
         this.dispatchService = dispatchService;
         this.diagnosticService = diagnosticService;
+        this.mapStylePreferenceStore = mapStylePreferenceStore;
         this.isMapHostConfigured = isMapHostConfigured;
+        selectedMapStyleKey = ResolveMapStyleKey(initialMapStyleKey);
 
         mapEmptyStateText = isMapHostConfigured
             ? "正在等待平台点位。"
             : "地图未配置。请准备 amap-js.json 后重启。";
         mapInteractionHint = isMapHostConfigured
-            ? "悬停查看摘要，单击联动详情。"
+            ? "点位默认只显示图标和单行名称，单击联动右侧详情。"
             : "地图未配置，暂不支持坐标补录。";
 
         Filters =
@@ -77,6 +91,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         ];
 
         selectedFilter = Filters[0];
+        MapStyleOptions = BuiltInMapStyleOptions;
         VisiblePoints = [];
         VisibleAlerts = [];
         ToggleFilterPanelCommand = new RelayCommand(() => IsFilterPanelExpanded = !IsFilterPanelExpanded);
@@ -127,6 +142,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public string LastRefreshText { get; private set; } = "--:--:--";
 
     public IReadOnlyList<DashboardFilterOption> Filters { get; }
+
+    public IReadOnlyList<MapStyleOption> MapStyleOptions { get; }
 
     public ObservableCollection<SiteMapPointViewModel> VisiblePoints { get; }
 
@@ -284,6 +301,21 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref mapHostStateJson, value);
     }
 
+    public string SelectedMapStyleKey
+    {
+        get => selectedMapStyleKey;
+        set
+        {
+            var resolved = ResolveMapStyleKey(value);
+            if (!SetProperty(ref selectedMapStyleKey, resolved))
+            {
+                return;
+            }
+
+            _ = PersistSelectedMapStyleAsync(resolved);
+        }
+    }
+
     public string MonitorToggleText => SelectedDetail?.IsMonitored == false ? "纳入巡检" : "暂停巡检";
 
     public void HandleMapClicked(double longitude, double latitude)
@@ -366,7 +398,6 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         isDisposed = true;
         refreshTimer.Stop();
         refreshTimer.Tick -= HandleRefreshTimerTick;
-        dashboardLoadLock.Dispose();
     }
 
     private async void HandleRefreshTimerTick(object? sender, EventArgs e)
@@ -700,7 +731,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         IsCoordinatePickActive = false;
         MapInteractionHint = isMapHostConfigured
-            ? "悬停查看摘要，单击联动详情。"
+            ? "点位默认只显示图标和单行名称，单击联动右侧详情。"
             : "地图未配置，暂不支持坐标补录。";
     }
 
@@ -786,6 +817,34 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
 
         return "当前筛选条件下暂无可展示点位。";
+    }
+
+    private async Task PersistSelectedMapStyleAsync(string mapStyleKey)
+    {
+        try
+        {
+            await mapStylePreferenceStore.SaveMapStyleAsync(mapStyleKey);
+        }
+        catch (Exception ex)
+        {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=save-map-style, mapStyle={mapStyleKey}, type={ex.GetType().FullName}, message={ex.Message}");
+        }
+    }
+
+    private static string ResolveMapStyleKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "default";
+        }
+
+        var normalized = value.Trim();
+        return string.Equals(normalized, "normal", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "native", StringComparison.OrdinalIgnoreCase)
+            ? "default"
+            : normalized;
     }
 
     private void Notify(string title, string message)

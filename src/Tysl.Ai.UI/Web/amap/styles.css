@@ -29,150 +29,125 @@ body {
     opacity: 0.72 !important;
 }
 
-.marker-shell {
+.marker-node {
     align-items: center;
-    backdrop-filter: blur(12px);
-    background: rgba(9, 18, 31, 0.92);
-    border: 1px solid rgba(52, 96, 141, 0.92);
-    border-radius: 999px;
-    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.26);
+    cursor: pointer;
     display: inline-flex;
-    gap: 7px;
-    max-width: 150px;
-    min-height: 26px;
-    padding: 5px 10px 5px 9px;
-    transform: translateY(-6px);
-    transition: box-shadow 120ms ease, border-color 120ms ease, transform 120ms ease;
+    flex-direction: column;
+    gap: 5px;
+    transform: translateY(-10px);
+    transition: transform 120ms ease;
 }
 
-.marker-shell:hover,
-.marker-shell.is-selected {
-    border-color: rgba(96, 188, 255, 0.92);
-    box-shadow: 0 0 0 1px rgba(46, 168, 255, 0.32), 0 14px 28px rgba(10, 62, 102, 0.34);
-    transform: translateY(-8px);
+.marker-node.is-selected {
+    transform: translateY(-12px);
 }
 
-.marker-shell.is-selected {
-    background: rgba(12, 25, 40, 0.96);
+.marker-icon {
+    align-items: center;
+    backdrop-filter: blur(10px);
+    background: rgba(8, 18, 31, 0.92);
+    border: 1px solid rgba(104, 162, 210, 0.82);
+    border-radius: 999px;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+    display: inline-flex;
+    height: 16px;
+    justify-content: center;
+    position: relative;
+    width: 16px;
 }
 
-.marker-dot {
+.marker-icon__core {
     border-radius: 50%;
-    flex: 0 0 9px;
-    height: 9px;
-    width: 9px;
-}
-
-.marker-status {
-    border-radius: 50%;
-    flex: 0 0 5px;
-    height: 5px;
-    width: 5px;
+    height: 8px;
+    width: 8px;
 }
 
 .marker-label {
-    color: #f2f7ff;
+    color: #eef7ff;
     font-size: 12px;
     font-weight: 600;
     line-height: 1;
+    max-width: 112px;
     overflow: hidden;
+    text-align: center;
     text-overflow: ellipsis;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.86);
     white-space: nowrap;
 }
 
-.marker-normal .marker-dot {
+.marker-state {
+    border: 1px solid rgba(8, 18, 31, 0.94);
+    border-radius: 50%;
+    bottom: -1px;
+    height: 6px;
+    position: absolute;
+    right: -1px;
+    width: 6px;
+}
+
+.marker-node.is-selected .marker-icon {
+    border-color: rgba(146, 214, 255, 0.96);
+    box-shadow: 0 0 0 2px rgba(46, 168, 255, 0.24), 0 0 18px rgba(46, 168, 255, 0.42);
+}
+
+.marker-node.is-selected .marker-label {
+    color: #ffffff;
+}
+
+.marker-normal .marker-icon__core {
     background: #2ed19a;
 }
 
-.marker-warning .marker-dot {
+.marker-warning .marker-icon__core {
     background: #ffc266;
 }
 
-.marker-fault .marker-dot,
-.marker-offline .marker-dot {
+.marker-fault .marker-icon__core,
+.marker-offline .marker-icon__core {
     background: #ff6b8b;
 }
 
-.marker-idle .marker-dot {
+.marker-idle .marker-icon__core {
     background: #8fb0c8;
 }
 
-.marker-cooling .marker-dot {
+.marker-cooling .marker-icon__core {
     background: #7bc9ff;
 }
 
-.marker-dispatched .marker-dot {
+.marker-dispatched .marker-icon__core {
     background: #ffd36d;
 }
 
-.marker-unmonitored .marker-dot {
+.marker-unmonitored .marker-icon__core {
     background: #6b7e95;
 }
 
-.marker-status {
-    background: rgba(255, 255, 255, 0.84);
+.marker-state {
+    background: rgba(255, 255, 255, 0.86);
 }
 
-.marker-status--pending {
+.marker-state--pending {
     background: #ffae63;
 }
 
-.marker-status--dispatched {
+.marker-state--dispatched {
     background: #ffd36d;
 }
 
-.marker-status--cooling {
+.marker-state--cooling {
     background: #7bc9ff;
 }
 
-.marker-status--send-failed {
+.marker-state--send-failed {
     background: #ff6b8b;
 }
 
-.marker-status--recovery-pending {
+.marker-state--recovery-pending {
     background: #9ab3ff;
 }
 
-.marker-status--recovered {
+.marker-state--recovered {
     background: #6fe1c1;
-}
-
-.point-card {
-    background: rgba(8, 18, 31, 0.96);
-    border: 1px solid rgba(46, 168, 255, 0.28);
-    border-radius: 14px;
-    box-shadow: 0 18px 34px rgba(0, 0, 0, 0.34);
-    color: #f2f7ff;
-    max-width: 220px;
-    padding: 12px 14px;
-}
-
-.point-card__title {
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 1.35;
-}
-
-.point-card__badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 10px;
-}
-
-.point-card__badge {
-    background: rgba(21, 45, 69, 0.92);
-    border: 1px solid rgba(67, 110, 156, 0.74);
-    border-radius: 999px;
-    color: #d9ecff;
-    font-size: 11px;
-    line-height: 1;
-    padding: 4px 8px;
-}
-
-.point-card__summary {
-    color: #a6bed6;
-    font-size: 12px;
-    line-height: 1.5;
-    margin-top: 10px;
 }

@@ -10,6 +10,14 @@
 
 不回退成表格中心页面，也不在首页堆叠调试面板、日志窗口或诊断角标。
 
+## 五层边界
+
+- `App`：启动、组合根和依赖注入。
+- `UI`：WPF 视图、主题、控件、ViewModel、WebView2 宿主和交互状态。
+- `Services`：查询编排与服务接口。
+- `Infrastructure`：ACIS、SQLite、派单、截图、配置持久化和外部系统接入。
+- `Core`：领域模型、枚举和稳定接口。
+
 ## 当前主链路
 
 1. `App` 启动时读取 `configs/acis-kernel.json`、`configs/amap-js.json`、`configs/dispatch.json`。
@@ -18,8 +26,16 @@
 4. 巡检结果落入 `site_runtime_state`、`snapshot_record` 和 `runtime/snapshots/`。
 5. `DispatchService` 复用运行态完成派单、冷却、恢复与恢复通知。
 6. `SiteMapQueryService` 合并平台快照、本地补充信息、运行态和派单记录。
-7. `ShellViewModel` 组织地图点位、详情抽屉和异常缩略条数据。
-8. `AmapHostControl` 与 `UI/Web/amap/*` 负责地图渲染、前端坐标转换和 marker 交互。
+7. `ShellViewModel` 组织地图点位、右侧详情抽屉和底部异常缩略条数据。
+8. `AmapHostControl` 与 `UI/Web/amap/*` 负责地图渲染、前端坐标转换、marker 交互和风格切换。
+
+## 地图默认行为
+
+- 点位默认只显示“小图标 + 一行名称”。
+- 名称规则为别名优先，设备名兜底。
+- 点击点位只高亮当前点位并联动右侧详情，不再弹出遮挡地图的摘要面板。
+- 地图风格支持轻量切换，默认值为原生地图样式。
+- 当前风格选择会持久化到本地 `amap-js.json` 配置。
 
 ## 当前受控降级
 

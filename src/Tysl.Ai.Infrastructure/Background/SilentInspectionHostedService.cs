@@ -5,6 +5,8 @@ namespace Tysl.Ai.Infrastructure.Background;
 
 public sealed class SilentInspectionHostedService : IDisposable
 {
+    private static readonly TimeSpan ShutdownWaitTimeout = TimeSpan.FromSeconds(5);
+
     private readonly IInspectionSettingsProvider inspectionSettingsProvider;
     private readonly ISilentInspectionService silentInspectionService;
     private CancellationTokenSource? shutdownSource;
@@ -29,18 +31,22 @@ public sealed class SilentInspectionHostedService : IDisposable
         loopTask = Task.Run(() => RunLoopAsync(shutdownSource.Token));
     }
 
-    public async Task StopAsync()
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        if (shutdownSource is null || loopTask is null)
+        var source = Interlocked.Exchange(ref shutdownSource, null);
+        var loop = Interlocked.Exchange(ref loopTask, null);
+
+        if (source is null || loop is null)
         {
+            source?.Dispose();
             return;
         }
 
-        shutdownSource.Cancel();
+        source.Cancel();
 
         try
         {
-            await loopTask;
+            await loop.WaitAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -48,15 +54,22 @@ public sealed class SilentInspectionHostedService : IDisposable
         }
         finally
         {
-            shutdownSource.Dispose();
-            shutdownSource = null;
-            loopTask = null;
+            source.Dispose();
         }
     }
 
     public void Dispose()
     {
-        StopAsync().GetAwaiter().GetResult();
+        using var shutdownTimeout = new CancellationTokenSource(ShutdownWaitTimeout);
+
+        try
+        {
+            StopAsync(shutdownTimeout.Token).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            // Best effort shutdown. App exit should not wait forever.
+        }
     }
 
     private async Task RunLoopAsync(CancellationToken cancellationToken)

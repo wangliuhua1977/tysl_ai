@@ -101,18 +101,37 @@
                                 Content="≡" />
                     </DockPanel>
 
-                    <TextBox Grid.Row="1"
-                             Margin="0,14,0,16"
-                             Style="{StaticResource SearchTextBoxStyle}"
-                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                             ToolTip="按别名、设备名、设备编码或维护信息检索"
-                             Visibility="{Binding IsFilterPanelExpanded, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Grid Grid.Row="1"
+                          Margin="0,14,0,16"
+                          Visibility="{Binding IsFilterPanelExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBox Style="{StaticResource SearchTextBoxStyle}"
+                                 Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="按别名、设备名、设备编码或维护信息检索" />
+                        <TextBlock Text="搜索点位、设备编码或维护信息">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource SearchWatermarkTextStyle}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SearchText}" Value="">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
 
                     <ListBox Grid.Row="2"
                              Style="{StaticResource FilterListBoxStyle}"
-                             DisplayMemberPath="Label"
                              ItemsSource="{Binding Filters}"
-                             SelectedItem="{Binding SelectedFilter}" />
+                             SelectedItem="{Binding SelectedFilter}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Style="{StaticResource FilterListBoxItemTextStyle}"
+                                           Text="{Binding Label}" />
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                 </Grid>
             </Border>
 
@@ -132,7 +151,33 @@
 
                     <Grid Grid.Row="1">
                         <controlsView:AmapHostControl x:Name="AmapHost"
-                                                      StateJson="{Binding MapHostStateJson}" />
+                                                      StateJson="{Binding MapHostStateJson}"
+                                                      SelectedMapStyleKey="{Binding SelectedMapStyleKey}" />
+
+                        <Border HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Margin="0,12,12,0"
+                                Padding="10,8"
+                                Background="{StaticResource CardBrush}"
+                                BorderBrush="{StaticResource SubtleBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Style="{StaticResource MutedTextStyle}" Text="地图风格" />
+                                <ComboBox Grid.Row="1"
+                                          Width="148"
+                                          Margin="0,6,0,0"
+                                          DisplayMemberPath="Label"
+                                          ItemsSource="{Binding MapStyleOptions}"
+                                          SelectedValue="{Binding SelectedMapStyleKey}"
+                                          SelectedValuePath="MapStyleKey"
+                                          Style="{StaticResource DialogComboBoxStyle}" />
+                            </Grid>
+                        </Border>
 
                         <Border HorizontalAlignment="Center"
                                 VerticalAlignment="Center"

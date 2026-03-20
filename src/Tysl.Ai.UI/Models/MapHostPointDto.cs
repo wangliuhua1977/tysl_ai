@@ -4,6 +4,8 @@ public sealed record MapHostPointDto
 {
     public required string DeviceCode { get; init; }
 
+    public string? Alias { get; init; }
+
     public required string DisplayName { get; init; }
 
     public required string DeviceName { get; init; }
@@ -15,6 +17,8 @@ public sealed record MapHostPointDto
     public required string OnlineStateText { get; init; }
 
     public required string MonitoringText { get; init; }
+
+    public required IReadOnlyList<string> StatusBadges { get; init; }
 
     public required string SummaryText { get; init; }
 

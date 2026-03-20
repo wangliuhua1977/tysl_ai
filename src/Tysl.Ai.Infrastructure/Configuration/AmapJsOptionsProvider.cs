@@ -1,14 +1,17 @@
 using System.Text.Json;
+using Tysl.Ai.Core.Interfaces;
 
 namespace Tysl.Ai.Infrastructure.Configuration;
 
-public sealed class AmapJsOptionsProvider
+public sealed class AmapJsOptionsProvider : IMapStylePreferenceStore
 {
     private const string ConfigRelativePath = "configs\\amap-js.json";
+    private const string DefaultMapStyle = "default";
 
     private static readonly JsonSerializerOptions JsonSerializerOptions = new()
     {
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
     };
 
     public AmapJsOptionsLoadResult Load()
@@ -39,6 +42,7 @@ public sealed class AmapJsOptionsProvider
 
             var normalized = options with
             {
+                MapStyle = NormalizeMapStyle(options.MapStyle),
                 Zoom = options.Zoom is > 0 and <= 20 ? options.Zoom : 11,
                 Center = NormalizeCenter(options.Center)
             };
@@ -57,6 +61,39 @@ public sealed class AmapJsOptionsProvider
                 false,
                 "地图未配置");
         }
+    }
+
+    public Task SaveMapStyleAsync(string? mapStyle, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var configPath = FindConfigPath();
+        if (configPath is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        AmapJsOptions options;
+        try
+        {
+            var json = File.ReadAllText(configPath);
+            options = JsonSerializer.Deserialize<AmapJsOptions>(json, JsonSerializerOptions) ?? new AmapJsOptions();
+        }
+        catch
+        {
+            options = new AmapJsOptions();
+        }
+
+        var updated = options with
+        {
+            MapStyle = NormalizeMapStyle(mapStyle),
+            Zoom = options.Zoom is > 0 and <= 20 ? options.Zoom : 11,
+            Center = NormalizeCenter(options.Center)
+        };
+
+        var content = JsonSerializer.Serialize(updated, JsonSerializerOptions);
+        File.WriteAllText(configPath, content);
+        return Task.CompletedTask;
     }
 
     private static string? FindConfigPath()
@@ -105,6 +142,18 @@ public sealed class AmapJsOptionsProvider
         }
 
         return [120.585316, 30.028105];
+    }
+
+    private static string NormalizeMapStyle(string? value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value)
+            ? DefaultMapStyle
+            : value.Trim();
+
+        return string.Equals(normalized, "native", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "normal", StringComparison.OrdinalIgnoreCase)
+            ? DefaultMapStyle
+            : normalized;
     }
 }
 

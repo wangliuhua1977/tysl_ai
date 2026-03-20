@@ -1,13 +1,15 @@
 (function () {
+    const DEFAULT_MAP_STYLE = "default";
     const DIRECT_TYPES = new Set(["", "gcj02", "amap", "gaode", "unknown"]);
     const hostState = {
-        hoverInfoWindow: null,
+        config: window.__TYSL_AMAP_CONFIG__ || {},
+        currentMapStyle: DEFAULT_MAP_STYLE,
         map: null,
         markers: new Map(),
         points: [],
         ready: false,
-        selectedDeviceCode: null,
-        selectedInfoWindow: null
+        renderedState: null,
+        selectedDeviceCode: null
     };
 
     function bridge(type, payload) {
@@ -60,112 +62,59 @@
         return normalized;
     }
 
+    function resolvePointName(point) {
+        const name = point.alias || point.displayName || point.deviceName || point.deviceCode;
+        return truncateText(name, 12);
+    }
+
+    function resolveMapStyle(mapStyleKey) {
+        const normalized = String(mapStyleKey || "").trim();
+        if (!normalized) {
+            return null;
+        }
+
+        switch (normalized.toLowerCase()) {
+            case DEFAULT_MAP_STYLE:
+            case "native":
+            case "normal":
+                return null;
+            default:
+                return normalized;
+        }
+    }
+
     function buildMarkerContent(point, selected) {
         const selectedClass = selected ? " is-selected" : "";
         const dispatchStateKey = escapeHtml(point.dispatchStateKey || "none");
-        const displayName = truncateText(point.displayName || point.deviceName || point.deviceCode, 12);
+        const visualState = escapeHtml(point.visualState || "normal");
+        const label = escapeHtml(resolvePointName(point));
+
         return [
-            `<div class="marker-shell marker-${escapeHtml(point.visualState)}${selectedClass}">`,
-            "  <span class=\"marker-dot\"></span>",
-            `  <span class=\"marker-status marker-status--${dispatchStateKey}\"></span>`,
-            `  <span class=\"marker-label\">${escapeHtml(displayName)}</span>`,
+            `<div class="marker-node marker-${visualState}${selectedClass}">`,
+            "  <span class=\"marker-icon\">",
+            "    <span class=\"marker-icon__core\"></span>",
+            `    <span class="marker-state marker-state--${dispatchStateKey}"></span>`,
+            "  </span>",
+            `  <span class="marker-label" title="${label}">${label}</span>`,
             "</div>"
         ].join("");
     }
 
-    function buildCardContent(point) {
-        const statusBadges = [
-            point.statusText,
-            point.monitoringText,
-            point.dispatchStateText !== "未处置" ? point.dispatchStateText : null
-        ].filter(Boolean);
-
-        return [
-            "<div class=\"point-card\">",
-            `  <div class=\"point-card__title\">${escapeHtml(truncateText(point.displayName || point.deviceName || point.deviceCode, 20))}</div>`,
-            "  <div class=\"point-card__badges\">",
-            statusBadges.map((badge) => `    <span class=\"point-card__badge\">${escapeHtml(badge)}</span>`).join(""),
-            "  </div>",
-            `  <div class=\"point-card__summary\">${escapeHtml(truncateText(point.summaryText, 56))}</div>`,
-            "</div>"
-        ].join("");
-    }
-
-    function ensureHoverInfoWindow() {
-        if (!hostState.hoverInfoWindow) {
-            hostState.hoverInfoWindow = new AMap.InfoWindow({
-                offset: new AMap.Pixel(0, -22),
-                closeWhenClickMap: false,
-                isCustom: true
-            });
+    function updateMapCursor(coordinatePickActive) {
+        const shell = document.getElementById("map-shell");
+        if (!shell) {
+            return;
         }
 
-        return hostState.hoverInfoWindow;
+        shell.classList.toggle("is-picking", Boolean(coordinatePickActive));
     }
 
-    function ensureSelectedInfoWindow() {
-        if (!hostState.selectedInfoWindow) {
-            hostState.selectedInfoWindow = new AMap.InfoWindow({
-                offset: new AMap.Pixel(0, -22),
-                closeWhenClickMap: false,
-                isCustom: true
-            });
-        }
-
-        return hostState.selectedInfoWindow;
-    }
-
-    function applyMarkerSelection() {
+    function updateMarkerSelection() {
         hostState.markers.forEach((entry, deviceCode) => {
-            entry.marker.setContent(buildMarkerContent(entry.point, deviceCode === hostState.selectedDeviceCode));
+            const selected = deviceCode === hostState.selectedDeviceCode;
+            entry.marker.setContent(buildMarkerContent(entry.point, selected));
+            entry.marker.setzIndex(selected ? 160 : 120);
         });
-
-        if (!hostState.selectedDeviceCode) {
-            if (hostState.selectedInfoWindow) {
-                hostState.selectedInfoWindow.close();
-            }
-
-            return;
-        }
-
-        const entry = hostState.markers.get(hostState.selectedDeviceCode);
-        if (!entry) {
-            if (hostState.selectedInfoWindow) {
-                hostState.selectedInfoWindow.close();
-            }
-
-            return;
-        }
-
-        const infoWindow = ensureSelectedInfoWindow();
-        infoWindow.setContent(buildCardContent(entry.point));
-        infoWindow.open(hostState.map, entry.position);
-        hostState.map && hostState.map.panTo(entry.position);
-    }
-
-    function showHoverCard(deviceCode) {
-        if (hostState.selectedDeviceCode === deviceCode) {
-            return;
-        }
-
-        const entry = hostState.markers.get(deviceCode);
-        if (!entry) {
-            return;
-        }
-
-        const infoWindow = ensureHoverInfoWindow();
-        infoWindow.setContent(buildCardContent(entry.point));
-        infoWindow.open(hostState.map, entry.position);
-    }
-
-    function hideHoverCard(deviceCode) {
-        if (hostState.selectedDeviceCode === deviceCode) {
-            return;
-        }
-
-        if (hostState.hoverInfoWindow) {
-            hostState.hoverInfoWindow.close();
-        }
     }
 
     function convertBatch(points, type) {
@@ -257,16 +206,8 @@
         hostState.markers.forEach((entry) => {
             hostState.map && hostState.map.remove(entry.marker);
         });
+
         hostState.markers.clear();
-    }
-
-    function updateMapCursor(coordinatePickActive) {
-        const shell = document.getElementById("map-shell");
-        if (!shell) {
-            return;
-        }
-
-        shell.classList.toggle("is-picking", Boolean(coordinatePickActive));
     }
 
     async function renderState(state) {
@@ -274,9 +215,14 @@
             return;
         }
 
-        hostState.points = state.points || [];
-        hostState.selectedDeviceCode = state.selectedDeviceCode || null;
-        updateMapCursor(state.coordinatePickActive);
+        hostState.renderedState = state || {
+            points: [],
+            coordinatePickActive: false,
+            selectedDeviceCode: null
+        };
+        hostState.points = hostState.renderedState.points || [];
+        hostState.selectedDeviceCode = hostState.renderedState.selectedDeviceCode || null;
+        updateMapCursor(hostState.renderedState.coordinatePickActive);
 
         const resolvedPoints = await normalizePoints(hostState.points);
         clearMarkers();
@@ -287,24 +233,22 @@
         resolvedPoints.forEach((item) => {
             const point = item.point;
             const position = new AMap.LngLat(item.longitude, item.latitude);
+            const selected = point.deviceCode === hostState.selectedDeviceCode;
             const marker = new AMap.Marker({
                 anchor: "bottom-center",
-                content: buildMarkerContent(point, point.deviceCode === hostState.selectedDeviceCode),
+                content: buildMarkerContent(point, selected),
                 offset: new AMap.Pixel(0, 0),
-                position: position
-            });
-
-            marker.on("mouseover", function () {
-                showHoverCard(point.deviceCode);
-            });
-
-            marker.on("mouseout", function () {
-                hideHoverCard(point.deviceCode);
+                position: position,
+                zIndex: selected ? 160 : 120
             });
 
             marker.on("click", function () {
                 hostState.selectedDeviceCode = point.deviceCode;
-                applyMarkerSelection();
+                hostState.renderedState = {
+                    ...(hostState.renderedState || {}),
+                    selectedDeviceCode: point.deviceCode
+                };
+                updateMarkerSelection();
                 bridge("marker-click", {
                     deviceCode: point.deviceCode
                 });
@@ -325,10 +269,10 @@
         });
 
         if (!hostState.selectedDeviceCode && markers.length > 0) {
-            hostState.map.setFitView(markers, false, [72, 72, 72, 72], 16);
+            hostState.map.setFitView(markers, false, [56, 56, 56, 56], 16);
         }
 
-        applyMarkerSelection();
+        updateMarkerSelection();
         bridge("rendered-points", renderedPoints);
     }
 
@@ -348,42 +292,94 @@
         });
     }
 
+    function getCurrentViewport() {
+        if (!hostState.map) {
+            return null;
+        }
+
+        const center = hostState.map.getCenter();
+        return {
+            center: [Number(center.getLng().toFixed(6)), Number(center.getLat().toFixed(6))],
+            zoom: Number(hostState.map.getZoom().toFixed(2))
+        };
+    }
+
+    function buildMapOptions(viewport) {
+        const mapStyle = resolveMapStyle(hostState.currentMapStyle);
+        const options = {
+            center: viewport?.center || hostState.config.center || [120.585316, 30.028105],
+            pitch: 0,
+            resizeEnable: true,
+            rotateEnable: false,
+            showBuildingBlock: false,
+            viewMode: "2D",
+            zoom: viewport?.zoom || hostState.config.zoom || 11,
+            zooms: [3, 20]
+        };
+
+        if (mapStyle) {
+            options.mapStyle = mapStyle;
+        }
+
+        return options;
+    }
+
+    function destroyMap() {
+        if (!hostState.map) {
+            return;
+        }
+
+        clearMarkers();
+        hostState.map.destroy();
+        hostState.map = null;
+    }
+
+    function createMap(viewport) {
+        hostState.map = new AMap.Map("map", buildMapOptions(viewport));
+        hostState.map.addControl(new AMap.Scale());
+        hostState.map.addControl(new AMap.ToolBar({
+            position: {
+                right: "18px",
+                top: "60px"
+            }
+        }));
+
+        hostState.map.on("click", function (event) {
+            bridge("map-click", {
+                longitude: Number(event.lnglat.getLng().toFixed(6)),
+                latitude: Number(event.lnglat.getLat().toFixed(6))
+            });
+        });
+    }
+
+    function applyMapStyle(mapStyleKey) {
+        hostState.currentMapStyle = String(mapStyleKey || DEFAULT_MAP_STYLE).trim() || DEFAULT_MAP_STYLE;
+
+        if (!window.AMap) {
+            return;
+        }
+
+        const viewport = getCurrentViewport();
+        destroyMap();
+        createMap(viewport);
+
+        if (hostState.renderedState) {
+            void renderState(hostState.renderedState);
+        }
+    }
+
     async function initialize() {
         const config = window.__TYSL_AMAP_CONFIG__;
         if (!config || !config.isConfigured || !config.key || !config.securityJsCode) {
             return;
         }
 
+        hostState.config = config;
+        hostState.currentMapStyle = String(config.mapStyle || DEFAULT_MAP_STYLE).trim() || DEFAULT_MAP_STYLE;
+
         try {
             await loadAmapScript(config);
-
-            hostState.map = new AMap.Map("map", {
-                center: config.center || [120.585316, 30.028105],
-                mapStyle: config.mapStyle || "amap://styles/darkblue",
-                pitch: 0,
-                resizeEnable: true,
-                rotateEnable: false,
-                showBuildingBlock: false,
-                viewMode: "2D",
-                zoom: config.zoom || 11,
-                zooms: [3, 20]
-            });
-
-            hostState.map.addControl(new AMap.Scale());
-            hostState.map.addControl(new AMap.ToolBar({
-                position: {
-                    right: "18px",
-                    top: "18px"
-                }
-            }));
-
-            hostState.map.on("click", function (event) {
-                bridge("map-click", {
-                    longitude: Number(event.lnglat.getLng().toFixed(6)),
-                    latitude: Number(event.lnglat.getLat().toFixed(6))
-                });
-            });
-
+            applyMapStyle(hostState.currentMapStyle);
             hostState.ready = true;
             bridge("host-ready", {});
         } catch (_error) {
@@ -399,7 +395,14 @@
 
             try {
                 const state = JSON.parse(json);
-                renderState(state);
+                void renderState(state);
+            } catch (_error) {
+                bridge("map-init-failed", {});
+            }
+        },
+        applyMapStyle: function (mapStyleKey) {
+            try {
+                applyMapStyle(mapStyleKey);
             } catch (_error) {
                 bridge("map-init-failed", {});
             }

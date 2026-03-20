@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.UI.Models;
@@ -25,6 +26,7 @@ public partial class ShellWindow : Window
         AmapHost.RenderedPointsUpdated += HandleRenderedPointsUpdated;
 
         DataContextChanged += OnDataContextChanged;
+        Closing += OnClosing;
         Closed += OnClosed;
     }
 
@@ -132,17 +134,43 @@ public partial class ShellWindow : Window
         MessageBox.Show(this, e.Message, e.Title, MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (editorDialog is not null)
+        {
+            editorDialog.Closed -= HandleEditorDialogClosed;
+            editorDialog.Close();
+            editorDialog = null;
+        }
+    }
+
     private void OnClosed(object? sender, EventArgs e)
     {
+        Closing -= OnClosing;
+        Closed -= OnClosed;
+        DataContextChanged -= OnDataContextChanged;
         AmapHost.PointSelected -= HandleMapPointSelected;
         AmapHost.MapClicked -= HandleMapClicked;
         AmapHost.RenderedPointsUpdated -= HandleRenderedPointsUpdated;
+        AmapHost.Dispose();
+
+        if (editorDialog is not null)
+        {
+            editorDialog.Closed -= HandleEditorDialogClosed;
+            editorDialog = null;
+        }
 
         if (shellViewModel is not null)
         {
             shellViewModel.EditorDialogRequested -= HandleEditorDialogRequested;
             shellViewModel.NotificationRequested -= HandleNotificationRequested;
             shellViewModel.Dispose();
+            shellViewModel = null;
+        }
+
+        if (Application.Current is { } app && ReferenceEquals(app.MainWindow, this))
+        {
+            app.Shutdown();
         }
     }
 }

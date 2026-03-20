@@ -1,7 +1,7 @@
 {
   "key": "your-amap-jsapi-key",
   "securityJsCode": "your-amap-security-js-code",
-  "mapStyle": "amap://styles/darkblue",
+  "mapStyle": "default",
   "zoom": 11,
   "center": [120.585316, 30.028105]
 }
