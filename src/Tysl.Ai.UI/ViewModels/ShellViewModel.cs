@@ -17,6 +17,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     private readonly SemaphoreSlim dashboardLoadLock = new(1, 1);
     private readonly IDispatchService dispatchService;
+    private readonly ILocalDiagnosticService diagnosticService;
     private readonly DispatcherTimer refreshTimer;
     private readonly bool isMapHostConfigured;
     private readonly Dictionary<string, DemoCoordinate> renderedPointCoordinates = new(StringComparer.OrdinalIgnoreCase);
@@ -51,11 +52,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         ISiteMapQueryService siteMapQueryService,
         ISiteLocalProfileService siteLocalProfileService,
         IDispatchService dispatchService,
+        ILocalDiagnosticService diagnosticService,
         bool isMapHostConfigured)
     {
         this.siteMapQueryService = siteMapQueryService;
         this.siteLocalProfileService = siteLocalProfileService;
         this.dispatchService = dispatchService;
+        this.diagnosticService = diagnosticService;
         this.isMapHostConfigured = isMapHostConfigured;
 
         mapEmptyStateText = isMapHostConfigured
@@ -290,6 +293,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
+        _ = WriteDiagnosticAsync(
+            "map-host-interaction-end",
+            $"deviceCode={activeEditor.DeviceCode}, longitude={longitude:F6}, latitude={latitude:F6}");
+
         activeEditor.ApplyPickedCoordinate(new DemoCoordinate
         {
             Longitude = Math.Round(longitude, 6),
@@ -342,6 +349,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             activeEditor = null;
         }
 
+        refreshTimer.Start();
+
         editor.SaveRequested -= HandleEditorSaveRequested;
         editor.CancelRequested -= HandleEditorCancelRequested;
         editor.CoordinatePickRequested -= HandleEditorCoordinatePickRequested;
@@ -362,6 +371,11 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     private async void HandleRefreshTimerTick(object? sender, EventArgs e)
     {
+        if (activeEditor is not null)
+        {
+            return;
+        }
+
         await LoadDashboardAsync(selectedPointDeviceCode);
     }
 
@@ -423,8 +437,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             selectedDetailSource = null;
             SelectedDetail = null;
         }
-        catch
+        catch (Exception ex)
         {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=load-dashboard, notifyOnError={notifyOnError}, type={ex.GetType().FullName}, message={ex.Message}");
+
             if (notifyOnError)
             {
                 Notify("加载失败", "地图数据暂不可用，请稍后重试。");
@@ -453,8 +471,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 ? null
                 : SiteDetailViewModel.FromSnapshot(detail, GetRenderedCoordinate(detail.DeviceCode));
         }
-        catch
+        catch (Exception ex)
         {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=load-site-detail, deviceCode={deviceCode}, notifyOnError={notifyOnError}, type={ex.GetType().FullName}, message={ex.Message}");
+
             if (notifyOnError)
             {
                 Notify("详情加载失败", "点位详情暂不可用，请稍后重试。");
@@ -469,7 +491,31 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return Task.CompletedTask;
         }
 
-        OpenEditor(SelectedDetail.CreateEditorViewModel());
+        try
+        {
+            _ = WriteDiagnosticAsync(
+                "edit-dialog-open-start",
+                $"deviceCode={SelectedDetail.DeviceCode}");
+            _ = WriteDiagnosticAsync(
+                "load-local-profile-start",
+                $"deviceCode={SelectedDetail.DeviceCode}");
+
+            var editor = SelectedDetail.CreateEditorViewModel();
+
+            _ = WriteDiagnosticAsync(
+                "load-local-profile-end",
+                $"deviceCode={SelectedDetail.DeviceCode}, hasLocalProfile={editor.HasLocalProfile}");
+
+            OpenEditor(editor);
+        }
+        catch (Exception ex)
+        {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=open-editor, deviceCode={SelectedDetail.DeviceCode}, type={ex.GetType().FullName}, message={ex.Message}");
+            Notify("打开失败", "编辑补充信息窗口暂不可用，请稍后重试。");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -486,8 +532,11 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             await siteLocalProfileService.UpsertAsync(input);
             await LoadDashboardAsync(SelectedDetail.DeviceCode, true);
         }
-        catch
+        catch (Exception ex)
         {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=toggle-monitoring, deviceCode={SelectedDetail.DeviceCode}, type={ex.GetType().FullName}, message={ex.Message}");
             Notify("操作失败", "巡检状态更新失败，请稍后重试。");
         }
     }
@@ -504,8 +553,11 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             await dispatchService.ConfirmRecoveryAsync(dispatchRecordId);
             await LoadDashboardAsync(SelectedDetail.DeviceCode, true);
         }
-        catch
+        catch (Exception ex)
         {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=confirm-recovery, dispatchRecordId={dispatchRecordId}, type={ex.GetType().FullName}, message={ex.Message}");
             Notify("恢复确认失败", "恢复状态更新失败，请稍后重试。");
         }
     }
@@ -518,10 +570,24 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
 
         activeEditor = editor;
+        refreshTimer.Stop();
         editor.SaveRequested += HandleEditorSaveRequested;
         editor.CancelRequested += HandleEditorCancelRequested;
         editor.CoordinatePickRequested += HandleEditorCoordinatePickRequested;
-        EditorDialogRequested?.Invoke(this, new SiteEditorDialogRequestedEventArgs(editor));
+
+        try
+        {
+            EditorDialogRequested?.Invoke(this, new SiteEditorDialogRequestedEventArgs(editor));
+        }
+        catch
+        {
+            editor.SaveRequested -= HandleEditorSaveRequested;
+            editor.CancelRequested -= HandleEditorCancelRequested;
+            editor.CoordinatePickRequested -= HandleEditorCoordinatePickRequested;
+            activeEditor = null;
+            refreshTimer.Start();
+            throw;
+        }
     }
 
     private void SelectPoint(SiteMapPointViewModel? point)
@@ -566,12 +632,26 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         try
         {
+            _ = WriteDiagnosticAsync(
+                "save-start",
+                $"deviceCode={input!.DeviceCode}");
+
             await siteLocalProfileService.UpsertAsync(input!);
             editor.RequestClose();
             await LoadDashboardAsync(input!.DeviceCode, true);
+
+            _ = WriteDiagnosticAsync(
+                "save-end",
+                $"deviceCode={input.DeviceCode}, result=success");
         }
-        catch
+        catch (Exception ex)
         {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=save-editor, deviceCode={editor.DeviceCode}, type={ex.GetType().FullName}, message={ex.Message}");
+            _ = WriteDiagnosticAsync(
+                "save-end",
+                $"deviceCode={editor.DeviceCode}, result=failure");
             Notify("保存失败", "本地补充信息保存失败，请稍后重试。");
         }
     }
@@ -603,11 +683,21 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         activeEditor = editor;
         IsCoordinatePickActive = true;
         MapInteractionHint = "坐标补录中，请在地图上点选位置。";
+        _ = WriteDiagnosticAsync(
+            "map-host-interaction-start",
+            $"deviceCode={editor.DeviceCode}, action=coordinate-pick");
         editor.MarkCoordinatePickPending();
     }
 
     private void ClearCoordinatePick()
     {
+        if (IsCoordinatePickActive && activeEditor is not null)
+        {
+            _ = WriteDiagnosticAsync(
+                "map-host-interaction-end",
+                $"deviceCode={activeEditor.DeviceCode}, action=coordinate-pick-cleared");
+        }
+
         IsCoordinatePickActive = false;
         MapInteractionHint = isMapHostConfigured
             ? "悬停查看摘要，单击联动详情。"
@@ -701,5 +791,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private void Notify(string title, string message)
     {
         NotificationRequested?.Invoke(this, new NotificationRequestedEventArgs(title, message));
+    }
+
+    private Task WriteDiagnosticAsync(string eventName, string message)
+    {
+        return diagnosticService.WriteAsync(eventName, message);
     }
 }

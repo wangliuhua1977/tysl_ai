@@ -1,4 +1,5 @@
 using System.Windows;
+using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.UI.Models;
 using Tysl.Ai.UI.ViewModels;
 using Tysl.Ai.UI.Views.Controls;
@@ -7,11 +8,15 @@ namespace Tysl.Ai.UI.Views;
 
 public partial class ShellWindow : Window
 {
+    private readonly ILocalDiagnosticService diagnosticService;
     private SiteEditorDialog? editorDialog;
     private ShellViewModel? shellViewModel;
 
-    public ShellWindow(AmapHostConfiguration mapHostConfiguration)
+    public ShellWindow(
+        AmapHostConfiguration mapHostConfiguration,
+        ILocalDiagnosticService diagnosticService)
     {
+        this.diagnosticService = diagnosticService ?? throw new ArgumentNullException(nameof(diagnosticService));
         InitializeComponent();
 
         AmapHost.Configuration = mapHostConfiguration;
@@ -58,19 +63,41 @@ public partial class ShellWindow : Window
 
     private void HandleEditorDialogRequested(object? sender, SiteEditorDialogRequestedEventArgs e)
     {
-        if (editorDialog is not null)
+        try
         {
-            editorDialog.Close();
-        }
+            _ = diagnosticService.WriteAsync(
+                "dialog-created",
+                $"deviceCode={e.ViewModel.DeviceCode}, hasExistingDialog={editorDialog is not null}");
 
-        editorDialog = new SiteEditorDialog
+            if (editorDialog is not null)
+            {
+                editorDialog.Close();
+            }
+
+            editorDialog = new SiteEditorDialog
+            {
+                Owner = this,
+                DataContext = e.ViewModel
+            };
+
+            _ = diagnosticService.WriteAsync(
+                "dialog-datacontext-bound",
+                $"deviceCode={e.ViewModel.DeviceCode}, viewModel={e.ViewModel.GetType().Name}");
+
+            editorDialog.Closed += HandleEditorDialogClosed;
+            _ = diagnosticService.WriteAsync(
+                "showdialog-enter",
+                $"deviceCode={e.ViewModel.DeviceCode}, mode=show");
+            editorDialog.Show();
+            editorDialog.Activate();
+        }
+        catch (Exception ex)
         {
-            Owner = this,
-            DataContext = e.ViewModel
-        };
-        editorDialog.Closed += HandleEditorDialogClosed;
-        editorDialog.Show();
-        editorDialog.Activate();
+            _ = diagnosticService.WriteAsync(
+                "exception-caught",
+                $"source=shell-window-open-dialog, type={ex.GetType().FullName}, message={ex.Message}");
+            MessageBox.Show(this, "编辑补充信息窗口打开失败，请稍后重试。", "打开失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void HandleEditorDialogClosed(object? sender, EventArgs e)
@@ -80,10 +107,13 @@ public partial class ShellWindow : Window
             return;
         }
 
+        var deviceCode = "unknown";
+
         dialog.Closed -= HandleEditorDialogClosed;
 
         if (dialog.DataContext is SiteEditorViewModel viewModel)
         {
+            deviceCode = viewModel.DeviceCode;
             shellViewModel?.HandleEditorClosed(viewModel);
         }
 
@@ -91,6 +121,10 @@ public partial class ShellWindow : Window
         {
             editorDialog = null;
         }
+
+        _ = diagnosticService.WriteAsync(
+            "showdialog-exit",
+            $"deviceCode={deviceCode}");
     }
 
     private void HandleNotificationRequested(object? sender, NotificationRequestedEventArgs e)

@@ -15,10 +15,10 @@ public sealed class AcisKernelPlatformSiteProvider :
     private const int CatalogPageSize = 20;
     private const int MaxCatalogPages = 3;
     private const int MaxCatalogItems = 60;
-    private const int MaxDetailRequests = 24;
-    private const int MaxDetailConcurrency = 4;
+    private const int MaxDetailRequests = 8;
+    private const int MaxDetailConcurrency = 2;
     private const string UnknownCoordinateType = "unknown";
-    private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(60);
 
     private readonly AcisApiKernel? kernel;
     private readonly string? configPath;
@@ -321,8 +321,7 @@ public sealed class AcisKernelPlatformSiteProvider :
     private static bool NeedsDetail(CatalogCandidate candidate)
     {
         return !candidate.RawLongitude.HasValue
-            || !candidate.RawLatitude.HasValue
-            || !candidate.IsOnline.HasValue;
+            || !candidate.RawLatitude.HasValue;
     }
 
     private static PlatformConnectionState CreateState(

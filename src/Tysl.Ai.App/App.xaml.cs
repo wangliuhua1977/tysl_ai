@@ -3,6 +3,7 @@ using System.Windows;
 using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.Infrastructure.Background;
 using Tysl.Ai.Infrastructure.Configuration;
+using Tysl.Ai.Infrastructure.Diagnostics;
 using Tysl.Ai.Infrastructure.Dispatch;
 using Tysl.Ai.Infrastructure.Integrations.Acis;
 using Tysl.Ai.Infrastructure.Messaging;
@@ -17,6 +18,7 @@ namespace Tysl.Ai.App;
 
 public partial class App : Application
 {
+    private ILocalDiagnosticService? diagnosticService;
     private AcisKernelPlatformSiteProvider? platformSiteProvider;
     private SilentInspectionHostedService? silentInspectionHostedService;
     private WeComWebhookSender? webhookSender;
@@ -27,6 +29,10 @@ public partial class App : Application
 
         var databasePath = GetDatabasePath();
         var connectionFactory = new SqliteConnectionFactory(databasePath);
+        diagnosticService = new LocalDiagnosticService(ProjectPathResolver.EnsureRuntimeDirectory("diagnostics"));
+        DispatcherUnhandledException += HandleDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += HandleCurrentDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += HandleUnobservedTaskException;
         var dispatchOptionsProvider = new DispatchOptionsProvider();
         var dispatchLoadResult = dispatchOptionsProvider.Load();
         var databaseInitializer = new SqliteDatabaseInitializer(connectionFactory);
@@ -78,8 +84,11 @@ public partial class App : Application
             siteMapQueryService,
             siteLocalProfileService,
             dispatchService,
+            diagnosticService,
             amapLoadResult.IsReady);
-        var shellWindow = new ShellWindow(BuildMapHostConfiguration(amapLoadResult))
+        var shellWindow = new ShellWindow(
+            BuildMapHostConfiguration(amapLoadResult),
+            diagnosticService)
         {
             DataContext = shellViewModel
         };
@@ -92,12 +101,51 @@ public partial class App : Application
     private void HandleExit(object? sender, ExitEventArgs e)
     {
         Exit -= HandleExit;
+        DispatcherUnhandledException -= HandleDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException -= HandleCurrentDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException -= HandleUnobservedTaskException;
         silentInspectionHostedService?.Dispose();
         silentInspectionHostedService = null;
         webhookSender?.Dispose();
         webhookSender = null;
         platformSiteProvider?.Dispose();
         platformSiteProvider = null;
+        if (diagnosticService is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
+
+        diagnosticService = null;
+    }
+
+    private void HandleDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        _ = diagnosticService?.WriteAsync(
+            "exception-caught",
+            $"source=dispatcher, type={e.Exception.GetType().FullName}, message={e.Exception.Message}");
+    }
+
+    private void HandleCurrentDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is not Exception exception)
+        {
+            _ = diagnosticService?.WriteAsync(
+                "exception-caught",
+                $"source=appdomain, terminating={e.IsTerminating}, detail=non-exception object");
+            return;
+        }
+
+        _ = diagnosticService?.WriteAsync(
+            "exception-caught",
+            $"source=appdomain, terminating={e.IsTerminating}, type={exception.GetType().FullName}, message={exception.Message}");
+    }
+
+    private void HandleUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        var exception = e.Exception.Flatten();
+        _ = diagnosticService?.WriteAsync(
+            "exception-caught",
+            $"source=taskscheduler, type={exception.GetType().FullName}, message={exception.Message}");
     }
 
     private static string GetDatabasePath()

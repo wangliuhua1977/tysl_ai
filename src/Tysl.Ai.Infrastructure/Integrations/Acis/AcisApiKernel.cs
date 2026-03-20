@@ -316,6 +316,15 @@ public sealed class AcisApiKernel : IDisposable
 
         foreach (var endpoint in candidateEndpoints)
         {
+            if (string.Equals(endpoint, Options.Ctyun.Endpoints.GetDeviceInfoByDeviceCode, StringComparison.OrdinalIgnoreCase)
+                && snapshots.Any(snapshot => snapshot.IsSuccess))
+            {
+                _logger.Info(
+                    "PointDetail",
+                    $"Skipping fallback endpoint after prior success: deviceCode={cacheKey}, endpoint={endpoint}, snapshotCount={snapshots.Count}");
+                break;
+            }
+
             var response = await PostProtectedJsonAsync(
                 endpoint,
                 new[]
@@ -360,6 +369,11 @@ public sealed class AcisApiKernel : IDisposable
                 {
                     best = snapshot;
                 }
+            }
+
+            if (best.Longitude.HasValue && best.Latitude.HasValue && best.IsOnline.HasValue)
+            {
+                break;
             }
         }
 
@@ -697,6 +711,7 @@ public sealed class AcisApiKernel : IDisposable
         var now = DateTimeOffset.UtcNow;
         var token = new TokenCacheEntry
         {
+            AppId = Options.Ctyun.AppId,
             AccessToken = dto.AccessToken ?? string.Empty,
             RefreshToken = dto.RefreshToken ?? string.Empty,
             ExpiresIn = dto.ExpiresIn,
@@ -722,6 +737,15 @@ public sealed class AcisApiKernel : IDisposable
         {
             var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
             var token = JsonSerializer.Deserialize<TokenCacheEntry>(json, JsonOptions);
+            if (token is not null
+                && !string.Equals(token.AppId, Options.Ctyun.AppId, StringComparison.Ordinal))
+            {
+                _logger.Warn(
+                    "Token",
+                    $"token cache appId mismatch or missing. cachedAppId={token.AppId ?? "missing"}, currentAppId={Options.Ctyun.AppId}. token cache will be ignored.");
+                return null;
+            }
+
             return token;
         }
         catch (Exception ex)
@@ -1098,6 +1122,7 @@ public sealed class AmapOptions
 
 public sealed class TokenCacheEntry
 {
+    public string AppId { get; set; } = string.Empty;
     public string AccessToken { get; set; } = string.Empty;
     public string RefreshToken { get; set; } = string.Empty;
     public int ExpiresIn { get; set; }
