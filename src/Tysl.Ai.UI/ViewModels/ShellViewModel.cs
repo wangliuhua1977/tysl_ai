@@ -24,8 +24,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private readonly ISiteMapQueryService siteMapQueryService;
     private SiteEditorViewModel? activeEditor;
     private int dispatchedCount;
+    private string dispatchOverviewDetail = "当前无派单中的点位。";
+    private string dispatchOverviewText = "派单待命";
     private int faultCount;
     private bool hasVisiblePoints;
+    private string inspectionStatusDetail = "当前无纳入静默巡检的点位。";
+    private string inspectionStatusText = "巡检待机";
     private bool isCoordinatePickActive;
     private bool isDisposed;
     private bool isFilterPanelExpanded = true;
@@ -35,7 +39,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private int monitoredCount;
     private int pointCount;
     private string platformStatusDetail = "正在准备平台设备源。";
-    private string platformStatusText = "平台连接准备中";
+    private string platformStatusText = "平台准备中";
     private string searchText = string.Empty;
     private SiteDetailViewModel? selectedDetail;
     private SiteMergedView? selectedDetailSource;
@@ -56,17 +60,17 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         mapEmptyStateText = isMapHostConfigured
             ? "正在等待平台点位。"
-            : "地图未配置。请补充 amap-js.json 后重启。";
+            : "地图未配置。请准备 amap-js.json 后重启。";
         mapInteractionHint = isMapHostConfigured
-            ? "地图只负责展示与联动，坐标拾取仅用于补录本地手工坐标。"
-            : "地图宿主未配置，暂不可拾取手工坐标。";
+            ? "悬停查看摘要，单击联动详情。"
+            : "地图未配置，暂不支持坐标补录。";
 
         Filters =
         [
             new DashboardFilterOption("全部", SiteDashboardFilter.All),
             new DashboardFilterOption("异常", SiteDashboardFilter.Fault),
-            new DashboardFilterOption("已监测", SiteDashboardFilter.Monitored),
-            new DashboardFilterOption("已派单", SiteDashboardFilter.Dispatched)
+            new DashboardFilterOption("已纳管", SiteDashboardFilter.Monitored),
+            new DashboardFilterOption("处理中", SiteDashboardFilter.Dispatched)
         ];
 
         selectedFilter = Filters[0];
@@ -235,6 +239,30 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref platformStatusDetail, value);
     }
 
+    public string InspectionStatusText
+    {
+        get => inspectionStatusText;
+        private set => SetProperty(ref inspectionStatusText, value);
+    }
+
+    public string InspectionStatusDetail
+    {
+        get => inspectionStatusDetail;
+        private set => SetProperty(ref inspectionStatusDetail, value);
+    }
+
+    public string DispatchOverviewText
+    {
+        get => dispatchOverviewText;
+        private set => SetProperty(ref dispatchOverviewText, value);
+    }
+
+    public string DispatchOverviewDetail
+    {
+        get => dispatchOverviewDetail;
+        private set => SetProperty(ref dispatchOverviewDetail, value);
+    }
+
     public bool HasVisiblePoints
     {
         get => hasVisiblePoints;
@@ -253,7 +281,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref mapHostStateJson, value);
     }
 
-    public string MonitorToggleText => SelectedDetail?.IsMonitored == false ? "纳入监测" : "暂停监测";
+    public string MonitorToggleText => SelectedDetail?.IsMonitored == false ? "纳入巡检" : "暂停巡检";
 
     public void HandleMapClicked(double longitude, double latitude)
     {
@@ -350,6 +378,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             MonitoredCount = snapshot.MonitoredCount;
             FaultCount = snapshot.FaultCount;
             DispatchedCount = snapshot.DispatchedCount;
+            UpdateOverviewStatus(snapshot);
+
             LastRefreshText = snapshot.LastRefreshedAt.ToLocalTime().ToString("HH:mm:ss");
             OnPropertyChanged(nameof(LastRefreshText));
 
@@ -458,7 +488,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
         catch
         {
-            Notify("操作失败", "监测状态更新失败，请稍后重试。");
+            Notify("操作失败", "巡检状态更新失败，请稍后重试。");
         }
     }
 
@@ -566,13 +596,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         if (!isMapHostConfigured)
         {
-            Notify("地图未配置", "请先补充 amap-js.json，再使用地图拾取手工坐标。");
+            Notify("地图未配置", "请先准备 amap-js.json，再使用地图补录坐标。");
             return;
         }
 
         activeEditor = editor;
         IsCoordinatePickActive = true;
-        MapInteractionHint = "手工坐标补录中，请点击地图回填经纬度。";
+        MapInteractionHint = "坐标补录中，请在地图上点选位置。";
         editor.MarkCoordinatePickPending();
     }
 
@@ -580,8 +610,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     {
         IsCoordinatePickActive = false;
         MapInteractionHint = isMapHostConfigured
-            ? "地图只负责展示与联动，坐标拾取仅用于补录本地手工坐标。"
-            : "地图宿主未配置，暂不可拾取手工坐标。";
+            ? "悬停查看摘要，单击联动详情。"
+            : "地图未配置，暂不支持坐标补录。";
     }
 
     private DemoCoordinate? GetRenderedCoordinate(string deviceCode)
@@ -615,6 +645,41 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             GetRenderedCoordinate(selectedDetailSource.DeviceCode));
     }
 
+    private void UpdateOverviewStatus(SiteDashboardSnapshot snapshot)
+    {
+        if (!snapshot.IsPlatformConnected)
+        {
+            InspectionStatusText = "巡检待机";
+            InspectionStatusDetail = "平台未连通，静默巡检按降级模式运行。";
+        }
+        else if (snapshot.MonitoredCount <= 0)
+        {
+            InspectionStatusText = "巡检待机";
+            InspectionStatusDetail = "当前无纳入静默巡检的点位。";
+        }
+        else
+        {
+            InspectionStatusText = "巡检运行";
+            InspectionStatusDetail = $"已纳管 {snapshot.MonitoredCount} 个点位。";
+        }
+
+        if (snapshot.DispatchedCount > 0)
+        {
+            DispatchOverviewText = "派单跟进";
+            DispatchOverviewDetail = $"{snapshot.DispatchedCount} 个点位处于派单或恢复链路。";
+        }
+        else if (snapshot.FaultCount > 0)
+        {
+            DispatchOverviewText = "待处置";
+            DispatchOverviewDetail = $"{snapshot.FaultCount} 个点位需要关注。";
+        }
+        else
+        {
+            DispatchOverviewText = "派单待命";
+            DispatchOverviewDetail = "当前无派单中的点位。";
+        }
+    }
+
     private static string ResolveMapEmptyStateText(
         bool isMapHostConfigured,
         bool isPlatformConnected,
@@ -622,7 +687,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     {
         if (!isMapHostConfigured)
         {
-            return "地图未配置。请补充 amap-js.json 后重启。";
+            return "地图未配置。请准备 amap-js.json 后重启。";
         }
 
         if (!isPlatformConnected)

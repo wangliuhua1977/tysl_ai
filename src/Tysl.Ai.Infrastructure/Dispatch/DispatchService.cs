@@ -112,6 +112,7 @@ public sealed class DispatchService : IDispatchService
             ? DispatchStatus.PendingDispatch
             : ResolveAutomaticDispatchStatus(policy);
         var message = BuildFaultMessage(
+            policy,
             platformSite,
             localProfile,
             currentState,
@@ -180,6 +181,7 @@ public sealed class DispatchService : IDispatchService
         }
 
         var message = BuildFaultMessage(
+            policy,
             platformSite,
             localProfile,
             currentState,
@@ -296,6 +298,7 @@ public sealed class DispatchService : IDispatchService
                 platformSite,
                 localProfile,
                 record.DeviceCode,
+                policy,
                 now,
                 normalizedSummary);
             var webhookUrl = NormalizeText(policy.WebhookUrl);
@@ -369,6 +372,7 @@ public sealed class DispatchService : IDispatchService
     }
 
     private static WebhookMessage BuildFaultMessage(
+        DispatchPolicy policy,
         PlatformSiteSnapshot platformSite,
         SiteLocalProfile? localProfile,
         SiteRuntimeState currentState,
@@ -391,8 +395,8 @@ public sealed class DispatchService : IDispatchService
         return new WebhookMessage
         {
             Content = string.Join(Environment.NewLine, lines),
-            MentionMobiles = Array.Empty<string>(),
-            MentionAll = false
+            MentionMobiles = policy.MentionMobiles,
+            MentionAll = policy.MentionAll
         };
     }
 
@@ -400,6 +404,7 @@ public sealed class DispatchService : IDispatchService
         PlatformSiteSnapshot? platformSite,
         SiteLocalProfile? localProfile,
         string deviceCode,
+        DispatchPolicy policy,
         DateTimeOffset recoveredAt,
         string recoverySummary)
     {
@@ -417,8 +422,8 @@ public sealed class DispatchService : IDispatchService
                     $"恢复时间：{FormatDateTime(recoveredAt)}",
                     $"恢复摘要：{recoverySummary}"
                 ]),
-            MentionMobiles = Array.Empty<string>(),
-            MentionAll = false
+            MentionMobiles = policy.MentionMobiles,
+            MentionAll = policy.MentionAll
         };
     }
 
@@ -441,7 +446,7 @@ public sealed class DispatchService : IDispatchService
             DispatchStatus.PendingDispatch => "待派单",
             DispatchStatus.Dispatched => "已派单",
             DispatchStatus.SendFailed => "发送失败",
-            DispatchStatus.WebhookNotConfigured => "待发送",
+            DispatchStatus.WebhookNotConfigured => "未配置 webhook",
             _ => "未派单"
         };
     }

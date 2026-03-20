@@ -23,6 +23,17 @@
             .replace(/'/g, "&#39;");
     }
 
+    function truncateText(value, maxLength) {
+        const text = String(value || "").trim();
+        if (!text) {
+            return "";
+        }
+
+        return text.length > maxLength
+            ? `${text.slice(0, Math.max(1, maxLength - 1))}…`
+            : text;
+    }
+
     function normalizeCoordinateType(value) {
         const normalized = String(value || "").trim().toLowerCase();
 
@@ -52,28 +63,30 @@
     function buildMarkerContent(point, selected) {
         const selectedClass = selected ? " is-selected" : "";
         const dispatchStateKey = escapeHtml(point.dispatchStateKey || "none");
+        const displayName = truncateText(point.displayName || point.deviceName || point.deviceCode, 12);
         return [
             `<div class="marker-shell marker-${escapeHtml(point.visualState)}${selectedClass}">`,
-            `  <span class="marker-dot"></span>`,
-            `  <span class="marker-status marker-status--${dispatchStateKey}"></span>`,
-            `  <span class="marker-label">${escapeHtml(point.displayName || point.deviceName || point.deviceCode)}</span>`,
-            `</div>`
+            "  <span class=\"marker-dot\"></span>",
+            `  <span class=\"marker-status marker-status--${dispatchStateKey}\"></span>`,
+            `  <span class=\"marker-label\">${escapeHtml(displayName)}</span>`,
+            "</div>"
         ].join("");
     }
 
     function buildCardContent(point) {
-        const dispatchBadge = point.dispatchStateText && point.dispatchStateText !== "未处置"
-            ? `<span class="point-card__badge point-card__badge--dispatch">${escapeHtml(point.dispatchStateText)}</span>`
-            : "";
+        const statusBadges = [
+            point.statusText,
+            point.monitoringText,
+            point.dispatchStateText !== "未处置" ? point.dispatchStateText : null
+        ].filter(Boolean);
+
         return [
-            '<div class="point-card">',
-            `  <div class="point-card__title">${escapeHtml(point.displayName || point.deviceName || point.deviceCode)}</div>`,
-            '  <div class="point-card__badges">',
-            `    <span class="point-card__badge">${escapeHtml(point.statusText)}</span>`,
-            `    <span class="point-card__badge">${escapeHtml(point.monitoringText)}</span>`,
-            `    ${dispatchBadge}`,
+            "<div class=\"point-card\">",
+            `  <div class=\"point-card__title\">${escapeHtml(truncateText(point.displayName || point.deviceName || point.deviceCode, 20))}</div>`,
+            "  <div class=\"point-card__badges\">",
+            statusBadges.map((badge) => `    <span class=\"point-card__badge\">${escapeHtml(badge)}</span>`).join(""),
             "  </div>",
-            `  <div class="point-card__summary">${escapeHtml(point.summaryText)}</div>`,
+            `  <div class=\"point-card__summary\">${escapeHtml(truncateText(point.summaryText, 56))}</div>`,
             "</div>"
         ].join("");
     }

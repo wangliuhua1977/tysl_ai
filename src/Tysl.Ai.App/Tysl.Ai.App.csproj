@@ -14,6 +14,9 @@
     <None Include="..\..\configs\amap-js.template.json" Link="configs\amap-js.template.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\..\configs\dispatch.template.json" Link="configs\dispatch.template.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <PropertyGroup>

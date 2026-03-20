@@ -3,15 +3,15 @@
 ## 固定分层
 
 - `Tysl.Ai.App`
-  - 启动、组合根、配置读取和依赖装配
+  - 启动、根组合、配置读取和依赖装配。
 - `Tysl.Ai.UI`
-  - WPF 视图、ViewModel、主题、WebView2 地图宿主和前端宿主页资源
+  - WPF 视图、ViewModel、主题、控件、WebView2 地图宿主和前端资源。
 - `Tysl.Ai.Services`
-  - 面向 UI 的查询编排和本地补充信息写入
+  - 面向 UI 的查询编排与本地补充信息写入服务。
 - `Tysl.Ai.Infrastructure`
-  - SQLite 持久化、ACIS / CTYun 接入、企业微信 webhook、截图存储、后台静默巡检
+  - ACIS / CTYun 接入、SQLite 持久化、派单、截图、后台巡检。
 - `Tysl.Ai.Core`
-  - 领域模型、枚举、稳定接口和无外部依赖抽象
+  - 领域模型、枚举、稳定接口和无外部依赖的抽象。
 
 ## 依赖方向
 
@@ -25,60 +25,36 @@
 
 ### Core
 
-- `PlatformSiteSnapshot`
-  - 平台原始坐标与原始坐标类型
-- `SiteRuntimeState`
-  - 最近巡检、最近截图、故障摘要、连续失败次数
 - `DispatchPolicy / DispatchRecord`
-  - 派单策略、派单历史、冷却和恢复状态
 - `InspectionSettings`
-  - 监测时段、巡检间隔、截图保留和批量限制
-- `IDispatchPolicyProvider / IDispatchRecordRepository / IDispatchService / IWebhookSender`
-  - 处置链路的稳定接口
+- `PlatformSiteSnapshot`
+- `SiteRuntimeState`
+- `SiteMergedView / SiteMapPoint / SiteAlertDigest`
 
 ### Infrastructure
 
 - `Integrations/Acis/AcisKernelPlatformSiteProvider`
-  - 平台目录、详情、原始坐标透传、预览解析和平台降级
 - `Persistence/Sqlite/*`
-  - 本地补充信息、运行态、截图记录、巡检设置、派单策略、派单记录
-- `Messaging/WeComWebhookSender`
-  - 企业微信 webhook 发送
 - `Dispatch/DispatchService`
-  - 派单、冷却、恢复与降级编排
+- `Messaging/WeComWebhookSender`
 - `Storage/SnapshotStorage`
-  - 最近截图留痕落盘
 - `Background/SilentInspectionService`
-  - 静默巡检与处置触发编排
 
 ### Services
 
 - `SiteMapQueryService`
-  - 合并平台快照、本地补充信息、运行态和派单记录
-  - 输出地图点位、详情抽屉和异常条所需视图模型源数据
-  - 不做坐标转换
+  - 只做聚合与视图模型源数据组织，不做平台接入细节和坐标转换。
 
 ### UI
 
-- `AmapHostControl`
-  - 持有 `WebView2`
-  - 负责 WPF 与 JS 消息桥
-  - 不直接调用 ACIS 或 webhook
 - `ShellViewModel`
-  - 组装地图宿主状态
-  - 定时刷新运行态合并结果
-  - 触发手工确认恢复
+- `AmapHostControl`
 - `Web/amap/*`
-  - 初始化高德 JSAPI
-  - 执行前端坐标转换
-  - 渲染 marker 和轻量状态角标
 
 ## 严格边界
 
-- `UI` 不直接写 `HttpClient`、签名、解密、webhook 调用或后端坐标转换
-- `UI` 不显示本地日志、堆栈、请求细节或 webhook 返回体
-- `Services` 不承载平台接入细节
-- `Infrastructure` 不回退到假数据主链
-- `Core` 不依赖 WebView2、高德 SDK 或 SQLite
-- 后端主链不重新启用 `ConvertCoordinatesAsync`
-- 当前仍不扩展成复杂工单系统、审批流和报表中心
+- `UI` 不直接写 `HttpClient`、签名、解密、webhook 调用或服务层坐标转换。
+- `UI` 不显示日志、异常堆栈、请求细节或诊断信息。
+- `Services` 不承载 ACIS 接入细节。
+- `Infrastructure` 不回退成假实现主链。
+- `Core` 不依赖 WebView2、高德 SDK、SQLite 或网络能力。

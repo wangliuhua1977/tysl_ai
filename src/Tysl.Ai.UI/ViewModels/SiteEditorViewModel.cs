@@ -45,7 +45,7 @@ public sealed class SiteEditorViewModel : ObservableObject
         this.maintenanceUnit = maintenanceUnit;
         this.maintainerName = maintainerName;
         this.maintainerPhone = maintainerPhone;
-        coordinatePickSummary = "坐标拾取仅用于补录本地手工坐标，不会新增平台点位。";
+        coordinatePickSummary = "仅维护本地补充信息，地图点选只回填手工坐标。";
 
         SaveCommand = new RelayCommand(() => SaveRequested?.Invoke(this, EventArgs.Empty));
         CancelCommand = new RelayCommand(() => CancelRequested?.Invoke(this, EventArgs.Empty));
@@ -160,7 +160,7 @@ public sealed class SiteEditorViewModel : ObservableObject
 
     public void MarkCoordinatePickPending()
     {
-        CoordinatePickSummary = "手工坐标补录中，请点击主界面地图占位区。";
+        CoordinatePickSummary = "坐标补录中，请在主界面地图上点选位置。";
     }
 
     public void ApplyPickedCoordinate(DemoCoordinate coordinate)

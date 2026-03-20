@@ -1,6 +1,0 @@
-deviceCode=3TPBH7930658PHZ
-displayName=东方佛都大佛湾景区
-capturedAt=2026-03-19T11:36:08.4286691+00:00
-previewResolveState=Resolved
-faultCode=None
-summary=Online; preview resolved; snapshot trace updated; runtime healthy

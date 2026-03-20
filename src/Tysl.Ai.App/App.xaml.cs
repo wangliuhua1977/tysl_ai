@@ -27,8 +27,10 @@ public partial class App : Application
 
         var databasePath = GetDatabasePath();
         var connectionFactory = new SqliteConnectionFactory(databasePath);
+        var dispatchOptionsProvider = new DispatchOptionsProvider();
+        var dispatchLoadResult = dispatchOptionsProvider.Load();
         var databaseInitializer = new SqliteDatabaseInitializer(connectionFactory);
-        databaseInitializer.InitializeAsync().GetAwaiter().GetResult();
+        databaseInitializer.InitializeAsync(dispatchLoadResult.InitialPolicy).GetAwaiter().GetResult();
 
         var optionsProvider = new AcisKernelOptionsProvider();
         var loadResult = optionsProvider.Load();

@@ -1,6 +1,0 @@
-deviceCode=3KSCP29325ECQXZ
-displayName=夹江大千纸故里研学基地
-capturedAt=2026-03-19T11:35:57.6338104+00:00
-previewResolveState=Failed
-faultCode=Offline
-summary=Offline; preview resolve failed; snapshot trace updated

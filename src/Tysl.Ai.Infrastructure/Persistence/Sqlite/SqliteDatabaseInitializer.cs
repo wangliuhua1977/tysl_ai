@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Tysl.Ai.Core.Models;
 
@@ -12,7 +13,9 @@ public sealed class SqliteDatabaseInitializer
         this.connectionFactory = connectionFactory;
     }
 
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    public async Task InitializeAsync(
+        DispatchPolicy? initialDispatchPolicy = null,
+        CancellationToken cancellationToken = default)
     {
         await using var connection = await connectionFactory.CreateOpenConnectionAsync(cancellationToken);
 
@@ -37,7 +40,7 @@ public sealed class SqliteDatabaseInitializer
         }
 
         await SeedInspectionSettingsAsync(connection, cancellationToken);
-        await SeedDispatchPolicyAsync(connection, cancellationToken);
+        await SeedDispatchPolicyAsync(connection, initialDispatchPolicy ?? DispatchPolicy.Default, cancellationToken);
 
         await using var countCommand = connection.CreateCommand();
         countCommand.CommandText = "SELECT COUNT(1) FROM site_local_profile;";
@@ -340,6 +343,7 @@ public sealed class SqliteDatabaseInitializer
 
     private static async Task SeedDispatchPolicyAsync(
         SqliteConnection connection,
+        DispatchPolicy initialPolicy,
         CancellationToken cancellationToken)
     {
         await using var countCommand = connection.CreateCommand();
@@ -350,7 +354,7 @@ public sealed class SqliteDatabaseInitializer
             return;
         }
 
-        var defaults = DispatchPolicy.Default with
+        var defaults = initialPolicy with
         {
             UpdatedAt = DateTimeOffset.UtcNow
         };
@@ -393,7 +397,7 @@ public sealed class SqliteDatabaseInitializer
         insertCommand.Parameters.AddWithValue("$repeatAfterRecovery", defaults.RepeatAfterRecovery ? 1 : 0);
         insertCommand.Parameters.AddWithValue("$notifyOnRecovery", defaults.NotifyOnRecovery ? 1 : 0);
         insertCommand.Parameters.AddWithValue("$webhookUrl", (object?)defaults.WebhookUrl ?? DBNull.Value);
-        insertCommand.Parameters.AddWithValue("$mentionMobiles", "[]");
+        insertCommand.Parameters.AddWithValue("$mentionMobiles", JsonSerializer.Serialize(defaults.MentionMobiles));
         insertCommand.Parameters.AddWithValue("$mentionAll", defaults.MentionAll ? 1 : 0);
         insertCommand.Parameters.AddWithValue("$updatedAt", defaults.UpdatedAt.UtcDateTime.ToString("O"));
 
@@ -467,7 +471,7 @@ public sealed class SqliteDatabaseInitializer
             {
                 DeviceCode = "ACIS-DEMO-002",
                 Alias = "高铁站前广场",
-                Remark = "保留别名与维护信息，演示平台快照与本地补充信息合并。",
+                Remark = "保留别名和维护信息，验证平台快照与本地补充信息合并。",
                 IsMonitored = true,
                 AddressText = "绍兴北站南广场",
                 ProductAccessNumber = "3306020002002",
@@ -481,7 +485,7 @@ public sealed class SqliteDatabaseInitializer
             {
                 DeviceCode = "ACIS-DEMO-004",
                 Alias = "政务中心东门",
-                Remark = "演示本地监测开关关闭时的视图状态。",
+                Remark = "演示本地监测开关关闭时的界面状态。",
                 IsMonitored = false,
                 AddressText = "越城区政务中心东门",
                 MaintenanceUnit = "政务中心值守组",
@@ -494,7 +498,7 @@ public sealed class SqliteDatabaseInitializer
             {
                 DeviceCode = "ACIS-DEMO-006",
                 Alias = "科创园一期西门",
-                Remark = "平台暂无坐标，依赖本地手工补录坐标兜底展示。",
+                Remark = "平台暂无坐标时，依赖本地手工补录坐标兜底显示。",
                 IsMonitored = true,
                 ManualLongitude = 120.6678,
                 ManualLatitude = 30.0084,

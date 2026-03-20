@@ -1,6 +1,0 @@
-deviceCode=51110200441324008964
-displayName=GST-G460-CT
-capturedAt=2026-03-19T11:36:07.7334448+00:00
-previewResolveState=Failed
-faultCode=Offline
-summary=Offline; preview resolve failed; snapshot trace updated

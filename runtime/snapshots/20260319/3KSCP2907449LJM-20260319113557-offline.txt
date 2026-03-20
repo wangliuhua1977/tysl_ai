@@ -1,6 +1,0 @@
-deviceCode=3KSCP2907449LJM
-displayName=峨眉桂花桥红山大讲堂
-capturedAt=2026-03-19T11:35:57.6329466+00:00
-previewResolveState=Failed
-faultCode=Offline
-summary=Offline; preview resolve failed; snapshot trace updated

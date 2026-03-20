@@ -13,7 +13,6 @@ public sealed class SiteMapPointViewModel : ObservableObject
         DeviceCode = point.DeviceCode;
         DeviceName = point.DeviceName;
         DisplayName = point.DisplayName;
-        StatusText = point.StatusText;
         VisualState = point.VisualState;
         IsMonitored = point.IsMonitored;
         RawCoordinateType = point.CoordinatePayload.RawCoordinateType;
@@ -24,13 +23,14 @@ public sealed class SiteMapPointViewModel : ObservableObject
         CoordinateSourceText = point.CoordinatePayload.CoordinateSourceText;
         AddressText = string.IsNullOrWhiteSpace(point.AddressText) ? "地址待补充" : point.AddressText!;
         OnlineStateText = point.DemoOnlineState == DemoOnlineState.Offline ? "离线" : "在线";
-        MonitoringText = point.IsMonitored ? "已纳入监测" : "未纳入监测";
+        MonitoringText = point.IsMonitored ? "已纳管" : "未纳管";
+        DispatchStateKey = point.DispatchStateKey;
+        DispatchStateText = ResolveDispatchStateText(point);
+        StatusText = ResolveStatusText(point);
         RuntimeSummaryText = string.IsNullOrWhiteSpace(point.RuntimeSummaryText)
             ? BuildCoordinateSummary(point)
             : point.RuntimeSummaryText!;
         SummaryText = RuntimeSummaryText;
-        DispatchStateText = point.DispatchStateText;
-        DispatchStateKey = point.DispatchStateKey;
         LastInspectionAtText = point.LastInspectionAt?.ToLocalTime().ToString("HH:mm:ss") ?? "--:--:--";
         LastSnapshotPath = point.LastSnapshotPath;
         HasSnapshot = !string.IsNullOrWhiteSpace(point.LastSnapshotPath);
@@ -114,11 +114,74 @@ public sealed class SiteMapPointViewModel : ObservableObject
         };
     }
 
+    private static string ResolveStatusText(SiteMapPoint point)
+    {
+        if (!point.IsMonitored)
+        {
+            return "未纳管";
+        }
+
+        if (point.RecoveryStatus == RecoveryStatus.PendingConfirmation)
+        {
+            return "待确认恢复";
+        }
+
+        if (point.RecoveryStatus is RecoveryStatus.Recovered or RecoveryStatus.NotificationFailed)
+        {
+            return "已恢复";
+        }
+
+        if (point.IsDispatchCooling)
+        {
+            return "冷却中";
+        }
+
+        return point.DispatchStatus switch
+        {
+            DispatchStatus.PendingDispatch => "待派单",
+            DispatchStatus.Dispatched => "已派单",
+            DispatchStatus.SendFailed => "发送失败",
+            DispatchStatus.WebhookNotConfigured => "未配置 webhook",
+            DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.Offline => "设备离线",
+            DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.PreviewResolveFailed => "预览解析失败",
+            DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.SnapshotFailed => "截图留痕失败",
+            DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.InspectionExecutionFailed => "巡检执行失败",
+            _ => point.DemoOnlineState == DemoOnlineState.Offline ? "设备离线" : "正常"
+        };
+    }
+
+    private static string ResolveDispatchStateText(SiteMapPoint point)
+    {
+        if (point.RecoveryStatus == RecoveryStatus.PendingConfirmation)
+        {
+            return "待确认恢复";
+        }
+
+        if (point.RecoveryStatus is RecoveryStatus.Recovered or RecoveryStatus.NotificationFailed)
+        {
+            return "已恢复";
+        }
+
+        if (point.IsDispatchCooling)
+        {
+            return "冷却中";
+        }
+
+        return point.DispatchStatus switch
+        {
+            DispatchStatus.PendingDispatch => "待派单",
+            DispatchStatus.Dispatched => "已派单",
+            DispatchStatus.SendFailed => "发送失败",
+            DispatchStatus.WebhookNotConfigured => "未配置 webhook",
+            _ => "未处置"
+        };
+    }
+
     private static string BuildCoordinateSummary(SiteMapPoint point)
     {
         if (!point.IsMonitored)
         {
-            return "当前未纳入监测。";
+            return "当前未纳入静默巡检。";
         }
 
         return point.CoordinatePayload.CoordinateSource switch

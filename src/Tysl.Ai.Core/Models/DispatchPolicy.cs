@@ -12,7 +12,7 @@ public sealed record DispatchPolicy
         RecoveryMode = RecoveryMode.Manual,
         RepeatAfterRecovery = true,
         NotifyOnRecovery = true,
-        WebhookUrl = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=7f1755c6-2af5-461d-a677-029674d0df90",
+        WebhookUrl = null,
         MentionMobiles = Array.Empty<string>(),
         MentionAll = false,
         UpdatedAt = DateTimeOffset.UtcNow

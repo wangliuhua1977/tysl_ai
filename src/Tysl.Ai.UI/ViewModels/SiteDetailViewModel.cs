@@ -15,9 +15,9 @@ public sealed class SiteDetailViewModel
         DeviceName = detail.DeviceName;
         DisplayName = detail.DisplayName;
         Alias = string.IsNullOrWhiteSpace(detail.Alias) ? "未设置别名" : detail.Alias;
-        Remark = string.IsNullOrWhiteSpace(detail.Remark) ? "暂无补充说明。" : detail.Remark;
+        Remark = string.IsNullOrWhiteSpace(detail.Remark) ? "暂无补充说明" : detail.Remark;
         IsMonitored = detail.IsMonitored;
-        MonitoringText = detail.IsMonitored ? "已纳入监测" : "未纳入监测";
+        MonitoringText = detail.IsMonitored ? "已纳入静默巡检" : "未纳入静默巡检";
         OnlineStateText = detail.DemoOnlineState switch
         {
             DemoOnlineState.Online => "在线",
@@ -38,14 +38,14 @@ public sealed class SiteDetailViewModel
         HasSnapshot = !string.IsNullOrWhiteSpace(detail.LastSnapshotPath);
         HasDispatchRecord = detail.HasDispatchRecord;
         DispatchRecordId = detail.DispatchRecordId;
+        DispatchStatusText = ResolveDispatchStatusText(detail);
+        RecoveryStatusText = ResolveRecoveryStatusText(detail);
         DispatchHeadlineText = detail.HasDispatchRecord
-            ? $"派单：{detail.DispatchStatusText} / 恢复：{detail.RecoveryStatusText}"
-            : "派单：未触发 / 恢复：未恢复";
-        DispatchStatusText = detail.DispatchStatusText;
+            ? $"{DispatchStatusText} / {RecoveryStatusText}"
+            : "未触发派单 / 未恢复";
         DispatchTriggeredAtText = detail.DispatchTriggeredAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未触发";
         LastDispatchAtText = detail.DispatchSentAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未发送";
         CoolingUntilText = detail.CoolingUntil?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "未进入冷却";
-        RecoveryStatusText = detail.RecoveryStatusText;
         RecoveredAtText = detail.RecoveredAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未恢复";
         RecoverySummaryText = string.IsNullOrWhiteSpace(detail.RecoverySummary) ? "暂无恢复摘要" : detail.RecoverySummary!;
         CanConfirmRecovery = detail.CanConfirmRecovery && detail.DispatchRecordId.HasValue;
@@ -61,13 +61,13 @@ public sealed class SiteDetailViewModel
             ? $"{detail.ManualLongitude.Value:F6}, {detail.ManualLatitude.Value:F6}"
             : "尚未补录";
         AddressText = string.IsNullOrWhiteSpace(detail.AddressText) ? "地址待补充" : detail.AddressText;
-        ProductAccessNumber = string.IsNullOrWhiteSpace(detail.ProductAccessNumber) ? "未配置" : detail.ProductAccessNumber;
+        ProductAccessNumber = string.IsNullOrWhiteSpace(detail.ProductAccessNumber) ? "未补充" : detail.ProductAccessNumber;
         MaintenanceUnit = string.IsNullOrWhiteSpace(detail.MaintenanceUnit) ? "维护单位待补充" : detail.MaintenanceUnit;
         MaintainerName = string.IsNullOrWhiteSpace(detail.MaintainerName) ? "维护人待补充" : detail.MaintainerName;
         MaintainerPhone = string.IsNullOrWhiteSpace(detail.MaintainerPhone) ? "联系电话待补充" : detail.MaintainerPhone;
         LocalProfileStatusText = detail.HasLocalProfile ? "已保存本地补充信息" : "尚未保存本地补充信息";
         VisualState = detail.VisualState;
-        StatusText = detail.StatusText;
+        StatusText = ResolveStatusText(detail);
         UpdatedAtText = detail.UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "尚未保存";
     }
 
@@ -187,18 +187,87 @@ public sealed class SiteDetailViewModel
         return SiteEditorViewModel.CreateFromSite(detail);
     }
 
+    private static string ResolveStatusText(SiteMergedView detail)
+    {
+        if (!detail.IsMonitored)
+        {
+            return "未纳管";
+        }
+
+        if (detail.CanConfirmRecovery)
+        {
+            return "待确认恢复";
+        }
+
+        if (detail.RecoveryStatus is RecoveryStatus.Recovered or RecoveryStatus.NotificationFailed)
+        {
+            return "已恢复";
+        }
+
+        if (detail.IsDispatchCooling)
+        {
+            return "冷却中";
+        }
+
+        return detail.DispatchStatus switch
+        {
+            DispatchStatus.PendingDispatch => "待派单",
+            DispatchStatus.Dispatched => "已派单",
+            DispatchStatus.SendFailed => "发送失败",
+            DispatchStatus.WebhookNotConfigured => "未配置 webhook",
+            DispatchStatus.None when detail.RuntimeFaultCode == RuntimeFaultCode.Offline => "设备离线",
+            DispatchStatus.None when detail.RuntimeFaultCode == RuntimeFaultCode.PreviewResolveFailed => "预览解析失败",
+            DispatchStatus.None when detail.RuntimeFaultCode == RuntimeFaultCode.SnapshotFailed => "截图留痕失败",
+            DispatchStatus.None when detail.RuntimeFaultCode == RuntimeFaultCode.InspectionExecutionFailed => "巡检执行失败",
+            _ => detail.DemoOnlineState == DemoOnlineState.Offline ? "设备离线" : "正常"
+        };
+    }
+
+    private static string ResolveDispatchStatusText(SiteMergedView detail)
+    {
+        if (!detail.HasDispatchRecord)
+        {
+            return "未触发派单";
+        }
+
+        if (detail.IsDispatchCooling)
+        {
+            return "冷却中";
+        }
+
+        return detail.DispatchStatus switch
+        {
+            DispatchStatus.PendingDispatch => "待派单",
+            DispatchStatus.Dispatched => "已派单",
+            DispatchStatus.SendFailed => "发送失败",
+            DispatchStatus.WebhookNotConfigured => "未配置 webhook",
+            _ => "未触发派单"
+        };
+    }
+
+    private static string ResolveRecoveryStatusText(SiteMergedView detail)
+    {
+        return detail.RecoveryStatus switch
+        {
+            RecoveryStatus.PendingConfirmation => "待人工确认恢复",
+            RecoveryStatus.Recovered => "已恢复",
+            RecoveryStatus.NotificationFailed => "已恢复（通知未发送）",
+            _ => detail.RecoveredAt.HasValue ? "已恢复" : "未恢复"
+        };
+    }
+
     private static string BuildCoordinateStatusText(SiteMergedView detail, DemoCoordinate? displayCoordinateOverride)
     {
         return detail.CoordinateSource switch
         {
             CoordinateSource.PlatformRaw when displayCoordinateOverride is not null
-                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），已由前端地图宿主转换后显示",
+                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），已由地图宿主转换显示",
             CoordinateSource.PlatformRaw when RequiresFrontendConversion(detail.PlatformRawCoordinateType)
-                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），等待前端地图宿主转换",
+                => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），等待地图宿主转换",
             CoordinateSource.PlatformRaw
                 => $"平台原始坐标（{ResolveCoordinateTypeLabel(detail.PlatformRawCoordinateType)}），当前按 GCJ-02 直接显示",
             CoordinateSource.ManualOverride => "当前使用本地手工坐标（GCJ-02）",
-            _ => "当前暂无可展示坐标"
+            _ => "当前暂无可显示坐标"
         };
     }
 
@@ -274,7 +343,7 @@ public sealed class SiteDetailViewModel
         return state switch
         {
             InspectionRunState.Succeeded => "巡检成功",
-            InspectionRunState.SucceededWithFault => "巡检完成但存在异常",
+            InspectionRunState.SucceededWithFault => "巡检完成，存在异常",
             InspectionRunState.Failed => "巡检失败",
             InspectionRunState.Skipped => "巡检跳过",
             _ => "尚未巡检"

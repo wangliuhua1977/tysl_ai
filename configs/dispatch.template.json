@@ -1,0 +1,9 @@
+{
+  "webhookUrl": "",
+  "mode": "automatic",
+  "coolingMinutes": 30,
+  "recoveryMode": "manual",
+  "notifyOnRecovery": true,
+  "mentionMobiles": [],
+  "mentionAll": false
+}

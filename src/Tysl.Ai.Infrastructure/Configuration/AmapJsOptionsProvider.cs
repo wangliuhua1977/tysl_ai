@@ -6,6 +6,11 @@ public sealed class AmapJsOptionsProvider
 {
     private const string ConfigRelativePath = "configs\\amap-js.json";
 
+    private static readonly JsonSerializerOptions JsonSerializerOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     public AmapJsOptionsLoadResult Load()
     {
         var configPath = FindConfigPath();
@@ -101,11 +106,6 @@ public sealed class AmapJsOptionsProvider
 
         return [120.585316, 30.028105];
     }
-
-    private static readonly JsonSerializerOptions JsonSerializerOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
 }
 
 public sealed record AmapJsOptions

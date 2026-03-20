@@ -19,7 +19,7 @@
             <TextBlock FontSize="24" FontWeight="SemiBold" Text="{Binding Title}" />
             <TextBlock Margin="0,6,0,0"
                        Style="{StaticResource CaptionTextStyle}"
-                       Text="这里只保存本地补充信息。平台设备编码与设备名称只读，坐标拾取仅回填手工坐标。" />
+                       Text="仅维护本地补充信息。设备编码和设备名称只读，地图点选只回填手工坐标。" />
         </StackPanel>
 
         <Border Grid.Row="1" Margin="0,18,0,18" Style="{StaticResource PanelCardStyle}">
@@ -59,7 +59,7 @@
 
                         <CheckBox Style="{StaticResource DialogCheckBoxStyle}"
                                   IsChecked="{Binding IsMonitored}"
-                                  Content="纳入监测" />
+                                  Content="纳入静默巡检" />
 
                         <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="手工经度" />
                         <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding LongitudeText, UpdateSourceTrigger=PropertyChanged}" />
@@ -71,7 +71,7 @@
                                 HorizontalAlignment="Left"
                                 Command="{Binding BeginCoordinatePickCommand}"
                                 Style="{StaticResource FlatActionButtonStyle}"
-                                Content="拾取手工坐标" />
+                                Content="点选手工坐标" />
                         <TextBlock Margin="0,8,0,0"
                                    Style="{StaticResource CaptionTextStyle}"
                                    TextWrapping="Wrap"
