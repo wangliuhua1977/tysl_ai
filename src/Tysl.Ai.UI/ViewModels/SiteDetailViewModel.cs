@@ -17,8 +17,14 @@ public sealed class SiteDetailViewModel
         DisplayName = detail.DisplayName;
         Alias = string.IsNullOrWhiteSpace(detail.Alias) ? "未设置别名" : detail.Alias;
         Remark = string.IsNullOrWhiteSpace(detail.Remark) ? "暂无补充说明" : detail.Remark;
+        IsIgnored = detail.IsIgnored;
         IsMonitored = detail.IsMonitored;
-        MonitoringText = detail.IsMonitored ? "已纳入静默巡检" : "未纳入静默巡检";
+        FocusScopeText = detail.IsIgnored ? "已忽略，退出主值守视图" : "主值守视图";
+        IgnoredAtText = detail.IgnoredAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "未忽略";
+        IgnoredReasonText = string.IsNullOrWhiteSpace(detail.IgnoredReason) ? "未填写" : detail.IgnoredReason;
+        MonitoringText = detail.IsIgnored
+            ? "已忽略，退出巡检"
+            : detail.IsMonitored ? "已纳入静默巡检" : "未纳入静默巡检";
         OnlineStateText = detail.DemoOnlineState switch
         {
             DemoOnlineState.Online => "在线",
@@ -31,7 +37,7 @@ public sealed class SiteDetailViewModel
         UnmappedReasonText = detail.UnmappedReasonText;
         CoordinateGovernanceHintText = detail.CoordinateGovernanceHintText;
         PlatformStatusSummary = detail.PlatformStatusSummary;
-        RuntimeSummaryText = string.IsNullOrWhiteSpace(detail.RuntimeSummary) ? "尚未产生运行态摘要。" : detail.RuntimeSummary!;
+        RuntimeSummaryText = string.IsNullOrWhiteSpace(detail.RuntimeSummary) ? "尚未产生运行摘要。" : detail.RuntimeSummary!;
         LastInspectionAtText = detail.LastInspectionAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未巡检";
         LastInspectionRunStateText = ResolveInspectionRunStateText(detail.LastInspectionRunState);
         LastPreviewResolveStateText = ResolvePreviewResolveStateText(detail.LastPreviewResolveState);
@@ -52,7 +58,7 @@ public sealed class SiteDetailViewModel
         CoolingUntilText = detail.CoolingUntil?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "未进入冷却";
         RecoveredAtText = detail.RecoveredAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未恢复";
         RecoverySummaryText = string.IsNullOrWhiteSpace(detail.RecoverySummary) ? "暂无恢复摘要" : detail.RecoverySummary!;
-        CanConfirmRecovery = detail.CanConfirmRecovery && detail.DispatchRecordId.HasValue;
+        CanConfirmRecovery = !detail.IsIgnored && detail.CanConfirmRecovery && detail.DispatchRecordId.HasValue;
 
         var displayCoordinate = ResolveCurrentDisplayCoordinate(detail, displayCoordinateOverride);
         LongitudeText = displayCoordinate?.Longitude.ToString("F6") ?? ResolveDisplayCoordinateFallback(detail);
@@ -89,7 +95,15 @@ public sealed class SiteDetailViewModel
 
     public string Remark { get; }
 
+    public bool IsIgnored { get; }
+
     public bool IsMonitored { get; }
+
+    public string FocusScopeText { get; }
+
+    public string IgnoredAtText { get; }
+
+    public string IgnoredReasonText { get; }
 
     public string MonitoringText { get; }
 
@@ -207,6 +221,11 @@ public sealed class SiteDetailViewModel
 
     private static string ResolveStatusText(SiteMergedView detail)
     {
+        if (detail.IsIgnored)
+        {
+            return "已忽略";
+        }
+
         if (!detail.IsMonitored)
         {
             return "未纳管";
@@ -326,11 +345,6 @@ public sealed class SiteDetailViewModel
         }
 
         return detail.HasMapPoint ? "待同步" : "暂无";
-    }
-
-    private static bool RequiresFrontendConversion(string coordinateType)
-    {
-        return CoordinateTypeCatalog.RequiresMapHostConversion(coordinateType);
     }
 
     private static string ResolveCoordinateTypeLabel(string coordinateType)

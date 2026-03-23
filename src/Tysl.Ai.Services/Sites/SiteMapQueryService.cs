@@ -35,12 +35,24 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         CancellationToken cancellationToken = default)
     {
         var mergeBundle = await BuildMergedSitesAsync(cancellationToken);
-        var filteredSites = mergeBundle.Sites
+        var activeSites = mergeBundle.Sites
+            .Where(site => !site.IsIgnored)
+            .ToList();
+        var ignoredSites = mergeBundle.Sites
+            .Where(site => site.IsIgnored)
+            .ToList();
+        var filterSource = filter == SiteDashboardFilter.Ignored
+            ? ignoredSites
+            : activeSites;
+        var filteredSites = filterSource
             .Where(site => MatchesFilter(site, filter))
             .Where(site => MatchesSearch(site, searchText))
             .ToList();
         var visibleMapSites = filteredSites
             .Where(site => site.HasMapPoint)
+            .ToList();
+        var filteredIgnoredSites = ignoredSites
+            .Where(site => MatchesSearch(site, searchText))
             .ToList();
 
         return new SiteDashboardSnapshot
@@ -48,15 +60,15 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             PlatformStatusText = mergeBundle.ConnectionState.SummaryText,
             PlatformStatusDetailText = mergeBundle.ConnectionState.DetailText,
             IsPlatformConnected = mergeBundle.ConnectionState.IsConnected,
-            PointCount = mergeBundle.Sites.Count,
-            MonitoredCount = mergeBundle.Sites.Count(site => site.IsMonitored),
-            FaultCount = mergeBundle.Sites.Count(IsAttentionSite),
-            DispatchedCount = mergeBundle.Sites.Count(HasActiveDispatch),
+            PointCount = activeSites.Count,
+            MonitoredCount = activeSites.Count(site => site.IsMonitored),
+            FaultCount = activeSites.Count(IsAttentionSite),
+            DispatchedCount = activeSites.Count(HasActiveDispatch),
             CoverageSummary = new MapCoverageSummary
             {
-                TotalPointCount = mergeBundle.Sites.Count,
-                MappedPointCount = mergeBundle.Sites.Count(site => site.HasMapPoint),
-                UnmappedPointCount = mergeBundle.Sites.Count(site => !site.HasMapPoint),
+                TotalPointCount = activeSites.Count,
+                MappedPointCount = activeSites.Count(site => site.HasMapPoint),
+                UnmappedPointCount = activeSites.Count(site => !site.HasMapPoint),
                 FilteredPointCount = filteredSites.Count,
                 CurrentVisiblePointCount = visibleMapSites.Count,
                 FilteredUnmappedPointCount = filteredSites.Count(site => !site.HasMapPoint)
@@ -71,11 +83,16 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
                 .ThenByDescending(GetAlertTimestamp)
                 .Select(ToAlertDigest)
                 .ToList(),
-            UnmappedPoints = mergeBundle.Sites
+            UnmappedPoints = activeSites
                 .Where(site => !site.HasMapPoint)
                 .OrderBy(GetUnmappedPriority)
                 .ThenBy(site => site.DisplayName, StringComparer.CurrentCultureIgnoreCase)
                 .Select(ToUnmappedDigest)
+                .ToList(),
+            IgnoredPoints = filteredIgnoredSites
+                .OrderByDescending(site => site.IgnoredAt ?? DateTimeOffset.MinValue)
+                .ThenBy(site => site.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .Select(ToIgnoredDigest)
                 .ToList()
         };
     }
@@ -140,6 +157,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
     {
         var coordinateGovernance = ResolveCoordinateGovernance(platformSite, localProfile);
         var isMonitored = localProfile?.IsMonitored ?? true;
+        var isIgnored = localProfile?.IsIgnored ?? false;
         var dispatchPresentation = ResolveDispatchPresentation(dispatchRecord, runtimeState);
 
         return new SiteMergedView
@@ -150,6 +168,9 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             Alias = localProfile?.Alias,
             Remark = localProfile?.Remark,
             IsMonitored = isMonitored,
+            IsIgnored = isIgnored,
+            IgnoredAt = localProfile?.IgnoredAt,
+            IgnoredReason = localProfile?.IgnoredReason,
             PlatformRawLongitude = platformSite.RawLongitude,
             PlatformRawLatitude = platformSite.RawLatitude,
             PlatformRawCoordinateType = platformSite.RawCoordinateType,
@@ -193,8 +214,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             RecoveredAt = dispatchRecord?.RecoveredAt,
             RecoverySummary = dispatchRecord?.RecoverySummary,
             DispatchMessageDigest = dispatchRecord?.MessageDigest,
-            IsDispatchCooling = dispatchPresentation.IsCooling,
-            CanConfirmRecovery = dispatchPresentation.CanConfirmRecovery,
+            IsDispatchCooling = !isIgnored && dispatchPresentation.IsCooling,
+            CanConfirmRecovery = !isIgnored && dispatchPresentation.CanConfirmRecovery,
             DispatchStatusText = dispatchPresentation.DispatchStatusText,
             RecoveryStatusText = dispatchPresentation.RecoveryStatusText,
             AddressText = localProfile?.AddressText,
@@ -205,8 +226,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             DemoOnlineState = runtimeState?.LastOnlineState ?? platformSite.DemoOnlineState,
             DemoStatus = platformSite.DemoStatus,
             DemoDispatchStatus = platformSite.DemoDispatchStatus,
-            VisualState = ResolveVisualState(platformSite, runtimeState, dispatchPresentation, isMonitored),
-            StatusText = ResolveStatusText(platformSite, runtimeState, dispatchPresentation, isMonitored),
+            VisualState = ResolveVisualState(platformSite, runtimeState, dispatchPresentation, isMonitored, isIgnored),
+            StatusText = ResolveStatusText(platformSite, runtimeState, dispatchPresentation, isMonitored, isIgnored),
             HasLocalProfile = localProfile is not null,
             CreatedAt = localProfile?.CreatedAt,
             UpdatedAt = localProfile?.UpdatedAt
@@ -293,6 +314,19 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         };
     }
 
+    private static IgnoredPointDigest ToIgnoredDigest(SiteMergedView site)
+    {
+        return new IgnoredPointDigest
+        {
+            DeviceCode = site.DeviceCode,
+            DisplayName = site.DisplayName,
+            DeviceName = site.DeviceName,
+            IsMonitored = site.IsMonitored,
+            IgnoredAt = site.IgnoredAt,
+            IgnoredReason = site.IgnoredReason
+        };
+    }
+
     private static bool MatchesFilter(SiteMergedView site, SiteDashboardFilter filter)
     {
         return filter switch
@@ -301,6 +335,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             SiteDashboardFilter.Monitored => site.IsMonitored,
             SiteDashboardFilter.Disposed => site.HasDispatchRecord,
             SiteDashboardFilter.Unmapped => !site.HasMapPoint,
+            SiteDashboardFilter.Ignored => site.IsIgnored,
             _ => true
         };
     }
@@ -326,12 +361,13 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             || site.DispatchStatusText.Contains(term, StringComparison.OrdinalIgnoreCase)
             || site.RecoveryStatusText.Contains(term, StringComparison.OrdinalIgnoreCase)
             || (site.DispatchFaultSummary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
-            || (site.RecoverySummary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false);
+            || (site.RecoverySummary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (site.IgnoredReason?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
     private static bool IsAttentionSite(SiteMergedView site)
     {
-        if (!site.IsMonitored)
+        if (site.IsIgnored || !site.IsMonitored)
         {
             return false;
         }
@@ -363,6 +399,11 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
     private static bool HasActiveDispatch(SiteMergedView site)
     {
+        if (site.IsIgnored)
+        {
+            return false;
+        }
+
         return site.HasDispatchRecord
             && !site.RecoveredAt.HasValue
             && site.DispatchStatus != DispatchStatus.None;
@@ -370,6 +411,11 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
     private static bool IsRecentlyRecovered(SiteMergedView site)
     {
+        if (site.IsIgnored)
+        {
+            return false;
+        }
+
         return site.RecoveredAt is DateTimeOffset recoveredAt
             && recoveredAt >= DateTimeOffset.UtcNow.Subtract(RecoveredHighlightWindow);
     }
@@ -578,8 +624,14 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         PlatformSiteSnapshot platformSite,
         SiteRuntimeState? runtimeState,
         DispatchPresentation dispatchPresentation,
-        bool isMonitored)
+        bool isMonitored,
+        bool isIgnored)
     {
+        if (isIgnored)
+        {
+            return SiteVisualState.Unmonitored;
+        }
+
         if (!isMonitored)
         {
             return SiteVisualState.Unmonitored;
@@ -656,8 +708,14 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         PlatformSiteSnapshot platformSite,
         SiteRuntimeState? runtimeState,
         DispatchPresentation dispatchPresentation,
-        bool isMonitored)
+        bool isMonitored,
+        bool isIgnored)
     {
+        if (isIgnored)
+        {
+            return "已忽略";
+        }
+
         if (!isMonitored)
         {
             return "未纳入监测";
@@ -744,6 +802,11 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
     private static string ResolveRuntimeSummary(SiteMergedView site)
     {
+        if (site.IsIgnored)
+        {
+            return "当前点位已忽略，已退出地图、巡检、派单和主统计。";
+        }
+
         if (!site.IsMonitored)
         {
             return "当前点位未纳入静默巡检。";

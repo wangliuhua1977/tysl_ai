@@ -25,4 +25,6 @@ public sealed record SiteDashboardSnapshot
     public required IReadOnlyList<SiteAlertDigest> VisibleAlerts { get; init; }
 
     public required IReadOnlyList<UnmappedPointDigest> UnmappedPoints { get; init; }
+
+    public required IReadOnlyList<IgnoredPointDigest> IgnoredPoints { get; init; }
 }

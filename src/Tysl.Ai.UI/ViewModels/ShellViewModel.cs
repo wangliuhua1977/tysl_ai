@@ -39,6 +39,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private string dispatchOverviewDetail = "当前无派单中的点位。";
     private string dispatchOverviewText = "派单待命";
     private int faultCount;
+    private bool hasIgnoredPoints;
     private bool hasUnmappedPoints;
     private bool hasVisiblePoints;
     private string inspectionStatusDetail = "当前无纳入静默巡检的点位。";
@@ -92,7 +93,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             new DashboardFilterOption("异常", SiteDashboardFilter.Fault),
             new DashboardFilterOption("已纳管", SiteDashboardFilter.Monitored),
             new DashboardFilterOption("已处置", SiteDashboardFilter.Disposed),
-            new DashboardFilterOption("未落图", SiteDashboardFilter.Unmapped)
+            new DashboardFilterOption("未落图", SiteDashboardFilter.Unmapped),
+            new DashboardFilterOption("已忽略", SiteDashboardFilter.Ignored)
         ];
 
         selectedFilter = Filters[0];
@@ -100,13 +102,16 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         VisiblePoints = [];
         VisibleAlerts = [];
         UnmappedPoints = [];
+        IgnoredPoints = [];
         ToggleFilterPanelCommand = new RelayCommand(() => IsFilterPanelExpanded = !IsFilterPanelExpanded);
         EditSelectedSiteCommand = new AsyncRelayCommand(OpenEditEditorAsync, () => SelectedDetail is not null);
         ToggleMonitoringCommand = new AsyncRelayCommand(ToggleMonitoringAsync, () => SelectedDetail is not null);
+        ToggleIgnoreCommand = new AsyncRelayCommand(ToggleIgnoreAsync, () => SelectedDetail is not null);
         ConfirmRecoveryCommand = new AsyncRelayCommand(ConfirmRecoveryAsync, () => SelectedDetail?.CanConfirmRecovery == true);
         SelectPointCommand = new RelayCommand<SiteMapPointViewModel>(SelectPoint);
         SelectAlertCommand = new RelayCommand<SiteAlertDigestViewModel>(SelectAlert);
         SelectUnmappedPointCommand = new RelayCommand<UnmappedPointDigestViewModel>(SelectUnmappedPoint);
+        SelectIgnoredPointCommand = new RelayCommand<IgnoredPointDigestViewModel>(SelectIgnoredPoint);
         EditUnmappedPointCommand = new RelayCommand<UnmappedPointDigestViewModel>(EditUnmappedPoint);
 
         refreshTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -177,11 +182,15 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<UnmappedPointDigestViewModel> UnmappedPoints { get; }
 
+    public ObservableCollection<IgnoredPointDigestViewModel> IgnoredPoints { get; }
+
     public RelayCommand ToggleFilterPanelCommand { get; }
 
     public AsyncRelayCommand EditSelectedSiteCommand { get; }
 
     public AsyncRelayCommand ToggleMonitoringCommand { get; }
+
+    public AsyncRelayCommand ToggleIgnoreCommand { get; }
 
     public AsyncRelayCommand ConfirmRecoveryCommand { get; }
 
@@ -190,6 +199,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public RelayCommand<SiteAlertDigestViewModel> SelectAlertCommand { get; }
 
     public RelayCommand<UnmappedPointDigestViewModel> SelectUnmappedPointCommand { get; }
+
+    public RelayCommand<IgnoredPointDigestViewModel> SelectIgnoredPointCommand { get; }
 
     public RelayCommand<UnmappedPointDigestViewModel> EditUnmappedPointCommand { get; }
 
@@ -218,6 +229,11 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref selectedFilter, value))
             {
+                OnPropertyChanged(nameof(IsIgnoredFilterSelected));
+                OnPropertyChanged(nameof(SecondarySectionTitle));
+                OnPropertyChanged(nameof(SecondarySectionDetail));
+                OnPropertyChanged(nameof(SecondarySectionEmptyText));
+                OnPropertyChanged(nameof(HasSecondaryItems));
                 _ = LoadDashboardAsync(selectedPointDeviceCode);
             }
         }
@@ -256,8 +272,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
             EditSelectedSiteCommand.NotifyCanExecuteChanged();
             ToggleMonitoringCommand.NotifyCanExecuteChanged();
+            ToggleIgnoreCommand.NotifyCanExecuteChanged();
             ConfirmRecoveryCommand.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(MonitorToggleText));
+            OnPropertyChanged(nameof(IgnoreToggleText));
         }
     }
 
@@ -321,6 +339,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref hasVisiblePoints, value);
     }
 
+    public bool HasIgnoredPoints
+    {
+        get => hasIgnoredPoints;
+        private set => SetProperty(ref hasIgnoredPoints, value);
+    }
+
     public bool HasUnmappedPoints
     {
         get => hasUnmappedPoints;
@@ -356,6 +380,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     public string MonitorToggleText => SelectedDetail?.IsMonitored == false ? "纳入巡检" : "暂停巡检";
 
+    public string IgnoreToggleText => SelectedDetail?.IsIgnored == true ? "恢复关注" : "忽略点位";
+
     public string MapCoverageText => $"当前地图显示 {CurrentMapVisibleCount} / 总点位 {PointCount}";
 
     public string MapCoverageDetailText
@@ -367,6 +393,22 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public string UnmappedSectionTitle => $"未落图治理 {UnmappedPointCount}";
 
     public string UnmappedSectionDetail => "点击条目联动详情，可直接进入编辑补充信息。";
+
+    public bool IsIgnoredFilterSelected => SelectedFilter.Value == SiteDashboardFilter.Ignored;
+
+    public string SecondarySectionTitle => IsIgnoredFilterSelected
+        ? $"已忽略点位 {IgnoredPoints.Count}"
+        : $"未落图治理 {UnmappedPointCount}";
+
+    public string SecondarySectionDetail => IsIgnoredFilterSelected
+        ? "已忽略点位已退出地图、巡检和派单主线，可在右侧详情中恢复关注。"
+        : "点击条目联动详情，可直接进入编辑补充信息。";
+
+    public string SecondarySectionEmptyText => IsIgnoredFilterSelected
+        ? "当前无已忽略点位。"
+        : "当前无未落图点位。";
+
+    public bool HasSecondaryItems => IsIgnoredFilterSelected ? HasIgnoredPoints : HasUnmappedPoints;
 
     public void HandleMapClicked(double longitude, double latitude)
     {
@@ -469,13 +511,16 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             FaultCount = snapshot.FaultCount;
             DispatchedCount = snapshot.DispatchedCount;
             CurrentMapVisibleCount = snapshot.CoverageSummary.CurrentVisiblePointCount;
-            MapCoverageDetailText = BuildMapCoverageDetailText(snapshot.CoverageSummary);
+            MapCoverageDetailText = BuildMapCoverageDetailText(snapshot.CoverageSummary, SelectedFilter.Value);
             UpdateOverviewStatus(snapshot);
 
             LastRefreshText = snapshot.LastRefreshedAt.ToLocalTime().ToString("HH:mm:ss");
             OnPropertyChanged(nameof(LastRefreshText));
             OnPropertyChanged(nameof(MapCoverageText));
             OnPropertyChanged(nameof(UnmappedSectionTitle));
+            OnPropertyChanged(nameof(SecondarySectionTitle));
+            OnPropertyChanged(nameof(SecondarySectionDetail));
+            OnPropertyChanged(nameof(SecondarySectionEmptyText));
 
             renderedPointCoordinates.Clear();
             VisiblePoints.Clear();
@@ -496,15 +541,38 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 UnmappedPoints.Add(unmappedPoint);
             }
 
+            IgnoredPoints.Clear();
+            foreach (var ignoredPoint in snapshot.IgnoredPoints.Select(point => new IgnoredPointDigestViewModel(point)))
+            {
+                IgnoredPoints.Add(ignoredPoint);
+            }
+
             HasVisiblePoints = VisiblePoints.Count > 0;
             HasUnmappedPoints = UnmappedPoints.Count > 0;
-            MapEmptyStateText = ResolveMapEmptyStateText(isMapHostConfigured, snapshot.IsPlatformConnected, snapshot.PlatformStatusText, snapshot.CoverageSummary);
+            HasIgnoredPoints = IgnoredPoints.Count > 0;
+            OnPropertyChanged(nameof(HasSecondaryItems));
+            MapEmptyStateText = ResolveMapEmptyStateText(
+                isMapHostConfigured,
+                snapshot.IsPlatformConnected,
+                snapshot.PlatformStatusText,
+                snapshot.CoverageSummary,
+                SelectedFilter.Value,
+                IgnoredPoints.Count);
 
             var targetDeviceCode = preferredSelectionDeviceCode ?? selectedPointDeviceCode;
             if (!string.IsNullOrWhiteSpace(targetDeviceCode))
             {
                 await SelectDeviceAsync(targetDeviceCode, notifyOnError);
                 return;
+            }
+
+            if (SelectedFilter.Value == SiteDashboardFilter.Ignored)
+            {
+                if (IgnoredPoints.FirstOrDefault() is { } firstIgnoredPoint)
+                {
+                    await SelectDeviceAsync(firstIgnoredPoint.DeviceCode, notifyOnError);
+                    return;
+                }
             }
 
             var firstVisiblePoint = VisiblePoints.FirstOrDefault();
@@ -630,6 +698,42 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task ToggleIgnoreAsync()
+    {
+        if (SelectedDetail is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var deviceCode = SelectedDetail.DeviceCode;
+            var isIgnored = SelectedDetail.IsIgnored;
+
+            if (isIgnored)
+            {
+                await siteLocalProfileService.RestoreAsync(deviceCode);
+            }
+            else
+            {
+                await siteLocalProfileService.IgnoreAsync(deviceCode);
+            }
+
+            var preferredSelectionDeviceCode = isIgnored
+                ? SelectedFilter.Value == SiteDashboardFilter.Ignored ? null : deviceCode
+                : SelectedFilter.Value == SiteDashboardFilter.Ignored ? deviceCode : null;
+
+            await LoadDashboardAsync(preferredSelectionDeviceCode, true);
+        }
+        catch (Exception ex)
+        {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=toggle-ignore, deviceCode={SelectedDetail.DeviceCode}, type={ex.GetType().FullName}, message={ex.Message}");
+            Notify("操作失败", "点位关注范围更新失败，请稍后重试。");
+        }
+    }
+
     private async Task ConfirmRecoveryAsync()
     {
         if (SelectedDetail?.DispatchRecordId is not long dispatchRecordId)
@@ -655,6 +759,11 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     {
         if (activeEditor is not null)
         {
+            if (IsCoordinatePickActive || coordinatePickCandidate is not null)
+            {
+                ClearCoordinatePick();
+            }
+
             activeEditor.RequestClose();
         }
 
@@ -698,6 +807,16 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     }
 
     private async void SelectUnmappedPoint(UnmappedPointDigestViewModel? point)
+    {
+        if (point is null)
+        {
+            return;
+        }
+
+        await SelectDeviceAsync(point.DeviceCode);
+    }
+
+    private async void SelectIgnoredPoint(IgnoredPointDigestViewModel? point)
     {
         if (point is null)
         {
@@ -802,13 +921,26 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var previousEditor = activeEditor;
+        if (previousEditor is not null
+            && !ReferenceEquals(previousEditor, editor)
+            && (IsCoordinatePickActive || coordinatePickCandidate is not null))
+        {
+            ClearCoordinatePick();
+        }
+
         activeEditor = editor;
+        if (!ReferenceEquals(previousEditor, editor) || !IsCoordinatePickActive)
+        {
+            coordinatePickCandidate = null;
+        }
+
         IsCoordinatePickActive = true;
         MapInteractionHint = BuildCoordinatePickHint(coordinatePickCandidate);
         _ = WriteDiagnosticAsync(
             "map-host-interaction-start",
             $"deviceCode={editor.DeviceCode}, action=coordinate-pick");
-        editor.MarkCoordinatePickPending();
+        editor.MarkCoordinatePickPending(coordinatePickCandidate);
     }
 
     private void ClearCoordinatePick()
@@ -909,21 +1041,30 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static string BuildMapCoverageDetailText(MapCoverageSummary coverageSummary)
+    private static string BuildMapCoverageDetailText(
+        MapCoverageSummary coverageSummary,
+        SiteDashboardFilter filter)
     {
-        if (coverageSummary.FilteredPointCount <= 0)
+        if (filter == SiteDashboardFilter.Ignored)
         {
-            return "“全部”包含全部点位；仅具备可用显示坐标的点位会落图。";
+            return "已忽略点位仅在次级列表中查看，不参与地图主视图。";
         }
 
-        return $"“全部”包含全部点位；当前筛选命中 {coverageSummary.FilteredPointCount} 个点位，其中 {coverageSummary.FilteredUnmappedPointCount} 个未落图。";
+        if (coverageSummary.FilteredPointCount <= 0)
+        {
+            return "地图主视图只保留当前关注点位，并联动状态、异常和详情抽屉。";
+        }
+
+        return "地图主视图聚焦点位状态、异常联动和右侧详情，不在主视图强调落图治理统计。";
     }
 
     private static string ResolveMapEmptyStateText(
         bool isMapHostConfigured,
         bool isPlatformConnected,
         string platformStatusText,
-        MapCoverageSummary coverageSummary)
+        MapCoverageSummary coverageSummary,
+        SiteDashboardFilter filter,
+        int ignoredPointCount)
     {
         if (!isMapHostConfigured)
         {
@@ -935,6 +1076,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return $"{platformStatusText}。请补充 ACIS 配置后重试。";
         }
 
+        if (filter == SiteDashboardFilter.Ignored)
+        {
+            return ignoredPointCount > 0
+                ? "已忽略点位保留在次级列表中，可在右侧详情恢复关注。"
+                : "当前无已忽略点位。";
+        }
+
         if (coverageSummary.FilteredPointCount <= 0)
         {
             return "当前筛选条件下暂无点位。";
@@ -942,7 +1090,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         if (coverageSummary.FilteredUnmappedPointCount > 0)
         {
-            return $"当前筛选命中 {coverageSummary.FilteredPointCount} 个点位，其中 {coverageSummary.FilteredUnmappedPointCount} 个未落图。请在下方未落图治理区补录坐标。";
+            return "当前筛选下暂无可展示点位，可在下方未落图治理区继续补录坐标。";
         }
 
         return "当前筛选条件下暂无可展示点位。";

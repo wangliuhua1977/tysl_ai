@@ -78,7 +78,15 @@ public sealed class SilentInspectionService : ISilentInspectionService
             StringComparer.OrdinalIgnoreCase);
 
         var monitoredSites = platformSites
-            .Where(site => !localProfileMap.TryGetValue(site.DeviceCode, out var profile) || profile.IsMonitored)
+            .Where(site =>
+            {
+                if (!localProfileMap.TryGetValue(site.DeviceCode, out var profile))
+                {
+                    return true;
+                }
+
+                return !profile.IsIgnored && profile.IsMonitored;
+            })
             .OrderByDescending(site => runtimeStateMap.TryGetValue(site.DeviceCode, out var runtime) ? runtime.ConsecutiveFailureCount : 0)
             .ThenBy(site => runtimeStateMap.TryGetValue(site.DeviceCode, out var runtime) ? runtime.LastInspectionAt : null)
             .ThenBy(site => site.DeviceCode, StringComparer.OrdinalIgnoreCase)

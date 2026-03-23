@@ -18,6 +18,7 @@ namespace Tysl.Ai.App;
 
 public partial class App : Application
 {
+    private int exitCleanupStarted;
     private ILocalDiagnosticService? diagnosticService;
     private AcisKernelPlatformSiteProvider? platformSiteProvider;
     private SilentInspectionHostedService? silentInspectionHostedService;
@@ -96,17 +97,35 @@ public partial class App : Application
             DataContext = shellViewModel
         };
 
-        Exit += HandleExit;
         MainWindow = shellWindow;
         shellWindow.Show();
     }
 
-    private void HandleExit(object? sender, ExitEventArgs e)
+    protected override void OnExit(ExitEventArgs e)
     {
-        Exit -= HandleExit;
+        if (Interlocked.Exchange(ref exitCleanupStarted, 1) == 1)
+        {
+            base.OnExit(e);
+            return;
+        }
+
         DispatcherUnhandledException -= HandleDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException -= HandleCurrentDomainUnhandledException;
         TaskScheduler.UnobservedTaskException -= HandleUnobservedTaskException;
+        silentInspectionHostedService?.RequestStop();
+
+        using (var shutdownTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(8)))
+        {
+            try
+            {
+                silentInspectionHostedService?.StopAsync(shutdownTimeout.Token).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                // Best effort shutdown only.
+            }
+        }
+
         silentInspectionHostedService?.Dispose();
         silentInspectionHostedService = null;
         webhookSender?.Dispose();
@@ -119,6 +138,7 @@ public partial class App : Application
         }
 
         diagnosticService = null;
+        base.OnExit(e);
     }
 
     private void HandleDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)

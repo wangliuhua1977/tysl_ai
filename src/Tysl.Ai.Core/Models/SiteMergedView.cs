@@ -16,6 +16,12 @@ public sealed record SiteMergedView
 
     public required bool IsMonitored { get; init; }
 
+    public required bool IsIgnored { get; init; }
+
+    public DateTimeOffset? IgnoredAt { get; init; }
+
+    public string? IgnoredReason { get; init; }
+
     public double? PlatformRawLongitude { get; init; }
 
     public double? PlatformRawLatitude { get; init; }

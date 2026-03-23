@@ -68,6 +68,9 @@ public sealed class SqliteDatabaseInitializer
                 alias TEXT NULL,
                 remark TEXT NULL,
                 is_monitored INTEGER NOT NULL,
+                is_ignored INTEGER NOT NULL DEFAULT 0,
+                ignored_at TEXT NULL,
+                ignored_reason TEXT NULL,
                 manual_longitude REAL NULL,
                 manual_latitude REAL NULL,
                 address_text TEXT NULL,
@@ -81,6 +84,7 @@ public sealed class SqliteDatabaseInitializer
             """;
 
         await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureSiteLocalProfileSchemaAsync(connection, cancellationToken);
     }
 
     private static async Task CreateSiteRuntimeStateTableAsync(
@@ -250,6 +254,9 @@ public sealed class SqliteDatabaseInitializer
                 alias,
                 remark,
                 is_monitored,
+                is_ignored,
+                ignored_at,
+                ignored_reason,
                 manual_longitude,
                 manual_latitude,
                 address_text,
@@ -265,6 +272,9 @@ public sealed class SqliteDatabaseInitializer
                 alias,
                 remark,
                 is_monitored,
+                0,
+                NULL,
+                NULL,
                 longitude,
                 latitude,
                 address_text,
@@ -417,6 +427,9 @@ public sealed class SqliteDatabaseInitializer
                 alias,
                 remark,
                 is_monitored,
+                is_ignored,
+                ignored_at,
+                ignored_reason,
                 manual_longitude,
                 manual_latitude,
                 address_text,
@@ -432,6 +445,9 @@ public sealed class SqliteDatabaseInitializer
                 $alias,
                 $remark,
                 $isMonitored,
+                $isIgnored,
+                $ignoredAt,
+                $ignoredReason,
                 $manualLongitude,
                 $manualLatitude,
                 $addressText,
@@ -448,6 +464,9 @@ public sealed class SqliteDatabaseInitializer
         insertCommand.Parameters.AddWithValue("$alias", (object?)profile.Alias ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$remark", (object?)profile.Remark ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$isMonitored", profile.IsMonitored ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$isIgnored", profile.IsIgnored ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$ignoredAt", profile.IgnoredAt?.UtcDateTime.ToString("O") ?? (object)DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$ignoredReason", (object?)profile.IgnoredReason ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$manualLongitude", (object?)profile.ManualLongitude ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$manualLatitude", (object?)profile.ManualLatitude ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$addressText", (object?)profile.AddressText ?? DBNull.Value);
@@ -510,5 +529,67 @@ public sealed class SqliteDatabaseInitializer
                 UpdatedAt = createdAt.AddHours(2)
             }
         ];
+    }
+
+    private static async Task EnsureSiteLocalProfileSchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "is_ignored",
+            "ALTER TABLE site_local_profile ADD COLUMN is_ignored INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "ignored_at",
+            "ALTER TABLE site_local_profile ADD COLUMN ignored_at TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "ignored_reason",
+            "ALTER TABLE site_local_profile ADD COLUMN ignored_reason TEXT NULL;",
+            cancellationToken);
+    }
+
+    private static async Task EnsureColumnAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        string alterSql,
+        CancellationToken cancellationToken)
+    {
+        if (await ColumnExistsAsync(connection, tableName, columnName, cancellationToken))
+        {
+            return;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = alterSql;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

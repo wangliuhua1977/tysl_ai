@@ -5,8 +5,6 @@ namespace Tysl.Ai.Infrastructure.Background;
 
 public sealed class SilentInspectionHostedService : IDisposable
 {
-    private static readonly TimeSpan ShutdownWaitTimeout = TimeSpan.FromSeconds(5);
-
     private readonly IInspectionSettingsProvider inspectionSettingsProvider;
     private readonly ISilentInspectionService silentInspectionService;
     private CancellationTokenSource? shutdownSource;
@@ -31,6 +29,18 @@ public sealed class SilentInspectionHostedService : IDisposable
         loopTask = Task.Run(() => RunLoopAsync(shutdownSource.Token));
     }
 
+    public void RequestStop()
+    {
+        try
+        {
+            shutdownSource?.Cancel();
+        }
+        catch
+        {
+            // Best effort only.
+        }
+    }
+
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         var source = Interlocked.Exchange(ref shutdownSource, null);
@@ -42,11 +52,18 @@ public sealed class SilentInspectionHostedService : IDisposable
             return;
         }
 
-        source.Cancel();
+        try
+        {
+            source.Cancel();
+        }
+        catch
+        {
+            // Best effort only.
+        }
 
         try
         {
-            await loop.WaitAsync(cancellationToken);
+            await loop.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -60,16 +77,7 @@ public sealed class SilentInspectionHostedService : IDisposable
 
     public void Dispose()
     {
-        using var shutdownTimeout = new CancellationTokenSource(ShutdownWaitTimeout);
-
-        try
-        {
-            StopAsync(shutdownTimeout.Token).GetAwaiter().GetResult();
-        }
-        catch (OperationCanceledException)
-        {
-            // Best effort shutdown. App exit should not wait forever.
-        }
+        RequestStop();
     }
 
     private async Task RunLoopAsync(CancellationToken cancellationToken)
@@ -84,7 +92,7 @@ public sealed class SilentInspectionHostedService : IDisposable
                     await silentInspectionService.RunCycleAsync(cancellationToken);
                 }
 
-                await Task.Delay(ResolveDelay(settings), cancellationToken);
+                await Task.Delay(ResolveDelay(settings), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -92,7 +100,7 @@ public sealed class SilentInspectionHostedService : IDisposable
             }
             catch
             {
-                await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
+                await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
             }
         }
     }
