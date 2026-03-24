@@ -34,6 +34,8 @@ public partial class PreviewHostControl : UserControl, IDisposable
     private bool isInitializing;
     private CancellationTokenSource? negotiationCts;
     private string? pendingSessionJson;
+    private TaskCompletionSource<bool>? stopPlaybackCompletionSource;
+    private string? stopPlaybackSessionId;
 
     public PreviewHostControl()
     {
@@ -256,9 +258,18 @@ public partial class PreviewHostControl : UserControl, IDisposable
                     }
                     break;
                 case "playback_stopped":
+                    var stoppedSessionId = GetValue(payload, "playbackSessionId");
                     WriteDiagnostic(
                         "preview-resources-released",
-                        $"Preview resources released: deviceCode={GetValue(payload, "deviceCode") ?? "unknown"}, sessionId={GetValue(payload, "playbackSessionId") ?? "unknown"}, protocol={GetProtocol(payload)}, reason={GetValue(payload, "reason") ?? "none"}, peerClosed={GetBoolValue(payload, "peerClosed")}, mediaTracksStopped={GetIntValue(payload, "mediaTracksStopped")}, flvPlayersDisposed={GetIntValue(payload, "flvPlayersDisposed")}, hlsPlayersDisposed={GetIntValue(payload, "hlsPlayersDisposed")}");
+                        $"Preview resources released: deviceCode={GetValue(payload, "deviceCode") ?? "unknown"}, sessionId={stoppedSessionId ?? "unknown"}, protocol={GetProtocol(payload)}, reason={GetValue(payload, "reason") ?? "none"}, peerClosed={GetBoolValue(payload, "peerClosed")}, mediaTracksStopped={GetIntValue(payload, "mediaTracksStopped")}, flvPlayersDisposed={GetIntValue(payload, "flvPlayersDisposed")}, hlsPlayersDisposed={GetIntValue(payload, "hlsPlayersDisposed")}");
+                    if (stopPlaybackCompletionSource is not null
+                        && (string.IsNullOrWhiteSpace(stopPlaybackSessionId)
+                            || string.Equals(stopPlaybackSessionId, stoppedSessionId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        stopPlaybackSessionId = null;
+                        stopPlaybackCompletionSource.TrySetResult(true);
+                        stopPlaybackCompletionSource = null;
+                    }
                     break;
                 case "playback_idle":
                     if (activeSession is null && string.IsNullOrWhiteSpace(pendingSessionJson))
@@ -521,6 +532,46 @@ public partial class PreviewHostControl : UserControl, IDisposable
         _ = DiagnosticService?.WriteAsync(eventName, message);
     }
 
+    public async Task FlushActiveSessionAsync(string reason = "window_closing", TimeSpan? timeout = null)
+    {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        pendingSessionJson = null;
+        var sessionId = activeSession?.PlaybackSessionId;
+        if (Browser.CoreWebView2 is null || !browserReady || string.IsNullOrWhiteSpace(sessionId))
+        {
+            activeSession = null;
+            return;
+        }
+
+        stopPlaybackCompletionSource?.TrySetResult(false);
+        var completionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        stopPlaybackCompletionSource = completionSource;
+        stopPlaybackSessionId = sessionId;
+
+        try
+        {
+            var reasonLiteral = JsonSerializer.Serialize(string.IsNullOrWhiteSpace(reason) ? "window_closing" : reason.Trim());
+            await Browser.ExecuteScriptAsync($"window.TyslPreviewHost?.stop({reasonLiteral});");
+        }
+        catch
+        {
+            stopPlaybackSessionId = null;
+            completionSource.TrySetResult(false);
+        }
+
+        await Task.WhenAny(
+            completionSource.Task,
+            Task.Delay(timeout ?? TimeSpan.FromSeconds(4)));
+
+        stopPlaybackSessionId = null;
+        stopPlaybackCompletionSource = null;
+        activeSession = null;
+    }
+
     public void Dispose()
     {
         if (isDisposed)
@@ -531,6 +582,9 @@ public partial class PreviewHostControl : UserControl, IDisposable
         isDisposed = true;
         browserReady = false;
         pendingSessionJson = null;
+        stopPlaybackSessionId = null;
+        stopPlaybackCompletionSource?.TrySetResult(false);
+        stopPlaybackCompletionSource = null;
         activeSession = null;
         CancelNegotiation();
         Loaded -= HandleLoaded;

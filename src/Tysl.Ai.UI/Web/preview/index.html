@@ -287,6 +287,14 @@ function createWebRtcPlaybackHost(session) {
 
       notifyHostInitialized("webrtc");
 
+      if (session.forceInitialWebRtcFailure) {
+        fail(
+          session.forceFailureCategory || "acceptance_forced_webrtc_failure",
+          session.forceFailureReason || "forced by preview acceptance"
+        );
+        return;
+      }
+
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       await waitForIceGatheringComplete(peer, 1500);

@@ -77,18 +77,22 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
                 await Task.Delay(350).ConfigureAwait(false);
             }
 
-            await WriteWebRtcSuccessMetricsAsync(results).ConfigureAwait(false);
-            await WriteFallbackSampleAsync(results).ConfigureAwait(false);
-
             var directSuccess = results.FirstOrDefault(result => result.IsSuccess && result.FinalProtocol == SitePreviewProtocol.WebRtc);
             var fallbackSuccess = results.FirstOrDefault(result => result.IsSuccess && result.FinalProtocol is SitePreviewProtocol.Flv or SitePreviewProtocol.Hls);
+            if (fallbackSuccess is null)
+            {
+                fallbackSuccess = await TryAcquireFallbackSampleAsync(results).ConfigureAwait(false);
+            }
+
+            await WriteWebRtcSuccessMetricsAsync(results).ConfigureAwait(false);
+            await WriteFallbackSampleAsync(results, fallbackSuccess).ConfigureAwait(false);
             var alternate = results.FirstOrDefault(result =>
                 !string.Equals(result.DeviceCode, directSuccess?.DeviceCode, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(result.DeviceCode, fallbackSuccess?.DeviceCode, StringComparison.OrdinalIgnoreCase));
 
             await WriteRunnerEventAsync(
                 "preview-acceptance-summary",
-                $"tested={results.Count}, directWebRtc={results.Count(result => result.IsSuccess && result.FinalProtocol == SitePreviewProtocol.WebRtc)}, fallbackSuccess={results.Count(result => result.IsSuccess && result.FinalProtocol is SitePreviewProtocol.Flv or SitePreviewProtocol.Hls)}, totalFailed={results.Count(result => !result.IsSuccess)}");
+                $"tested={results.Count}, directWebRtc={results.Count(result => result.IsSuccess && result.FinalProtocol == SitePreviewProtocol.WebRtc)}, fallbackSuccess={results.Count(result => result.IsSuccess && result.FinalProtocol is SitePreviewProtocol.Flv or SitePreviewProtocol.Hls) + (fallbackSuccess is not null && results.All(result => !string.Equals(result.LastSessionId, fallbackSuccess.LastSessionId, StringComparison.OrdinalIgnoreCase)) ? 1 : 0)}, totalFailed={results.Count(result => !result.IsSuccess)}");
 
             var repeatDevice = directSuccess?.DeviceCode ?? fallbackSuccess?.DeviceCode ?? alternate?.DeviceCode;
             if (!string.IsNullOrWhiteSpace(repeatDevice))
@@ -255,21 +259,38 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
             await WriteRunnerEventAsync(
                 "preview-acceptance-skip",
                 $"scenario=close-main-window-while-webrtc-playing, reason=device_not_webrtc_ready, deviceCode={deviceCode}, finalProtocol={ToProtocolKey(result.FinalProtocol)}, success={result.IsSuccess}");
-            await CloseMainWindowAsync().ConfigureAwait(false);
+            await CloseMainWindowAsync(
+                deviceCode,
+                result.LastSessionId,
+                result.FinalProtocol,
+                "device_not_webrtc_ready").ConfigureAwait(false);
             return;
         }
 
         await WriteRunnerEventAsync(
             "preview-acceptance-close-main-window",
             $"deviceCode={deviceCode}, sessionId={result.LastSessionId ?? "unknown"}, finalProtocol={ToProtocolKey(result.FinalProtocol)}");
-        await CloseMainWindowAsync().ConfigureAwait(false);
+        await CloseMainWindowAsync(
+            deviceCode,
+            result.LastSessionId,
+            result.FinalProtocol,
+            "validated_webrtc_playing").ConfigureAwait(false);
     }
 
-    private async Task<PreviewAttemptResult> ExercisePreviewAsync(string deviceCode, bool closeAfter)
+    private async Task<PreviewAttemptResult> ExercisePreviewAsync(
+        string deviceCode,
+        bool closeAfter,
+        bool forceInitialWebRtcFailure = false)
     {
         await WriteRunnerEventAsync("preview-acceptance-device-start", $"deviceCode={deviceCode}");
         var baseline = SnapshotEventCount();
         await SelectDeviceAsync(deviceCode).ConfigureAwait(false);
+        if (forceInitialWebRtcFailure)
+        {
+            await shellWindow.Dispatcher.InvokeAsync(
+                () => shellViewModel.PrepareAcceptanceForcedWebRtcFailure());
+        }
+
         await OpenPreviewAsync().ConfigureAwait(false);
 
         var result = await WaitForPreviewOutcomeAsync(deviceCode, baseline, DeviceTimeout).ConfigureAwait(false);
@@ -312,9 +333,11 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
                 $"devices={results.Count}, resolved={resolvedCount}, preferredWebRtc={preferredWebRtc}, preferredWebRtcRate={preferredRate:F2}%, success={successCount}, webrtcSuccess={webrtcSuccessCount}, webrtcSuccessRate={webrtcSuccessRate:F2}%"));
     }
 
-    private async Task WriteFallbackSampleAsync(IReadOnlyList<PreviewAttemptResult> results)
+    private async Task WriteFallbackSampleAsync(
+        IReadOnlyList<PreviewAttemptResult> results,
+        PreviewAttemptResult? fallbackOverride = null)
     {
-        var fallback = results.FirstOrDefault(result =>
+        var fallback = fallbackOverride ?? results.FirstOrDefault(result =>
             result.IsSuccess
             && result.PreferredProtocol == SitePreviewProtocol.WebRtc
             && result.FinalProtocol is SitePreviewProtocol.Flv or SitePreviewProtocol.Hls
@@ -330,7 +353,7 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
 
         await WriteRunnerEventAsync(
             "preview-acceptance-fallback-sample",
-            $"status=ok, deviceCode={fallback.DeviceCode}, sessionId={fallback.LastSessionId ?? "none"}, preferredProtocol={ToProtocolKey(fallback.PreferredProtocol)}, finalProtocol={ToProtocolKey(fallback.FinalProtocol)}, failureReason={fallback.FailureReason ?? "none"}");
+            $"status=ok, sampleSource={(fallbackOverride is null ? "scan" : "probe")}, deviceCode={fallback.DeviceCode}, sessionId={fallback.LastSessionId ?? "none"}, preferredProtocol={ToProtocolKey(fallback.PreferredProtocol)}, finalProtocol={ToProtocolKey(fallback.FinalProtocol)}, failureReason={fallback.FailureReason ?? "none"}");
     }
 
     private async Task WriteSessionAndReleaseValidationAsync()
@@ -425,18 +448,58 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
         await shellWindow.Dispatcher.InvokeAsync(() => shellViewModel.ClosePreviewCommand.Execute(null));
     }
 
-    private async Task CloseMainWindowAsync()
+    private async Task CloseMainWindowAsync(
+        string? deviceCode = null,
+        string? sessionId = null,
+        SitePreviewProtocol finalProtocol = SitePreviewProtocol.Unknown,
+        string reason = "runner_request")
     {
+        if (!HasEvent("preview-acceptance-close-main-window"))
+        {
+            await WriteRunnerEventAsync(
+                "preview-acceptance-close-main-window",
+                $"deviceCode={deviceCode ?? "unknown"}, sessionId={sessionId ?? "unknown"}, finalProtocol={ToProtocolKey(finalProtocol)}, reason={reason}");
+        }
+
         if (!shellWindow.Dispatcher.HasShutdownStarted)
         {
-            await shellWindow.Dispatcher.InvokeAsync(() =>
-            {
-                if (shellWindow.IsLoaded)
-                {
-                    shellWindow.Close();
-                }
-            });
+            await shellWindow.RequestCloseForAcceptanceAsync().ConfigureAwait(false);
         }
+    }
+
+    private async Task<PreviewAttemptResult?> TryAcquireFallbackSampleAsync(IReadOnlyList<PreviewAttemptResult> results)
+    {
+        var candidates = results
+            .Where(result => result.IsSuccess && result.FinalProtocol == SitePreviewProtocol.WebRtc)
+            .Select(result => result.DeviceCode)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var deviceCode in candidates)
+        {
+            await WriteRunnerEventAsync(
+                "preview-acceptance-scenario-start",
+                $"scenario=forced-webrtc-fallback-probe, deviceCode={deviceCode}");
+
+            var result = await ExercisePreviewAsync(
+                deviceCode,
+                closeAfter: true,
+                forceInitialWebRtcFailure: true).ConfigureAwait(false);
+
+            await WriteRunnerEventAsync(
+                "preview-acceptance-scenario-step",
+                $"scenario=forced-webrtc-fallback-probe, deviceCode={deviceCode}, success={result.IsSuccess}, finalProtocol={ToProtocolKey(result.FinalProtocol)}, fallbackTriggered={result.FallbackTriggered}, failureReason={result.FailureReason ?? "none"}");
+
+            if (result.IsSuccess
+                && result.PreferredProtocol == SitePreviewProtocol.WebRtc
+                && result.FinalProtocol is SitePreviewProtocol.Flv or SitePreviewProtocol.Hls
+                && result.FallbackTriggered)
+            {
+                return result;
+            }
+        }
+
+        return null;
     }
 
     private async Task<PreviewAttemptResult> WaitForPreviewOutcomeAsync(string deviceCode, int baselineIndex, TimeSpan timeout)
@@ -554,6 +617,14 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
         lock (syncRoot)
         {
             return diagnosticEvents.Count;
+        }
+    }
+
+    private bool HasEvent(string eventName)
+    {
+        lock (syncRoot)
+        {
+            return diagnosticEvents.Any(evt => string.Equals(evt.EventName, eventName, StringComparison.OrdinalIgnoreCase));
         }
     }
 

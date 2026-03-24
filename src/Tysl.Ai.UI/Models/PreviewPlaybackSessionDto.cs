@@ -15,4 +15,10 @@ public sealed class PreviewPlaybackSessionDto
     public bool WebRtcUrlAcquired { get; set; }
 
     public int ReadyTimeoutSeconds { get; set; } = 10;
+
+    public bool ForceInitialWebRtcFailure { get; set; }
+
+    public string? ForceFailureCategory { get; set; }
+
+    public string? ForceFailureReason { get; set; }
 }

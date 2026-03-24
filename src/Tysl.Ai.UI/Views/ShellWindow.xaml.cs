@@ -9,7 +9,10 @@ namespace Tysl.Ai.UI.Views;
 
 public partial class ShellWindow : Window
 {
+    private bool allowCloseAfterPreviewFlush;
     private readonly ILocalDiagnosticService diagnosticService;
+    private TaskCompletionSource<bool>? closePreparationCompletionSource;
+    private bool isClosingAsync;
     private readonly ISitePreviewService sitePreviewService;
     private SiteEditorDialog? editorDialog;
     private ShellViewModel? shellViewModel;
@@ -162,16 +165,74 @@ public partial class ShellWindow : Window
         MessageBox.Show(this, e.Message, e.Title, MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private void OnClosing(object? sender, CancelEventArgs e)
+    public Task RequestCloseForAcceptanceAsync()
     {
-        shellViewModel?.PrepareForShutdown();
-        PreviewHost.SessionJson = null;
+        return Dispatcher.CheckAccess()
+            ? RequestCloseForAcceptanceCoreAsync()
+            : Dispatcher.InvokeAsync(RequestCloseForAcceptanceCoreAsync).Task.Unwrap();
+    }
 
-        if (editorDialog is not null)
+    private async Task RequestCloseForAcceptanceCoreAsync()
+    {
+        if (allowCloseAfterPreviewFlush)
         {
-            editorDialog.Closed -= HandleEditorDialogClosed;
-            editorDialog.Close();
-            editorDialog = null;
+            Close();
+            return;
+        }
+
+        if (isClosingAsync && closePreparationCompletionSource is not null)
+        {
+            await closePreparationCompletionSource.Task;
+            return;
+        }
+
+        closePreparationCompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Close();
+        await closePreparationCompletionSource.Task;
+    }
+
+    private async void OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (allowCloseAfterPreviewFlush)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        if (isClosingAsync)
+        {
+            return;
+        }
+
+        isClosingAsync = true;
+        closePreparationCompletionSource ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        try
+        {
+            shellViewModel?.BeginShutdownPreviewRelease();
+            await PreviewHost.FlushActiveSessionAsync();
+            shellViewModel?.CompleteShutdownAfterPreviewRelease();
+
+            if (editorDialog is not null)
+            {
+                editorDialog.Closed -= HandleEditorDialogClosed;
+                editorDialog.Close();
+                editorDialog = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _ = diagnosticService.WriteAsync(
+                "exception-caught",
+                $"source=shell-window-close, type={ex.GetType().FullName}, message={ex.Message}");
+        }
+        finally
+        {
+            isClosingAsync = false;
+            allowCloseAfterPreviewFlush = true;
+            closePreparationCompletionSource?.TrySetResult(true);
+            closePreparationCompletionSource = null;
+            _ = Dispatcher.BeginInvoke(new Action(Close));
         }
     }
 

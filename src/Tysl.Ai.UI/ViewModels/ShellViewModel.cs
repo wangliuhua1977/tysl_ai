@@ -63,6 +63,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private SitePreviewProtocol previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
     private string? previewFallbackFailureReason;
     private SitePreviewProtocol previewPreferredProtocol = SitePreviewProtocol.Unknown;
+    private bool acceptanceForceNextWebRtcFailure;
+    private string? acceptanceForcedFailureCategory;
+    private string? acceptanceForcedFailureReason;
     private bool previewRequested;
     private string previewProtocolText = "待开启";
     private string? previewSessionJson;
@@ -497,6 +500,19 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         RefreshSelectedDetail();
     }
 
+    public void PrepareAcceptanceForcedWebRtcFailure(
+        string category = "acceptance_forced_webrtc_failure",
+        string reason = "forced by preview acceptance")
+    {
+        acceptanceForceNextWebRtcFailure = true;
+        acceptanceForcedFailureCategory = string.IsNullOrWhiteSpace(category)
+            ? "acceptance_forced_webrtc_failure"
+            : category.Trim();
+        acceptanceForcedFailureReason = string.IsNullOrWhiteSpace(reason)
+            ? "forced by preview acceptance"
+            : reason.Trim();
+    }
+
     private void HandlePreviewPlaybackReadyLegacy(string protocol)
     {
         if (previewSession is null)
@@ -835,6 +851,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         previewResolveCts?.Cancel();
         previewResolveCts?.Dispose();
         previewResolveCts = null;
+        ResetAcceptanceForcedPreviewFailure();
         previewPlaybackState = PreviewPlaybackState.Idle;
         previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
         previewFallbackFailureReason = null;
@@ -1021,6 +1038,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         var currentSession = previewSession;
         previewRequested = false;
         CancelPreviewResolve();
+        ResetAcceptanceForcedPreviewFailure();
         previewPlaybackState = PreviewPlaybackState.Idle;
         previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
         previewFallbackFailureReason = null;
@@ -1058,6 +1076,49 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 "preview-shutdown-requested",
                 $"deviceCode={currentSession.DeviceCode}, sessionId={currentSession.PlaybackSessionId}, protocol={ToProtocolKey(currentSession.SelectedProtocol)}");
         }
+    }
+
+    public void BeginShutdownPreviewRelease()
+    {
+        var currentSession = previewSession;
+        previewRequested = false;
+        CancelPreviewResolve();
+        ResetAcceptanceForcedPreviewFailure();
+        if (currentSession is not null)
+        {
+            _ = WriteDiagnosticAsync(
+                "preview-shutdown-requested",
+                $"deviceCode={currentSession.DeviceCode}, sessionId={currentSession.PlaybackSessionId}, protocol={ToProtocolKey(currentSession.SelectedProtocol)}");
+        }
+    }
+
+#if false
+    public void CompleteShutdownAfterPreviewRelease()
+    {
+        previewPlaybackState = PreviewPlaybackState.Idle;
+        previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
+        previewFallbackFailureReason = null;
+        previewPreferredProtocol = SitePreviewProtocol.Unknown;
+        previewSession = null;
+        PreviewSessionJson = null;
+        PreviewProtocolText = "寰呭紑鍚?;
+        PreviewStatusText = "棰勮宸插叧闂€?;
+        ClosePreviewCommand.NotifyCanExecuteChanged();
+    }
+
+#endif
+
+    public void CompleteShutdownAfterPreviewRelease()
+    {
+        previewPlaybackState = PreviewPlaybackState.Idle;
+        previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
+        previewFallbackFailureReason = null;
+        previewPreferredProtocol = SitePreviewProtocol.Unknown;
+        previewSession = null;
+        PreviewSessionJson = null;
+        PreviewProtocolText = "待开启";
+        PreviewStatusText = "预览已关闭。";
+        ClosePreviewCommand.NotifyCanExecuteChanged();
     }
 
     private async Task StartPreviewAsyncLegacy(string deviceCode, SitePreviewProtocol? failedProtocol = null)
@@ -1138,6 +1199,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
 
         CancelPreviewResolve();
+        var forceInitialWebRtcFailure = acceptanceForceNextWebRtcFailure;
+        var forcedFailureCategory = acceptanceForcedFailureCategory;
+        var forcedFailureReason = acceptanceForcedFailureReason;
+        ResetAcceptanceForcedPreviewFailure();
 
         var cancellationTokenSource = new CancellationTokenSource();
         previewResolveCts = cancellationTokenSource;
@@ -1216,7 +1281,19 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
 
         var preferredProtocol = GetEffectivePreferredProtocol(result.Session);
-        PreviewSessionJson = JsonSerializer.Serialize(ToPreviewPlaybackSession(result.Session), MapHostJsonOptions);
+        var playbackSession = ToPreviewPlaybackSession(result.Session);
+        if (forceInitialWebRtcFailure && result.Session.SelectedProtocol == SitePreviewProtocol.WebRtc)
+        {
+            playbackSession.ForceInitialWebRtcFailure = true;
+            playbackSession.ForceFailureCategory = string.IsNullOrWhiteSpace(forcedFailureCategory)
+                ? "acceptance_forced_webrtc_failure"
+                : forcedFailureCategory;
+            playbackSession.ForceFailureReason = string.IsNullOrWhiteSpace(forcedFailureReason)
+                ? "forced by preview acceptance"
+                : forcedFailureReason;
+        }
+
+        PreviewSessionJson = JsonSerializer.Serialize(playbackSession, MapHostJsonOptions);
         PreviewProtocolText = $"当前协议：{GetProtocolLabel(result.Session.SelectedProtocol)}";
         _ = WriteDiagnosticAsync(
             "preview-session-resolved",
@@ -1859,6 +1936,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private Task WriteDiagnosticAsync(string eventName, string message)
     {
         return diagnosticService.WriteAsync(eventName, message);
+    }
+
+    private void ResetAcceptanceForcedPreviewFailure()
+    {
+        acceptanceForceNextWebRtcFailure = false;
+        acceptanceForcedFailureCategory = null;
+        acceptanceForcedFailureReason = null;
     }
 }
 
