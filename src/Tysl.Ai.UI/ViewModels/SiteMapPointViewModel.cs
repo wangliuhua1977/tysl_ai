@@ -17,6 +17,8 @@ public sealed class SiteMapPointViewModel : ObservableObject
         VisualState = point.VisualState;
         IsMonitored = point.IsMonitored;
         RawCoordinateType = point.CoordinatePayload.RawCoordinateType;
+        DisplayLongitude = point.DisplayLongitude;
+        DisplayLatitude = point.DisplayLatitude;
         PlatformRawLongitude = point.CoordinatePayload.PlatformRawLongitude;
         PlatformRawLatitude = point.CoordinatePayload.PlatformRawLatitude;
         ManualLongitude = point.CoordinatePayload.ManualLongitude;
@@ -55,6 +57,10 @@ public sealed class SiteMapPointViewModel : ObservableObject
     public SiteVisualState VisualState { get; }
 
     public bool IsMonitored { get; }
+
+    public double? DisplayLongitude { get; }
+
+    public double? DisplayLatitude { get; }
 
     public double? PlatformRawLongitude { get; }
 
@@ -114,6 +120,8 @@ public sealed class SiteMapPointViewModel : ObservableObject
             SummaryText = SummaryText,
             DispatchStateKey = DispatchStateKey,
             DispatchStateText = DispatchStateText,
+            DisplayLongitude = DisplayLongitude,
+            DisplayLatitude = DisplayLatitude,
             PlatformRawLongitude = PlatformRawLongitude,
             PlatformRawLatitude = PlatformRawLatitude,
             RawCoordinateType = RawCoordinateType,

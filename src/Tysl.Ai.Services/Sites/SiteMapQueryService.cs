@@ -1,5 +1,6 @@
 using Tysl.Ai.Core.Enums;
 using Tysl.Ai.Core.Interfaces;
+using Tysl.Ai.Core.Map;
 using Tysl.Ai.Core.Models;
 
 namespace Tysl.Ai.Services.Sites;
@@ -34,13 +35,24 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         CancellationToken cancellationToken = default)
     {
         var mergeBundle = await BuildMergedSitesAsync(cancellationToken);
-        var visibleSites = mergeBundle.Sites
+        var activeSites = mergeBundle.Sites
+            .Where(site => !site.IsIgnored)
+            .ToList();
+        var ignoredSites = mergeBundle.Sites
+            .Where(site => site.IsIgnored)
+            .ToList();
+        var filterSource = filter == SiteDashboardFilter.Ignored
+            ? ignoredSites
+            : activeSites;
+        var filteredSites = filterSource
             .Where(site => MatchesFilter(site, filter))
             .Where(site => MatchesSearch(site, searchText))
             .ToList();
-
-        var visibleMapSites = visibleSites
+        var visibleMapSites = filteredSites
             .Where(site => site.HasMapPoint)
+            .ToList();
+        var filteredIgnoredSites = ignoredSites
+            .Where(site => MatchesSearch(site, searchText))
             .ToList();
 
         return new SiteDashboardSnapshot
@@ -48,19 +60,39 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             PlatformStatusText = mergeBundle.ConnectionState.SummaryText,
             PlatformStatusDetailText = mergeBundle.ConnectionState.DetailText,
             IsPlatformConnected = mergeBundle.ConnectionState.IsConnected,
-            PointCount = mergeBundle.Sites.Count,
-            MonitoredCount = mergeBundle.Sites.Count(site => site.IsMonitored),
-            FaultCount = mergeBundle.Sites.Count(IsAttentionSite),
-            DispatchedCount = mergeBundle.Sites.Count(HasActiveDispatch),
+            PointCount = activeSites.Count,
+            MonitoredCount = activeSites.Count(site => site.IsMonitored),
+            FaultCount = activeSites.Count(IsAttentionSite),
+            DispatchedCount = activeSites.Count(HasActiveDispatch),
+            CoverageSummary = new MapCoverageSummary
+            {
+                TotalPointCount = activeSites.Count,
+                MappedPointCount = activeSites.Count(site => site.HasMapPoint),
+                UnmappedPointCount = activeSites.Count(site => !site.HasMapPoint),
+                FilteredPointCount = filteredSites.Count,
+                CurrentVisiblePointCount = visibleMapSites.Count,
+                FilteredUnmappedPointCount = filteredSites.Count(site => !site.HasMapPoint)
+            },
             LastRefreshedAt = DateTimeOffset.Now,
             VisiblePoints = visibleMapSites
                 .Select(ToMapPoint)
                 .ToList(),
-            VisibleAlerts = visibleSites
+            VisibleAlerts = filteredSites
                 .Where(IsAttentionSite)
                 .OrderByDescending(GetAlertPriority)
                 .ThenByDescending(GetAlertTimestamp)
                 .Select(ToAlertDigest)
+                .ToList(),
+            UnmappedPoints = activeSites
+                .Where(site => !site.HasMapPoint)
+                .OrderBy(GetUnmappedPriority)
+                .ThenBy(site => site.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .Select(ToUnmappedDigest)
+                .ToList(),
+            IgnoredPoints = filteredIgnoredSites
+                .OrderByDescending(site => site.IgnoredAt ?? DateTimeOffset.MinValue)
+                .ThenBy(site => site.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .Select(ToIgnoredDigest)
                 .ToList()
         };
     }
@@ -123,21 +155,9 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         DispatchRecord? dispatchRecord,
         PlatformConnectionState platformConnectionState)
     {
-        var coordinateSource = ResolveCoordinateSource(platformSite, localProfile);
-        var displayLongitude = coordinateSource switch
-        {
-            CoordinateSource.PlatformRaw => platformSite.RawLongitude,
-            CoordinateSource.ManualOverride => localProfile?.ManualLongitude,
-            _ => null
-        };
-        var displayLatitude = coordinateSource switch
-        {
-            CoordinateSource.PlatformRaw => platformSite.RawLatitude,
-            CoordinateSource.ManualOverride => localProfile?.ManualLatitude,
-            _ => null
-        };
-        var hasMapPoint = displayLongitude.HasValue && displayLatitude.HasValue;
+        var coordinateGovernance = ResolveCoordinateGovernance(platformSite, localProfile);
         var isMonitored = localProfile?.IsMonitored ?? true;
+        var isIgnored = localProfile?.IsIgnored ?? false;
         var dispatchPresentation = ResolveDispatchPresentation(dispatchRecord, runtimeState);
 
         return new SiteMergedView
@@ -148,16 +168,26 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             Alias = localProfile?.Alias,
             Remark = localProfile?.Remark,
             IsMonitored = isMonitored,
+            IsIgnored = isIgnored,
+            IgnoredAt = localProfile?.IgnoredAt,
+            IgnoredReason = localProfile?.IgnoredReason,
             PlatformRawLongitude = platformSite.RawLongitude,
             PlatformRawLatitude = platformSite.RawLatitude,
             PlatformRawCoordinateType = platformSite.RawCoordinateType,
+            IsPlatformCoordinateEnrichedFromDetail = platformSite.IsCoordinateEnrichedFromDetail,
             ManualLongitude = localProfile?.ManualLongitude,
             ManualLatitude = localProfile?.ManualLatitude,
-            DisplayLongitude = displayLongitude,
-            DisplayLatitude = displayLatitude,
-            HasMapPoint = hasMapPoint,
-            CoordinateSource = coordinateSource,
-            CoordinateSourceText = ResolveCoordinateSourceText(coordinateSource),
+            DisplayLongitude = coordinateGovernance.DisplayLongitude,
+            DisplayLatitude = coordinateGovernance.DisplayLatitude,
+            CoordinateDisplayStatus = coordinateGovernance.DisplayStatus,
+            HasMapPoint = coordinateGovernance.HasMapPoint,
+            HasDisplayCoordinate = coordinateGovernance.HasDisplayCoordinate,
+            UnmappedReason = coordinateGovernance.UnmappedReason,
+            UnmappedReasonText = ResolveUnmappedReasonText(coordinateGovernance.UnmappedReason),
+            CoordinateDisplayStatusText = ResolveCoordinateDisplayStatusText(coordinateGovernance.DisplayStatus),
+            CoordinateGovernanceHintText = ResolveCoordinateGovernanceHintText(coordinateGovernance.UnmappedReason),
+            CoordinateSource = coordinateGovernance.CoordinateSource,
+            CoordinateSourceText = ResolveCoordinateSourceText(coordinateGovernance.CoordinateSource, platformSite.IsCoordinateEnrichedFromDetail),
             PlatformStatusSummary = platformConnectionState.SummaryText,
             HasRuntimeState = runtimeState is not null,
             LastInspectionAt = runtimeState?.LastInspectionAt,
@@ -184,8 +214,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             RecoveredAt = dispatchRecord?.RecoveredAt,
             RecoverySummary = dispatchRecord?.RecoverySummary,
             DispatchMessageDigest = dispatchRecord?.MessageDigest,
-            IsDispatchCooling = dispatchPresentation.IsCooling,
-            CanConfirmRecovery = dispatchPresentation.CanConfirmRecovery,
+            IsDispatchCooling = !isIgnored && dispatchPresentation.IsCooling,
+            CanConfirmRecovery = !isIgnored && dispatchPresentation.CanConfirmRecovery,
             DispatchStatusText = dispatchPresentation.DispatchStatusText,
             RecoveryStatusText = dispatchPresentation.RecoveryStatusText,
             AddressText = localProfile?.AddressText,
@@ -196,8 +226,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             DemoOnlineState = runtimeState?.LastOnlineState ?? platformSite.DemoOnlineState,
             DemoStatus = platformSite.DemoStatus,
             DemoDispatchStatus = platformSite.DemoDispatchStatus,
-            VisualState = ResolveVisualState(platformSite, runtimeState, dispatchPresentation, isMonitored),
-            StatusText = ResolveStatusText(platformSite, runtimeState, dispatchPresentation, isMonitored),
+            VisualState = ResolveVisualState(platformSite, runtimeState, dispatchPresentation, isMonitored, isIgnored),
+            StatusText = ResolveStatusText(platformSite, runtimeState, dispatchPresentation, isMonitored, isIgnored),
             HasLocalProfile = localProfile is not null,
             CreatedAt = localProfile?.CreatedAt,
             UpdatedAt = localProfile?.UpdatedAt
@@ -224,9 +254,15 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
                 RawCoordinateType = site.PlatformRawCoordinateType,
                 ManualLongitude = site.ManualLongitude,
                 ManualLatitude = site.ManualLatitude,
+                CoordinateDisplayStatus = site.CoordinateDisplayStatus,
+                UnmappedReason = site.UnmappedReason,
                 CoordinateSource = site.CoordinateSource,
                 CoordinateSourceText = site.CoordinateSourceText
             },
+            DisplayLongitude = site.DisplayLongitude,
+            DisplayLatitude = site.DisplayLatitude,
+            CoordinateDisplayStatus = site.CoordinateDisplayStatus,
+            UnmappedReason = site.UnmappedReason,
             DemoOnlineState = site.DemoOnlineState,
             DemoStatus = site.DemoStatus,
             DemoDispatchStatus = site.DemoDispatchStatus,
@@ -260,13 +296,46 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         };
     }
 
+    private static UnmappedPointDigest ToUnmappedDigest(SiteMergedView site)
+    {
+        return new UnmappedPointDigest
+        {
+            DeviceCode = site.DeviceCode,
+            DisplayName = site.DisplayName,
+            DeviceName = site.DeviceName,
+            IsMonitored = site.IsMonitored,
+            UnmappedReason = site.UnmappedReason,
+            UnmappedReasonText = site.UnmappedReasonText,
+            CoordinateSourceText = site.CoordinateSourceText,
+            GovernanceHintText = site.CoordinateGovernanceHintText,
+            PlatformCoordinateText = FormatCoordinate(site.PlatformRawLongitude, site.PlatformRawLatitude),
+            PlatformCoordinateTypeText = CoordinateTypeCatalog.GetDisplayLabel(site.PlatformRawCoordinateType),
+            ManualCoordinateText = FormatCoordinate(site.ManualLongitude, site.ManualLatitude)
+        };
+    }
+
+    private static IgnoredPointDigest ToIgnoredDigest(SiteMergedView site)
+    {
+        return new IgnoredPointDigest
+        {
+            DeviceCode = site.DeviceCode,
+            DisplayName = site.DisplayName,
+            DeviceName = site.DeviceName,
+            IsMonitored = site.IsMonitored,
+            IgnoredAt = site.IgnoredAt,
+            IgnoredReason = site.IgnoredReason
+        };
+    }
+
     private static bool MatchesFilter(SiteMergedView site, SiteDashboardFilter filter)
     {
         return filter switch
         {
             SiteDashboardFilter.Fault => IsAttentionSite(site),
             SiteDashboardFilter.Monitored => site.IsMonitored,
-            SiteDashboardFilter.Dispatched => HasActiveDispatch(site),
+            SiteDashboardFilter.Disposed => site.HasDispatchRecord,
+            SiteDashboardFilter.Unmapped => !site.HasMapPoint,
+            SiteDashboardFilter.Ignored => site.IsIgnored,
             _ => true
         };
     }
@@ -283,6 +352,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         return site.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)
             || site.DeviceName.Contains(term, StringComparison.OrdinalIgnoreCase)
             || site.DeviceCode.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || site.UnmappedReasonText.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || site.CoordinateGovernanceHintText.Contains(term, StringComparison.OrdinalIgnoreCase)
             || (site.AddressText?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
             || (site.MaintenanceUnit?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
             || (site.MaintainerName?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
@@ -290,12 +361,13 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             || site.DispatchStatusText.Contains(term, StringComparison.OrdinalIgnoreCase)
             || site.RecoveryStatusText.Contains(term, StringComparison.OrdinalIgnoreCase)
             || (site.DispatchFaultSummary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
-            || (site.RecoverySummary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false);
+            || (site.RecoverySummary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (site.IgnoredReason?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
     private static bool IsAttentionSite(SiteMergedView site)
     {
-        if (!site.IsMonitored)
+        if (site.IsIgnored || !site.IsMonitored)
         {
             return false;
         }
@@ -327,6 +399,11 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
     private static bool HasActiveDispatch(SiteMergedView site)
     {
+        if (site.IsIgnored)
+        {
+            return false;
+        }
+
         return site.HasDispatchRecord
             && !site.RecoveredAt.HasValue
             && site.DispatchStatus != DispatchStatus.None;
@@ -334,6 +411,11 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
     private static bool IsRecentlyRecovered(SiteMergedView site)
     {
+        if (site.IsIgnored)
+        {
+            return false;
+        }
+
         return site.RecoveredAt is DateTimeOffset recoveredAt
             && recoveredAt >= DateTimeOffset.UtcNow.Subtract(RecoveredHighlightWindow);
     }
@@ -383,6 +465,18 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             ?? DateTimeOffset.MinValue;
     }
 
+    private static int GetUnmappedPriority(SiteMergedView site)
+    {
+        return site.UnmappedReason switch
+        {
+            UnmappedReason.ManualCoordinateIncomplete => 1,
+            UnmappedReason.PlatformCoordinateTypeUnrecognized => 2,
+            UnmappedReason.PlatformCoordinateIncomplete => 3,
+            UnmappedReason.MissingPlatformCoordinate => 4,
+            _ => 9
+        };
+    }
+
     private static string ResolveDisplayName(PlatformSiteSnapshot platformSite, SiteLocalProfile? localProfile)
     {
         return string.IsNullOrWhiteSpace(localProfile?.Alias)
@@ -390,30 +484,139 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             : localProfile.Alias.Trim();
     }
 
-    private static CoordinateSource ResolveCoordinateSource(
+    private static CoordinateGovernance ResolveCoordinateGovernance(
         PlatformSiteSnapshot platformSite,
         SiteLocalProfile? localProfile)
     {
-        if (platformSite.RawLongitude.HasValue && platformSite.RawLatitude.HasValue)
+        var hasManualPair = CoordinateTypeCatalog.HasCompleteCoordinate(localProfile?.ManualLongitude, localProfile?.ManualLatitude);
+        var hasManualPartial = CoordinateTypeCatalog.HasPartialCoordinate(localProfile?.ManualLongitude, localProfile?.ManualLatitude);
+        var hasPlatformPair = CoordinateTypeCatalog.HasCompleteCoordinate(platformSite.RawLongitude, platformSite.RawLatitude);
+        var hasPlatformPartial = CoordinateTypeCatalog.HasPartialCoordinate(platformSite.RawLongitude, platformSite.RawLatitude);
+        var normalizedType = CoordinateTypeCatalog.Normalize(platformSite.RawCoordinateType);
+
+        if (hasManualPair)
         {
-            return CoordinateSource.PlatformRaw;
+            return new CoordinateGovernance(
+                CoordinateSource.ManualOverride,
+                CoordinateDisplayStatus.Ready,
+                true,
+                true,
+                UnmappedReason.None,
+                localProfile!.ManualLongitude,
+                localProfile.ManualLatitude);
         }
 
-        if (localProfile?.ManualLongitude.HasValue == true && localProfile.ManualLatitude.HasValue)
+        if (hasPlatformPair && CoordinateTypeCatalog.IsDirectDisplayType(normalizedType))
         {
-            return CoordinateSource.ManualOverride;
+            return new CoordinateGovernance(
+                CoordinateSource.PlatformRaw,
+                CoordinateDisplayStatus.Ready,
+                true,
+                true,
+                UnmappedReason.None,
+                platformSite.RawLongitude,
+                platformSite.RawLatitude);
         }
 
-        return CoordinateSource.None;
+        if (hasPlatformPair && CoordinateTypeCatalog.RequiresMapHostConversion(normalizedType))
+        {
+            return new CoordinateGovernance(
+                CoordinateSource.PlatformRaw,
+                CoordinateDisplayStatus.RequiresMapHostConversion,
+                true,
+                false,
+                UnmappedReason.None,
+                null,
+                null);
+        }
+
+        if (hasManualPartial)
+        {
+            return new CoordinateGovernance(
+                CoordinateSource.None,
+                CoordinateDisplayStatus.Unmapped,
+                false,
+                false,
+                UnmappedReason.ManualCoordinateIncomplete,
+                null,
+                null);
+        }
+
+        if (hasPlatformPair)
+        {
+            return new CoordinateGovernance(
+                CoordinateSource.None,
+                CoordinateDisplayStatus.Unmapped,
+                false,
+                false,
+                UnmappedReason.PlatformCoordinateTypeUnrecognized,
+                null,
+                null);
+        }
+
+        if (hasPlatformPartial)
+        {
+            return new CoordinateGovernance(
+                CoordinateSource.None,
+                CoordinateDisplayStatus.Unmapped,
+                false,
+                false,
+                UnmappedReason.PlatformCoordinateIncomplete,
+                null,
+                null);
+        }
+
+        return new CoordinateGovernance(
+            CoordinateSource.None,
+            CoordinateDisplayStatus.Unmapped,
+            false,
+            false,
+            UnmappedReason.MissingPlatformCoordinate,
+            null,
+            null);
     }
 
-    private static string ResolveCoordinateSourceText(CoordinateSource coordinateSource)
+    private static string ResolveCoordinateSourceText(CoordinateSource coordinateSource, bool isCoordinateEnrichedFromDetail)
     {
         return coordinateSource switch
         {
-            CoordinateSource.PlatformRaw => "平台原始",
-            CoordinateSource.ManualOverride => "本地手工",
-            _ => "暂无坐标"
+            CoordinateSource.PlatformRaw when isCoordinateEnrichedFromDetail => "平台原始坐标（详情补全）",
+            CoordinateSource.PlatformRaw => "平台原始坐标",
+            CoordinateSource.ManualOverride => "本地手工坐标",
+            _ => "暂无可用显示坐标"
+        };
+    }
+
+    private static string ResolveCoordinateDisplayStatusText(CoordinateDisplayStatus displayStatus)
+    {
+        return displayStatus switch
+        {
+            CoordinateDisplayStatus.Ready => "已具备显示坐标",
+            CoordinateDisplayStatus.RequiresMapHostConversion => "地图宿主转换后可显示",
+            _ => "未落图"
+        };
+    }
+
+    private static string ResolveUnmappedReasonText(UnmappedReason unmappedReason)
+    {
+        return unmappedReason switch
+        {
+            UnmappedReason.MissingPlatformCoordinate => "平台未提供坐标，且尚未补录手工坐标",
+            UnmappedReason.PlatformCoordinateIncomplete => "平台坐标不完整，且尚未补录手工坐标",
+            UnmappedReason.PlatformCoordinateTypeUnrecognized => "平台原始坐标类型无法识别，且尚未补录手工坐标",
+            UnmappedReason.ManualCoordinateIncomplete => "手工坐标未补全，暂时无法落图",
+            _ => "当前已落图"
+        };
+    }
+
+    private static string ResolveCoordinateGovernanceHintText(UnmappedReason unmappedReason)
+    {
+        return unmappedReason switch
+        {
+            UnmappedReason.PlatformCoordinateTypeUnrecognized => "请确认平台坐标类型，或直接通过“编辑补充信息”补录手工坐标。",
+            UnmappedReason.ManualCoordinateIncomplete => "请补全手工经纬度后保存，点位才会重新落图。",
+            UnmappedReason.None => "当前显示坐标有效，无需补录。",
+            _ => "请通过“编辑补充信息”补录手工坐标后再落图。"
         };
     }
 
@@ -421,8 +624,14 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         PlatformSiteSnapshot platformSite,
         SiteRuntimeState? runtimeState,
         DispatchPresentation dispatchPresentation,
-        bool isMonitored)
+        bool isMonitored,
+        bool isIgnored)
     {
+        if (isIgnored)
+        {
+            return SiteVisualState.Unmonitored;
+        }
+
         if (!isMonitored)
         {
             return SiteVisualState.Unmonitored;
@@ -499,8 +708,14 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         PlatformSiteSnapshot platformSite,
         SiteRuntimeState? runtimeState,
         DispatchPresentation dispatchPresentation,
-        bool isMonitored)
+        bool isMonitored,
+        bool isIgnored)
     {
+        if (isIgnored)
+        {
+            return "已忽略";
+        }
+
         if (!isMonitored)
         {
             return "未纳入监测";
@@ -587,9 +802,19 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
     private static string ResolveRuntimeSummary(SiteMergedView site)
     {
+        if (site.IsIgnored)
+        {
+            return "当前点位已忽略，已退出地图、巡检、派单和主统计。";
+        }
+
         if (!site.IsMonitored)
         {
             return "当前点位未纳入静默巡检。";
+        }
+
+        if (!site.HasMapPoint)
+        {
+            return $"{site.UnmappedReasonText}。";
         }
 
         if (site.CanConfirmRecovery)
@@ -712,12 +937,6 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             && dispatchRecord.CoolingUntil is DateTimeOffset coolingUntil
             && coolingUntil > DateTimeOffset.UtcNow;
         var canConfirmRecovery = dispatchRecord.RecoveryStatus == RecoveryStatus.PendingConfirmation;
-        var isRecovered =
-            dispatchRecord.IsRecovered
-            && runtimeState?.LastFaultCode == RuntimeFaultCode.None
-            && runtimeState?.LastInspectionRunState != InspectionRunState.Failed
-            && dispatchRecord.RecoveredAt is DateTimeOffset recoveredAt
-            && recoveredAt >= DateTimeOffset.UtcNow.Subtract(RecoveredHighlightWindow);
 
         return new DispatchPresentation(
             dispatchRecord.DispatchStatus != DispatchStatus.None && !dispatchRecord.IsRecovered,
@@ -788,6 +1007,13 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         };
     }
 
+    private static string? FormatCoordinate(double? longitude, double? latitude)
+    {
+        return CoordinateTypeCatalog.HasCompleteCoordinate(longitude, latitude)
+            ? $"{longitude!.Value:F6}, {latitude!.Value:F6}"
+            : null;
+    }
+
     private sealed record SiteMergeBundle(
         IReadOnlyList<SiteMergedView> Sites,
         PlatformConnectionState ConnectionState);
@@ -805,4 +1031,13 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             && !CanConfirmRecovery
             && RecoveryStatusText.StartsWith("已恢复", StringComparison.Ordinal);
     }
+
+    private sealed record CoordinateGovernance(
+        CoordinateSource CoordinateSource,
+        CoordinateDisplayStatus DisplayStatus,
+        bool HasMapPoint,
+        bool HasDisplayCoordinate,
+        UnmappedReason UnmappedReason,
+        double? DisplayLongitude,
+        double? DisplayLatitude);
 }

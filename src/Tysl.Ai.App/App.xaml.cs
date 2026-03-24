@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using Tysl.Ai.App.Acceptance;
 using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.Infrastructure.Background;
 using Tysl.Ai.Infrastructure.Configuration;
@@ -18,8 +19,10 @@ namespace Tysl.Ai.App;
 
 public partial class App : Application
 {
+    private int exitCleanupStarted;
     private ILocalDiagnosticService? diagnosticService;
     private AcisKernelPlatformSiteProvider? platformSiteProvider;
+    private PreviewAcceptanceRunner? previewAcceptanceRunner;
     private SilentInspectionHostedService? silentInspectionHostedService;
     private WeComWebhookSender? webhookSender;
 
@@ -67,6 +70,9 @@ public partial class App : Application
             repository,
             runtimeStateRepository,
             dispatchRecordRepository);
+        ISitePreviewService sitePreviewService = new SitePreviewService(
+            platformSiteProvider,
+            runtimeStateRepository);
 
         ISilentInspectionService silentInspectionService = new SilentInspectionService(
             platformSiteProvider,
@@ -83,6 +89,7 @@ public partial class App : Application
 
         var shellViewModel = new ShellViewModel(
             siteMapQueryService,
+            sitePreviewService,
             siteLocalProfileService,
             dispatchService,
             diagnosticService,
@@ -91,24 +98,57 @@ public partial class App : Application
             amapLoadResult.Options?.MapStyle);
         var shellWindow = new ShellWindow(
             BuildMapHostConfiguration(amapLoadResult),
+            sitePreviewService,
             diagnosticService)
         {
             DataContext = shellViewModel
         };
 
-        Exit += HandleExit;
         MainWindow = shellWindow;
         shellWindow.Show();
+
+        if (e.Args.Any(arg => string.Equals(arg, "--preview-acceptance-v2", StringComparison.OrdinalIgnoreCase))
+            && platformSiteProvider is not null
+            && diagnosticService is LocalDiagnosticService localDiagnosticService)
+        {
+            previewAcceptanceRunner = new PreviewAcceptanceRunner(
+                shellWindow,
+                shellViewModel,
+                platformSiteProvider,
+                localDiagnosticService);
+            previewAcceptanceRunner.Start();
+        }
     }
 
-    private void HandleExit(object? sender, ExitEventArgs e)
+    protected override void OnExit(ExitEventArgs e)
     {
-        Exit -= HandleExit;
+        if (Interlocked.Exchange(ref exitCleanupStarted, 1) == 1)
+        {
+            base.OnExit(e);
+            return;
+        }
+
         DispatcherUnhandledException -= HandleDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException -= HandleCurrentDomainUnhandledException;
         TaskScheduler.UnobservedTaskException -= HandleUnobservedTaskException;
+        silentInspectionHostedService?.RequestStop();
+
+        using (var shutdownTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(8)))
+        {
+            try
+            {
+                silentInspectionHostedService?.StopAsync(shutdownTimeout.Token).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                // Best effort shutdown only.
+            }
+        }
+
         silentInspectionHostedService?.Dispose();
         silentInspectionHostedService = null;
+        previewAcceptanceRunner?.Dispose();
+        previewAcceptanceRunner = null;
         webhookSender?.Dispose();
         webhookSender = null;
         platformSiteProvider?.Dispose();
@@ -119,6 +159,7 @@ public partial class App : Application
         }
 
         diagnosticService = null;
+        base.OnExit(e);
     }
 
     private void HandleDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)

@@ -24,6 +24,14 @@ public sealed record SiteMapPoint
 
     public required MapCoordinatePayload CoordinatePayload { get; init; }
 
+    public double? DisplayLongitude { get; init; }
+
+    public double? DisplayLatitude { get; init; }
+
+    public required CoordinateDisplayStatus CoordinateDisplayStatus { get; init; }
+
+    public required UnmappedReason UnmappedReason { get; init; }
+
     public required DemoOnlineState DemoOnlineState { get; init; }
 
     public required PointDemoStatus DemoStatus { get; init; }

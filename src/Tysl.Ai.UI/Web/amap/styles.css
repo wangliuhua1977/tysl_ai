@@ -151,3 +151,78 @@ body {
 .marker-state--recovered {
     background: #6fe1c1;
 }
+
+.candidate-marker {
+    align-items: center;
+    display: inline-flex;
+    flex-direction: column;
+    gap: 6px;
+    pointer-events: none;
+    transform: translateY(-14px);
+}
+
+.candidate-marker__icon {
+    align-items: center;
+    display: inline-flex;
+    height: 30px;
+    justify-content: center;
+    position: relative;
+    width: 30px;
+}
+
+.candidate-marker__pulse {
+    animation: candidate-pulse 1.6s ease-out infinite;
+    background: rgba(255, 170, 94, 0.22);
+    border: 1px solid rgba(255, 198, 122, 0.72);
+    border-radius: 50%;
+    height: 30px;
+    position: absolute;
+    width: 30px;
+}
+
+.candidate-marker__pin {
+    background: linear-gradient(180deg, #ffd89b 0%, #ff9f59 100%);
+    border: 2px solid rgba(255, 241, 220, 0.92);
+    border-radius: 50% 50% 50% 0;
+    box-shadow: 0 10px 18px rgba(0, 0, 0, 0.32);
+    height: 18px;
+    position: relative;
+    transform: rotate(-45deg);
+    width: 18px;
+}
+
+.candidate-marker__pin::after {
+    background: rgba(118, 49, 10, 0.92);
+    border-radius: 50%;
+    content: "";
+    height: 6px;
+    left: 4px;
+    position: absolute;
+    top: 4px;
+    width: 6px;
+}
+
+.candidate-marker__label {
+    background: rgba(8, 18, 31, 0.9);
+    border: 1px solid rgba(255, 176, 102, 0.78);
+    border-radius: 999px;
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.28);
+    color: #fff5e8;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 5px 10px;
+    white-space: nowrap;
+}
+
+@keyframes candidate-pulse {
+    0% {
+        opacity: 0.88;
+        transform: scale(0.72);
+    }
+
+    100% {
+        opacity: 0;
+        transform: scale(1.28);
+    }
+}

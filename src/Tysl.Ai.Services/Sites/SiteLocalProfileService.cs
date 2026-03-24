@@ -22,6 +22,58 @@ public sealed class SiteLocalProfileService : ISiteLocalProfileService
         return repository.GetByDeviceCodeAsync(deviceCode.Trim(), cancellationToken);
     }
 
+    public async Task<SiteLocalProfile> IgnoreAsync(
+        string deviceCode,
+        string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(deviceCode))
+        {
+            throw new InvalidOperationException("设备编码不能为空。");
+        }
+
+        var normalizedDeviceCode = deviceCode.Trim();
+        var now = DateTimeOffset.UtcNow;
+        var existingProfile = await repository.GetByDeviceCodeAsync(normalizedDeviceCode, cancellationToken);
+
+        var profile = existingProfile ?? new SiteLocalProfile
+        {
+            DeviceCode = normalizedDeviceCode,
+            CreatedAt = now,
+            IsMonitored = true
+        };
+
+        profile.IsIgnored = true;
+        profile.IgnoredAt = now;
+        profile.IgnoredReason = NormalizeText(reason);
+        profile.UpdatedAt = now;
+
+        await repository.UpsertAsync(profile, cancellationToken);
+        return profile;
+    }
+
+    public async Task<SiteLocalProfile?> RestoreAsync(string deviceCode, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(deviceCode))
+        {
+            return null;
+        }
+
+        var profile = await repository.GetByDeviceCodeAsync(deviceCode.Trim(), cancellationToken);
+        if (profile is null)
+        {
+            return null;
+        }
+
+        profile.IsIgnored = false;
+        profile.IgnoredAt = null;
+        profile.IgnoredReason = null;
+        profile.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await repository.UpsertAsync(profile, cancellationToken);
+        return profile;
+    }
+
     public async Task<SiteLocalProfile> UpsertAsync(
         SiteLocalProfileInput input,
         CancellationToken cancellationToken = default)

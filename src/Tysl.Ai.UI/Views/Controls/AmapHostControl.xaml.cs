@@ -50,7 +50,6 @@ public partial class AmapHostControl : UserControl, IDisposable
     {
         InitializeComponent();
         Loaded += HandleLoaded;
-        Unloaded += HandleUnloaded;
     }
 
     public event EventHandler<MapPointSelectedEventArgs>? PointSelected;
@@ -113,11 +112,6 @@ public partial class AmapHostControl : UserControl, IDisposable
     private async void HandleLoaded(object sender, RoutedEventArgs e)
     {
         await EnsureInitializedAsync();
-    }
-
-    private void HandleUnloaded(object sender, RoutedEventArgs e)
-    {
-        Dispose();
     }
 
     private async Task EnsureInitializedAsync()
@@ -402,8 +396,10 @@ public partial class AmapHostControl : UserControl, IDisposable
 
         isDisposed = true;
         browserReady = false;
+        pendingStateJson = null;
+        pendingMapStyleKey = null;
         Loaded -= HandleLoaded;
-        Unloaded -= HandleUnloaded;
+        Browser.Visibility = Visibility.Collapsed;
 
         if (Browser.CoreWebView2 is not null)
         {
@@ -412,7 +408,6 @@ public partial class AmapHostControl : UserControl, IDisposable
 
             try
             {
-                Browser.CoreWebView2.Stop();
                 Browser.CoreWebView2.ClearVirtualHostNameToFolderMapping(HostName);
             }
             catch
@@ -423,7 +418,16 @@ public partial class AmapHostControl : UserControl, IDisposable
 
         try
         {
-            Browser.Source = null;
+            Browser.Source = new Uri("about:blank");
+        }
+        catch
+        {
+            // Best effort shutdown only.
+        }
+
+        try
+        {
+            Browser.Dispose();
         }
         catch
         {

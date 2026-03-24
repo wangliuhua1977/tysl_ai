@@ -78,7 +78,15 @@ public sealed class SilentInspectionService : ISilentInspectionService
             StringComparer.OrdinalIgnoreCase);
 
         var monitoredSites = platformSites
-            .Where(site => !localProfileMap.TryGetValue(site.DeviceCode, out var profile) || profile.IsMonitored)
+            .Where(site =>
+            {
+                if (!localProfileMap.TryGetValue(site.DeviceCode, out var profile))
+                {
+                    return true;
+                }
+
+                return !profile.IsIgnored && profile.IsMonitored;
+            })
             .OrderByDescending(site => runtimeStateMap.TryGetValue(site.DeviceCode, out var runtime) ? runtime.ConsecutiveFailureCount : 0)
             .ThenBy(site => runtimeStateMap.TryGetValue(site.DeviceCode, out var runtime) ? runtime.LastInspectionAt : null)
             .ThenBy(site => site.DeviceCode, StringComparer.OrdinalIgnoreCase)
@@ -151,6 +159,14 @@ public sealed class SilentInspectionService : ISilentInspectionService
                 LastOnlineState = platformSite.DemoOnlineState,
                 LastProductState = BuildProductState(platformSite.DemoOnlineState),
                 LastPreviewResolveState = previewState,
+                LastPreviewAt = previousState?.LastPreviewAt,
+                LastPreviewSessionId = previousState?.LastPreviewSessionId,
+                LastPreviewPreferredProtocol = previousState?.LastPreviewPreferredProtocol ?? SitePreviewProtocol.Unknown,
+                LastPreviewProtocol = previousState?.LastPreviewProtocol ?? SitePreviewProtocol.Unknown,
+                LastPreviewSucceeded = previousState?.LastPreviewSucceeded,
+                LastPreviewUsedFallback = previousState?.LastPreviewUsedFallback ?? false,
+                LastPreviewFailureProtocol = previousState?.LastPreviewFailureProtocol ?? SitePreviewProtocol.Unknown,
+                LastPreviewFailureReason = previousState?.LastPreviewFailureReason,
                 LastSnapshotPath = snapshotResult.IsSuccess ? snapshotResult.SnapshotPath : previousState?.LastSnapshotPath,
                 LastSnapshotAt = snapshotResult.IsSuccess ? snapshotResult.CapturedAt : previousState?.LastSnapshotAt,
                 LastFaultCode = faultCode,
@@ -205,6 +221,14 @@ public sealed class SilentInspectionService : ISilentInspectionService
                 LastOnlineState = platformSite.DemoOnlineState,
                 LastProductState = BuildProductState(platformSite.DemoOnlineState),
                 LastPreviewResolveState = previousState?.LastPreviewResolveState ?? PreviewResolveState.Unknown,
+                LastPreviewAt = previousState?.LastPreviewAt,
+                LastPreviewSessionId = previousState?.LastPreviewSessionId,
+                LastPreviewPreferredProtocol = previousState?.LastPreviewPreferredProtocol ?? SitePreviewProtocol.Unknown,
+                LastPreviewProtocol = previousState?.LastPreviewProtocol ?? SitePreviewProtocol.Unknown,
+                LastPreviewSucceeded = previousState?.LastPreviewSucceeded,
+                LastPreviewUsedFallback = previousState?.LastPreviewUsedFallback ?? false,
+                LastPreviewFailureProtocol = previousState?.LastPreviewFailureProtocol ?? SitePreviewProtocol.Unknown,
+                LastPreviewFailureReason = previousState?.LastPreviewFailureReason,
                 LastSnapshotPath = previousState?.LastSnapshotPath,
                 LastSnapshotAt = previousState?.LastSnapshotAt,
                 LastFaultCode = RuntimeFaultCode.InspectionExecutionFailed,

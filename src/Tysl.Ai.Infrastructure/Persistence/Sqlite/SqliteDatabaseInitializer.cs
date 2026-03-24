@@ -68,6 +68,9 @@ public sealed class SqliteDatabaseInitializer
                 alias TEXT NULL,
                 remark TEXT NULL,
                 is_monitored INTEGER NOT NULL,
+                is_ignored INTEGER NOT NULL DEFAULT 0,
+                ignored_at TEXT NULL,
+                ignored_reason TEXT NULL,
                 manual_longitude REAL NULL,
                 manual_latitude REAL NULL,
                 address_text TEXT NULL,
@@ -81,6 +84,7 @@ public sealed class SqliteDatabaseInitializer
             """;
 
         await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureSiteLocalProfileSchemaAsync(connection, cancellationToken);
     }
 
     private static async Task CreateSiteRuntimeStateTableAsync(
@@ -96,6 +100,14 @@ public sealed class SqliteDatabaseInitializer
                 last_online_state INTEGER NOT NULL,
                 last_product_state TEXT NULL,
                 last_preview_resolve_state INTEGER NOT NULL,
+                last_preview_at TEXT NULL,
+                last_preview_session_id TEXT NULL,
+                last_preview_preferred_protocol INTEGER NOT NULL DEFAULT 0,
+                last_preview_protocol INTEGER NOT NULL DEFAULT 0,
+                last_preview_succeeded INTEGER NULL,
+                last_preview_used_fallback INTEGER NOT NULL DEFAULT 0,
+                last_preview_failure_protocol INTEGER NOT NULL DEFAULT 0,
+                last_preview_failure_reason TEXT NULL,
                 last_snapshot_path TEXT NULL,
                 last_snapshot_at TEXT NULL,
                 last_fault_code INTEGER NOT NULL,
@@ -107,6 +119,7 @@ public sealed class SqliteDatabaseInitializer
             """;
 
         await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureSiteRuntimeStateSchemaAsync(connection, cancellationToken);
     }
 
     private static async Task CreateSnapshotRecordTableAsync(
@@ -250,6 +263,9 @@ public sealed class SqliteDatabaseInitializer
                 alias,
                 remark,
                 is_monitored,
+                is_ignored,
+                ignored_at,
+                ignored_reason,
                 manual_longitude,
                 manual_latitude,
                 address_text,
@@ -265,6 +281,9 @@ public sealed class SqliteDatabaseInitializer
                 alias,
                 remark,
                 is_monitored,
+                0,
+                NULL,
+                NULL,
                 longitude,
                 latitude,
                 address_text,
@@ -417,6 +436,9 @@ public sealed class SqliteDatabaseInitializer
                 alias,
                 remark,
                 is_monitored,
+                is_ignored,
+                ignored_at,
+                ignored_reason,
                 manual_longitude,
                 manual_latitude,
                 address_text,
@@ -432,6 +454,9 @@ public sealed class SqliteDatabaseInitializer
                 $alias,
                 $remark,
                 $isMonitored,
+                $isIgnored,
+                $ignoredAt,
+                $ignoredReason,
                 $manualLongitude,
                 $manualLatitude,
                 $addressText,
@@ -448,6 +473,9 @@ public sealed class SqliteDatabaseInitializer
         insertCommand.Parameters.AddWithValue("$alias", (object?)profile.Alias ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$remark", (object?)profile.Remark ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$isMonitored", profile.IsMonitored ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$isIgnored", profile.IsIgnored ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$ignoredAt", profile.IgnoredAt?.UtcDateTime.ToString("O") ?? (object)DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$ignoredReason", (object?)profile.IgnoredReason ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$manualLongitude", (object?)profile.ManualLongitude ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$manualLatitude", (object?)profile.ManualLatitude ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$addressText", (object?)profile.AddressText ?? DBNull.Value);
@@ -510,5 +538,121 @@ public sealed class SqliteDatabaseInitializer
                 UpdatedAt = createdAt.AddHours(2)
             }
         ];
+    }
+
+    private static async Task EnsureSiteLocalProfileSchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "is_ignored",
+            "ALTER TABLE site_local_profile ADD COLUMN is_ignored INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "ignored_at",
+            "ALTER TABLE site_local_profile ADD COLUMN ignored_at TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "ignored_reason",
+            "ALTER TABLE site_local_profile ADD COLUMN ignored_reason TEXT NULL;",
+            cancellationToken);
+    }
+
+    private static async Task EnsureSiteRuntimeStateSchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_at",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_at TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_session_id",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_session_id TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_preferred_protocol",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_preferred_protocol INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_protocol",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_protocol INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_succeeded",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_succeeded INTEGER NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_used_fallback",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_used_fallback INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_failure_protocol",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_failure_protocol INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_failure_reason",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_failure_reason TEXT NULL;",
+            cancellationToken);
+    }
+
+    private static async Task EnsureColumnAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        string alterSql,
+        CancellationToken cancellationToken)
+    {
+        if (await ColumnExistsAsync(connection, tableName, columnName, cancellationToken))
+        {
+            return;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = alterSql;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

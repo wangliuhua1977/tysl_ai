@@ -24,6 +24,9 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
                 alias,
                 remark,
                 is_monitored,
+                is_ignored,
+                ignored_at,
+                ignored_reason,
                 manual_longitude,
                 manual_latitude,
                 address_text,
@@ -60,6 +63,9 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
                 alias,
                 remark,
                 is_monitored,
+                is_ignored,
+                ignored_at,
+                ignored_reason,
                 manual_longitude,
                 manual_latitude,
                 address_text,
@@ -96,6 +102,9 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
                 alias,
                 remark,
                 is_monitored,
+                is_ignored,
+                ignored_at,
+                ignored_reason,
                 manual_longitude,
                 manual_latitude,
                 address_text,
@@ -111,6 +120,9 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
                 $alias,
                 $remark,
                 $isMonitored,
+                $isIgnored,
+                $ignoredAt,
+                $ignoredReason,
                 $manualLongitude,
                 $manualLatitude,
                 $addressText,
@@ -125,6 +137,9 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
                 alias = excluded.alias,
                 remark = excluded.remark,
                 is_monitored = excluded.is_monitored,
+                is_ignored = excluded.is_ignored,
+                ignored_at = excluded.ignored_at,
+                ignored_reason = excluded.ignored_reason,
                 manual_longitude = excluded.manual_longitude,
                 manual_latitude = excluded.manual_latitude,
                 address_text = excluded.address_text,
@@ -140,6 +155,9 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
         command.Parameters.AddWithValue("$alias", (object?)profile.Alias ?? DBNull.Value);
         command.Parameters.AddWithValue("$remark", (object?)profile.Remark ?? DBNull.Value);
         command.Parameters.AddWithValue("$isMonitored", profile.IsMonitored ? 1 : 0);
+        command.Parameters.AddWithValue("$isIgnored", profile.IsIgnored ? 1 : 0);
+        command.Parameters.AddWithValue("$ignoredAt", profile.IgnoredAt?.UtcDateTime.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$ignoredReason", (object?)profile.IgnoredReason ?? DBNull.Value);
         command.Parameters.AddWithValue("$manualLongitude", (object?)profile.ManualLongitude ?? DBNull.Value);
         command.Parameters.AddWithValue("$manualLatitude", (object?)profile.ManualLatitude ?? DBNull.Value);
         command.Parameters.AddWithValue("$addressText", (object?)profile.AddressText ?? DBNull.Value);
@@ -161,15 +179,18 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
             Alias = reader.IsDBNull(1) ? null : reader.GetString(1),
             Remark = reader.IsDBNull(2) ? null : reader.GetString(2),
             IsMonitored = reader.GetInt64(3) == 1,
-            ManualLongitude = reader.IsDBNull(4) ? null : reader.GetDouble(4),
-            ManualLatitude = reader.IsDBNull(5) ? null : reader.GetDouble(5),
-            AddressText = reader.IsDBNull(6) ? null : reader.GetString(6),
-            ProductAccessNumber = reader.IsDBNull(7) ? null : reader.GetString(7),
-            MaintenanceUnit = reader.IsDBNull(8) ? null : reader.GetString(8),
-            MaintainerName = reader.IsDBNull(9) ? null : reader.GetString(9),
-            MaintainerPhone = reader.IsDBNull(10) ? null : reader.GetString(10),
-            CreatedAt = DateTimeOffset.Parse(reader.GetString(11)),
-            UpdatedAt = DateTimeOffset.Parse(reader.GetString(12))
+            IsIgnored = reader.GetInt64(4) == 1,
+            IgnoredAt = reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5)),
+            IgnoredReason = reader.IsDBNull(6) ? null : reader.GetString(6),
+            ManualLongitude = reader.IsDBNull(7) ? null : reader.GetDouble(7),
+            ManualLatitude = reader.IsDBNull(8) ? null : reader.GetDouble(8),
+            AddressText = reader.IsDBNull(9) ? null : reader.GetString(9),
+            ProductAccessNumber = reader.IsDBNull(10) ? null : reader.GetString(10),
+            MaintenanceUnit = reader.IsDBNull(11) ? null : reader.GetString(11),
+            MaintainerName = reader.IsDBNull(12) ? null : reader.GetString(12),
+            MaintainerPhone = reader.IsDBNull(13) ? null : reader.GetString(13),
+            CreatedAt = DateTimeOffset.Parse(reader.GetString(14)),
+            UpdatedAt = DateTimeOffset.Parse(reader.GetString(15))
         };
     }
 }

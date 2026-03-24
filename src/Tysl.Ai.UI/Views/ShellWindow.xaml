@@ -54,10 +54,10 @@
                 <WrapPanel Grid.Column="1"
                            HorizontalAlignment="Right"
                            VerticalAlignment="Center">
-                    <controls:StatCard Title="点位数" Value="{Binding PointCount}" Hint="当前平台设备快照中的点位总数" />
+                    <controls:StatCard Title="点位" Value="{Binding PointCount}" Hint="当前仍在主值守链路中的点位数" />
                     <controls:StatCard Title="已纳管" Value="{Binding MonitoredCount}" Hint="当前纳入静默巡检的点位数" />
-                    <controls:StatCard Title="异常数" Value="{Binding FaultCount}" Hint="异常、离线或待处置的点位数" />
-                    <controls:StatCard Title="处理中" Value="{Binding DispatchedCount}" Hint="当前处于派单或恢复链路中的点位数" />
+                    <controls:StatCard Title="异常" Value="{Binding FaultCount}" Hint="当前需要关注的点位数" />
+                    <controls:StatCard Title="派单" Value="{Binding DispatchedCount}" Hint="当前处于派单或恢复链路的点位数" />
                     <controls:StatCard Title="刷新" Value="{Binding LastRefreshText}" Hint="最新一次地图查询刷新时间" />
                 </WrapPanel>
             </Grid>
@@ -142,12 +142,23 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <DockPanel Margin="0,0,0,14">
-                        <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="地图主视图" />
-                        <TextBlock HorizontalAlignment="Right"
+                    <Grid Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="地图主视图" />
+                            <TextBlock Margin="0,4,0,0"
+                                       MaxWidth="460"
+                                       Style="{StaticResource CaptionTextStyle}"
+                                       Text="{Binding MapCoverageDetailText}" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1"
+                                   VerticalAlignment="Center"
                                    Style="{StaticResource CaptionTextStyle}"
                                    Text="{Binding MapInteractionHint}" />
-                    </DockPanel>
+                    </Grid>
 
                     <Grid Grid.Row="1">
                         <controlsView:AmapHostControl x:Name="AmapHost"
@@ -212,7 +223,7 @@
                                 BorderThickness="1"
                                 CornerRadius="12"
                                 Visibility="{Binding IsCoordinatePickActive, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="坐标补录中，请在地图上点选位置。" />
+                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="{Binding MapInteractionHint}" />
                         </Border>
                     </Grid>
                 </Grid>
@@ -260,6 +271,29 @@
                                                Text="{Binding SelectedDetail.DispatchHeadlineText, TargetNullValue=未触发派单 / 未恢复}" />
                                 </Border>
                             </StackPanel>
+
+                            <TextBlock Margin="0,18,0,0" Style="{StaticResource SubsectionTitleTextStyle}" Text="实时预览" />
+                            <TextBlock Margin="0,8,0,0"
+                                       Style="{StaticResource CaptionTextStyle}"
+                                       Text="{Binding PreviewStatusText}" />
+                            <TextBlock Margin="0,4,0,0"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       Text="{Binding PreviewProtocolText}" />
+                            <WrapPanel Margin="0,10,0,0">
+                                <Button Margin="0,0,8,8"
+                                        Command="{Binding OpenPreviewCommand}"
+                                        Style="{StaticResource FlatActionButtonStyle}"
+                                        Content="开启预览" />
+                                <Button Margin="0,0,0,8"
+                                        Command="{Binding ClosePreviewCommand}"
+                                        Style="{StaticResource FlatActionButtonStyle}"
+                                        Content="关闭预览" />
+                            </WrapPanel>
+                            <controlsView:PreviewHostControl x:Name="PreviewHost"
+                                                             Height="224"
+                                                             Margin="0,2,0,0"
+                                                             SessionJson="{Binding PreviewSessionJson}" />
+
                             <TextBlock Margin="0,18,0,0" Style="{StaticResource SubsectionTitleTextStyle}" Text="基础信息" />
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
@@ -267,6 +301,8 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
@@ -282,10 +318,16 @@
                                 <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.OnlineStateText}" />
                                 <TextBlock Grid.Row="3" Style="{StaticResource DetailLabelTextStyle}" Text="巡检状态" />
                                 <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.MonitoringText}" />
-                                <TextBlock Grid.Row="4" Style="{StaticResource DetailLabelTextStyle}" Text="本地补充" />
-                                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LocalProfileStatusText}" />
-                                <TextBlock Grid.Row="5" Style="{StaticResource DetailLabelTextStyle}" Text="地址" />
-                                <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.AddressText}" />
+                                <TextBlock Grid.Row="4" Style="{StaticResource DetailLabelTextStyle}" Text="关注范围" />
+                                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.FocusScopeText}" />
+                                <TextBlock Grid.Row="5" Style="{StaticResource DetailLabelTextStyle}" Text="忽略时间" />
+                                <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.IgnoredAtText}" />
+                                <TextBlock Grid.Row="6" Style="{StaticResource DetailLabelTextStyle}" Text="忽略说明" />
+                                <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.IgnoredReasonText}" />
+                                <TextBlock Grid.Row="7" Style="{StaticResource DetailLabelTextStyle}" Text="本地补充" />
+                                <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LocalProfileStatusText}" />
+                                <TextBlock Grid.Row="8" Style="{StaticResource DetailLabelTextStyle}" Text="地址" />
+                                <TextBlock Grid.Row="8" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.AddressText}" />
                             </Grid>
 
                             <TextBlock Margin="0,18,0,0" Style="{StaticResource SubsectionTitleTextStyle}" Text="运行态" />
@@ -389,21 +431,31 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <TextBlock Style="{StaticResource DetailLabelTextStyle}" Text="坐标来源" />
                                 <TextBlock Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoordinateSourceText}" />
-                                <TextBlock Grid.Row="1" Style="{StaticResource DetailLabelTextStyle}" Text="坐标状态" />
-                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoordinateStatusText}" />
-                                <TextBlock Grid.Row="2" Style="{StaticResource DetailLabelTextStyle}" Text="显示经度" />
-                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LongitudeText}" />
-                                <TextBlock Grid.Row="3" Style="{StaticResource DetailLabelTextStyle}" Text="显示纬度" />
-                                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.LatitudeText}" />
-                                <TextBlock Grid.Row="4" Style="{StaticResource DetailLabelTextStyle}" Text="平台坐标" />
+                                <TextBlock Grid.Row="1" Style="{StaticResource DetailLabelTextStyle}" Text="治理状态" />
+                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoordinateDisplayStatusText}" />
+                                <TextBlock Grid.Row="2" Style="{StaticResource DetailLabelTextStyle}" Text="坐标说明" />
+                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CoordinateStatusText}" />
+                                <TextBlock Grid.Row="3" Style="{StaticResource DetailLabelTextStyle}" Text="当前显示" />
+                                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.CurrentDisplayCoordinateText}" />
+                                <TextBlock Grid.Row="4" Style="{StaticResource DetailLabelTextStyle}" Text="平台原始" />
                                 <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.PlatformCoordinateText}" />
-                                <TextBlock Grid.Row="5" Style="{StaticResource DetailLabelTextStyle}" Text="手工坐标" />
-                                <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.ManualCoordinateText}" />
-                                <TextBlock Grid.Row="6" Style="{StaticResource DetailLabelTextStyle}" Text="平台连接" />
-                                <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.PlatformStatusSummary}" />
+                                <TextBlock Grid.Row="5" Style="{StaticResource DetailLabelTextStyle}" Text="原始类型" />
+                                <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.PlatformRawCoordinateTypeText}" />
+                                <TextBlock Grid.Row="6" Style="{StaticResource DetailLabelTextStyle}" Text="手工坐标" />
+                                <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.ManualCoordinateText}" />
+                                <TextBlock Grid.Row="7" Style="{StaticResource DetailLabelTextStyle}" Text="未落图原因" />
+                                <TextBlock Grid.Row="7" Grid.Column="1" Style="{StaticResource DetailValueTextStyle}" Text="{Binding SelectedDetail.UnmappedReasonText}" />
+                                <TextBlock Grid.Row="8" Style="{StaticResource DetailLabelTextStyle}" Text="治理建议" />
+                                <TextBlock Grid.Row="8"
+                                           Grid.Column="1"
+                                           Style="{StaticResource DetailValueTextStyle}"
+                                           Foreground="{StaticResource TextMutedBrush}"
+                                           Text="{Binding SelectedDetail.CoordinateGovernanceHintText}" />
                             </Grid>
 
                             <TextBlock Margin="0,18,0,0" Style="{StaticResource SubsectionTitleTextStyle}" Text="维护信息" />
@@ -436,82 +488,223 @@
                         </StackPanel>
                     </ScrollViewer>
 
-                    <UniformGrid Grid.Row="2" Columns="2">
+                    <UniformGrid Grid.Row="2" Columns="3">
                         <Button Margin="0,0,8,0"
                                 Command="{Binding EditSelectedSiteCommand}"
                                 Style="{StaticResource FlatActionButtonStyle}"
-                                ToolTip="维护当前点位的本地补充信息"
-                                Content="编辑补充信息" />
-                        <Button Command="{Binding ToggleMonitoringCommand}"
-                                Style="{StaticResource AccentActionButtonStyle}"
+                                ToolTip="维护当前点位的本地补充信息并补录坐标"
+                                Content="编辑补充信息 / 补坐标" />
+                        <Button Margin="0,0,8,0"
+                                Command="{Binding ToggleMonitoringCommand}"
+                                Style="{StaticResource FlatActionButtonStyle}"
                                 ToolTip="切换当前点位是否纳入静默巡检"
                                 Content="{Binding MonitorToggleText}" />
+                        <Button Command="{Binding ToggleIgnoreCommand}"
+                                Style="{StaticResource AccentActionButtonStyle}"
+                                ToolTip="将当前点位移出主值守视图，或恢复进入主线"
+                                Content="{Binding IgnoreToggleText}" />
                     </UniformGrid>
                 </Grid>
             </Border>
         </Grid>
 
         <Border Grid.Row="2" Padding="18" Margin="0,16,0,0" Style="{StaticResource PanelCardStyle}">
-            <StackPanel>
-                <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="异常缩略条" />
-                <ScrollViewer Margin="0,14,0,0" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                    <ItemsControl ItemsSource="{Binding VisibleAlerts}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Button Margin="0,0,12,0"
-                                        Command="{Binding DataContext.SelectAlertCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        CommandParameter="{Binding}"
-                                        Style="{StaticResource AlertSelectButtonStyle}">
-                                    <Border Padding="14,12"
-                                            Background="{StaticResource PanelAltBrush}"
-                                            BorderBrush="{StaticResource SubtleBorderBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="12">
-                                        <Grid Width="246">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2.2*" />
+                    <ColumnDefinition Width="18" />
+                    <ColumnDefinition Width="1.2*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="异常缩略条" />
+                    <ScrollViewer Margin="0,14,0,0" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding VisibleAlerts}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Margin="0,0,12,0"
+                                            Command="{Binding DataContext.SelectAlertCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            Style="{StaticResource AlertSelectButtonStyle}">
+                                        <Border Padding="14,12"
+                                                Background="{StaticResource PanelAltBrush}"
+                                                BorderBrush="{StaticResource SubtleBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="12">
+                                            <Grid Width="246">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="88" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="76"
+                                                        Height="52"
+                                                        CornerRadius="8"
+                                                        BorderBrush="{StaticResource SubtleBorderBrush}"
+                                                        BorderThickness="1"
+                                                        Background="{StaticResource CardBrush}">
+                                                    <Image Stretch="UniformToFill"
+                                                           Source="{Binding SnapshotPath}" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                                    <TextBlock FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Text="{Binding PointDisplayName}" />
+                                                    <Border Margin="0,6,0,0" Style="{StaticResource TagPillStyle}" HorizontalAlignment="Left">
+                                                        <TextBlock Style="{StaticResource MutedTextStyle}"
+                                                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                                                   Text="{Binding IssueLabel}" />
+                                                    </Border>
+                                                    <TextBlock Margin="0,8,0,0"
+                                                               MaxWidth="132"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Style="{StaticResource CaptionTextStyle}"
+                                                               Text="{Binding RuntimeSummary}" />
+                                                    <TextBlock Margin="0,6,0,0"
+                                                               Style="{StaticResource MutedTextStyle}"
+                                                               Text="{Binding OccurredAtText, StringFormat=最近变化：{0}}" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2">
+                    <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="{Binding SecondarySectionTitle}" />
+                    <TextBlock Margin="0,4,0,0"
+                               Style="{StaticResource CaptionTextStyle}"
+                               Text="{Binding SecondarySectionDetail}" />
+
+                    <ScrollViewer Margin="0,14,0,0"
+                                  MaxHeight="188"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <ItemsControl ItemsSource="{Binding UnmappedPoints}">
+                                <ItemsControl.Style>
+                                    <Style TargetType="ItemsControl">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsIgnoredFilterSelected}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ItemsControl.Style>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,0,0,10">
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="88" />
                                                 <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <Border Width="76"
-                                                    Height="52"
-                                                    CornerRadius="8"
+                                            <Button Command="{Binding DataContext.SelectUnmappedPointCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource AlertSelectButtonStyle}">
+                                                <Border Padding="12,10"
+                                                        Background="{StaticResource PanelAltBrush}"
+                                                        BorderBrush="{StaticResource SubtleBorderBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="12">
+                                                    <StackPanel>
+                                                        <TextBlock FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   Text="{Binding DisplayName}" />
+                                                        <TextBlock Margin="0,6,0,0"
+                                                                   Style="{StaticResource CaptionTextStyle}"
+                                                                   Text="{Binding UnmappedReasonText}" />
+                                                        <TextBlock Margin="0,4,0,0"
+                                                                   Style="{StaticResource MutedTextStyle}"
+                                                                   Text="{Binding PlatformCoordinateText, StringFormat=平台：{0}}" />
+                                                        <TextBlock Margin="0,2,0,0"
+                                                                   Style="{StaticResource MutedTextStyle}"
+                                                                   Text="{Binding ManualCoordinateText, StringFormat=手工：{0}}" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </Button>
+                                            <Button Grid.Column="1"
+                                                    Margin="8,0,0,0"
+                                                    Command="{Binding DataContext.EditUnmappedPointCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource FlatActionButtonStyle}"
+                                                    Content="补坐标" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <ItemsControl ItemsSource="{Binding IgnoredPoints}">
+                                <ItemsControl.Style>
+                                    <Style TargetType="ItemsControl">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsIgnoredFilterSelected}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ItemsControl.Style>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Margin="0,0,0,10"
+                                                Command="{Binding DataContext.SelectIgnoredPointCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource AlertSelectButtonStyle}">
+                                            <Border Padding="12,10"
+                                                    Background="{StaticResource PanelAltBrush}"
                                                     BorderBrush="{StaticResource SubtleBorderBrush}"
                                                     BorderThickness="1"
-                                                    Background="{StaticResource CardBrush}">
-                                                <Image Stretch="UniformToFill"
-                                                       Source="{Binding SnapshotPath}" />
+                                                    CornerRadius="12">
+                                                <StackPanel>
+                                                    <TextBlock FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Text="{Binding DisplayName}" />
+                                                    <TextBlock Margin="0,6,0,0"
+                                                               Style="{StaticResource CaptionTextStyle}"
+                                                               Text="{Binding IgnoredReasonText}" />
+                                                    <TextBlock Margin="0,4,0,0"
+                                                               Style="{StaticResource MutedTextStyle}"
+                                                               Text="{Binding IgnoredAtText, StringFormat=忽略时间：{0}}" />
+                                                    <TextBlock Margin="0,2,0,0"
+                                                               Style="{StaticResource MutedTextStyle}"
+                                                               Text="{Binding MonitoringText}" />
+                                                </StackPanel>
                                             </Border>
-                                            <StackPanel Grid.Column="1" Margin="12,0,0,0">
-                                                <TextBlock FontWeight="SemiBold"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           Text="{Binding PointDisplayName}" />
-                                                <Border Margin="0,6,0,0" Style="{StaticResource TagPillStyle}" HorizontalAlignment="Left">
-                                                    <TextBlock Style="{StaticResource MutedTextStyle}"
-                                                               Foreground="{StaticResource TextPrimaryBrush}"
-                                                               Text="{Binding IssueLabel}" />
-                                                </Border>
-                                                <TextBlock Margin="0,8,0,0"
-                                                           MaxWidth="132"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           Style="{StaticResource CaptionTextStyle}"
-                                                           Text="{Binding RuntimeSummary}" />
-                                                <TextBlock Margin="0,6,0,0"
-                                                           Style="{StaticResource MutedTextStyle}"
-                                                           Text="{Binding OccurredAtText, StringFormat=最近变化：{0}}" />
-                                            </StackPanel>
-                                        </Grid>
-                                    </Border>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </StackPanel>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <Border Padding="12,10"
+                                    Background="{StaticResource PanelAltBrush}"
+                                    BorderBrush="{StaticResource SubtleBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasSecondaryItems}" Value="False">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Style="{StaticResource CaptionTextStyle}"
+                                           Text="{Binding SecondarySectionEmptyText}" />
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </Window>

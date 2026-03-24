@@ -34,6 +34,11 @@ public sealed class DispatchService : IDispatchService
         SiteRuntimeState currentState,
         CancellationToken cancellationToken = default)
     {
+        if (localProfile?.IsIgnored == true)
+        {
+            return;
+        }
+
         var policy = await dispatchPolicyProvider.GetAsync(cancellationToken);
         var activeRecord = await dispatchRecordRepository.GetLatestUnrecoveredByDeviceAsync(
             platformSite.DeviceCode,
@@ -88,6 +93,10 @@ public sealed class DispatchService : IDispatchService
 
         var policy = await dispatchPolicyProvider.GetAsync(cancellationToken);
         var context = await LoadSiteContextAsync(record.DeviceCode, cancellationToken);
+        if (context.LocalProfile?.IsIgnored == true)
+        {
+            return;
+        }
 
         await FinalizeRecoveryAsync(
             policy,

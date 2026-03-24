@@ -10,6 +10,12 @@ public sealed class SiteLocalProfile
 
     public bool IsMonitored { get; set; }
 
+    public bool IsIgnored { get; set; }
+
+    public DateTimeOffset? IgnoredAt { get; set; }
+
+    public string? IgnoredReason { get; set; }
+
     public double? ManualLongitude { get; set; }
 
     public double? ManualLatitude { get; set; }

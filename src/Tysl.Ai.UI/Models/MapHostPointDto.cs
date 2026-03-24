@@ -26,6 +26,10 @@ public sealed record MapHostPointDto
 
     public required string DispatchStateText { get; init; }
 
+    public double? DisplayLongitude { get; init; }
+
+    public double? DisplayLatitude { get; init; }
+
     public double? PlatformRawLongitude { get; init; }
 
     public double? PlatformRawLatitude { get; init; }

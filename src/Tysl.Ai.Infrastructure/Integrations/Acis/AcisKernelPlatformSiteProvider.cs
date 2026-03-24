@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 using TianyiVision.Acis.Reusable;
 using Tysl.Ai.Core.Enums;
@@ -10,13 +11,17 @@ namespace Tysl.Ai.Infrastructure.Integrations.Acis;
 public sealed class AcisKernelPlatformSiteProvider :
     IPlatformSiteProvider,
     IPlatformConnectionStateProvider,
+    IPlatformPreviewProvider,
     IDisposable
 {
-    private const int CatalogPageSize = 20;
-    private const int MaxCatalogPages = 3;
-    private const int MaxCatalogItems = 60;
-    private const int MaxDetailRequests = 8;
-    private const int MaxDetailConcurrency = 2;
+    private const int CatalogPageSize = 50;
+    private const int MaxCatalogPages = 12;
+    private const int MaxCatalogItems = 500;
+    private const int MaxCoordinateDetailRequests = 24;
+    private const int MaxMetadataDetailRequests = 8;
+    private const int MaxDetailRequests = 28;
+    private const int MaxDetailConcurrency = 3;
+    private const string DefaultPlatformCoordinateType = "bd09";
     private const string UnknownCoordinateType = "unknown";
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan DetailCacheLifetime = TimeSpan.FromMinutes(3);
@@ -80,7 +85,7 @@ public sealed class AcisKernelPlatformSiteProvider :
                 var summary = loadResult.Snapshots.Count == 0
                     ? "平台已连接，暂无点位"
                     : "平台已连接";
-                var detail = $"配置：{Path.GetFileName(configPath ?? "acis-kernel.json")}，目录 {loadResult.CatalogCount} 条，详情补全 {loadResult.DetailCount} 条。";
+                var detail = $"配置：{Path.GetFileName(configPath ?? "acis-kernel.json")}，目录 {loadResult.CatalogCount} 条 / {loadResult.CatalogPageCount} 页，详情补全 {loadResult.DetailCount} 条，当前选中 {loadResult.FinalSelectedCount} 条。";
 
                 cacheEntry = new PlatformCacheEntry(loadResult.Snapshots, DateTimeOffset.UtcNow.Add(CacheLifetime));
                 currentState = CreateState(PlatformConnectionStatus.Connected, summary, detail);
@@ -141,7 +146,103 @@ public sealed class AcisKernelPlatformSiteProvider :
                     "ACIS configuration unavailable."));
         }
 
-        return kernel.ResolvePreviewAsync(deviceCode, AcisPreviewIntent.Inspection, cancellationToken);
+        return kernel.ResolvePreviewAsync(deviceCode, AcisPreviewIntent.Inspection, cancellationToken: cancellationToken);
+    }
+
+    public async Task<SitePreviewResolveResult> ResolvePreviewAsync(
+        string deviceCode,
+        IReadOnlyList<SitePreviewProtocol> protocolOrder,
+        CancellationToken cancellationToken = default)
+    {
+        if (kernel is null)
+        {
+            return new SitePreviewResolveResult
+            {
+                IsSuccess = false,
+                AttemptedProtocols = protocolOrder.ToArray(),
+                FailureReason = "预览服务未配置。"
+            };
+        }
+
+        var resolution = await kernel.ResolvePreviewAsync(
+            deviceCode,
+            AcisPreviewIntent.ClickPreview,
+            protocolOrder.Select(ToProtocolKey).ToArray(),
+            cancellationToken);
+
+        if (!resolution.IsSuccess || string.IsNullOrWhiteSpace(resolution.PreviewUrl))
+        {
+            return new SitePreviewResolveResult
+            {
+                IsSuccess = false,
+                AttemptedProtocols = resolution.AttemptedProtocols.Select(ToPreviewProtocol).ToArray(),
+                FailureReason = resolution.FailureReason
+            };
+        }
+
+        var selectedProtocol = ToPreviewProtocol(resolution.ParsedProtocolType ?? resolution.SelectedProtocol);
+        var attemptedProtocols = resolution.AttemptedProtocols.Select(ToPreviewProtocol).ToArray();
+        var webRtcUrlAcquired = selectedProtocol == SitePreviewProtocol.WebRtc
+                                && !string.IsNullOrWhiteSpace(resolution.PreviewUrl);
+
+        if (webRtcUrlAcquired)
+        {
+            await TryWriteDiagnosticAsync(
+                "Preview",
+                $"WebRTC URL acquired: deviceCode={resolution.DeviceCode}, attempted={string.Join(">", resolution.AttemptedProtocols)}, url={resolution.PreviewUrl}",
+                cancellationToken);
+        }
+
+        return new SitePreviewResolveResult
+        {
+            IsSuccess = true,
+            AttemptedProtocols = attemptedProtocols,
+            Session = new SitePreviewSession
+            {
+                PlaybackSessionId = Guid.NewGuid().ToString("N"),
+                DeviceCode = resolution.DeviceCode,
+                SelectedProtocol = selectedProtocol,
+                AttemptedProtocols = attemptedProtocols,
+                SourceUrl = resolution.PreviewUrl,
+                WebRtcApiUrl = selectedProtocol == SitePreviewProtocol.WebRtc
+                    ? AcisApiKernel.BuildWebRtcPlayApiUrl(resolution.PreviewUrl)
+                    : null,
+                WebRtcUrlAcquired = webRtcUrlAcquired,
+                ReadyTimeoutSeconds = selectedProtocol == SitePreviewProtocol.WebRtc ? 12 : 10,
+                UsedFallback = attemptedProtocols.Length > 0 && selectedProtocol != attemptedProtocols[0]
+            }
+        };
+    }
+
+    public async Task<WebRtcPlaybackNegotiationResult> NegotiateWebRtcAsync(
+        string deviceCode,
+        string apiUrl,
+        string streamUrl,
+        string offerSdp,
+        CancellationToken cancellationToken = default)
+    {
+        if (kernel is null)
+        {
+            return new WebRtcPlaybackNegotiationResult
+            {
+                IsSuccess = false,
+                ApiUrl = apiUrl,
+                ResponseCode = -1,
+                FailureReason = "预览服务未配置。"
+            };
+        }
+
+        var result = await kernel.NegotiateWebRtcPlayAsync(apiUrl, streamUrl, offerSdp, cancellationToken);
+        return new WebRtcPlaybackNegotiationResult
+        {
+            IsSuccess = result.IsSuccess,
+            ApiUrl = result.ApiUrl,
+            AnswerSdp = result.AnswerSdp,
+            ResponseCode = result.ResponseCode,
+            SessionId = result.SessionId,
+            Server = result.Server,
+            FailureReason = result.IsSuccess ? null : result.FailureReason
+        };
     }
 
     public Task WriteDiagnosticAsync(
@@ -156,15 +257,15 @@ public sealed class AcisKernelPlatformSiteProvider :
     {
         ArgumentNullException.ThrowIfNull(kernel);
 
-        var catalogItems = await LoadCatalogItemsAsync(cancellationToken);
-        var candidates = catalogItems
+        var catalogLoad = await LoadCatalogItemsAsync(cancellationToken);
+        var candidates = catalogLoad.Items
             .Select(CreateCandidate)
             .Where(candidate => !string.IsNullOrWhiteSpace(candidate.DeviceCode))
             .ToList();
 
-        var detailMap = await LoadDeviceDetailsAsync(candidates, cancellationToken);
+        var detailLoad = await LoadDeviceDetailsAsync(candidates, cancellationToken);
         var snapshots = candidates
-            .Select(candidate => MergeCandidate(candidate, detailMap.TryGetValue(candidate.DeviceCode, out var detail) ? detail : null))
+            .Select(candidate => MergeCandidate(candidate, detailLoad.Details.TryGetValue(candidate.DeviceCode, out var detail) ? detail : null))
             .Select(record => new PlatformSiteSnapshot
             {
                 DeviceCode = record.DeviceCode,
@@ -172,22 +273,35 @@ public sealed class AcisKernelPlatformSiteProvider :
                 RawLongitude = record.RawLongitude,
                 RawLatitude = record.RawLatitude,
                 RawCoordinateType = record.RawCoordinateType,
+                IsCoordinateEnrichedFromDetail = record.IsCoordinateEnrichedFromDetail,
                 DemoOnlineState = record.IsOnline == false ? DemoOnlineState.Offline : DemoOnlineState.Online,
                 DemoStatus = PointDemoStatus.Normal,
                 DemoDispatchStatus = DispatchDemoStatus.None
             })
             .ToList();
 
-        return new PlatformLoadResult(snapshots, candidates.Count, detailMap.Count);
+        await TryWriteDiagnosticAsync(
+            "PlatformSiteProvider",
+            $"catalogCount={catalogLoad.Items.Count}, catalogPageCount={catalogLoad.PageCount}, detailCandidateCount={detailLoad.SelectedCount}, detailCount={detailLoad.Details.Count}, finalSelectedCount={snapshots.Count}",
+            cancellationToken);
+
+        return new PlatformLoadResult(
+            snapshots,
+            catalogLoad.Items.Count,
+            catalogLoad.PageCount,
+            detailLoad.Details.Count,
+            snapshots.Count);
     }
 
-    private async Task<IReadOnlyList<DeviceCatalogItem>> LoadCatalogItemsAsync(CancellationToken cancellationToken)
+    private async Task<CatalogLoadResult> LoadCatalogItemsAsync(CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(kernel);
 
         var results = new List<DeviceCatalogItem>();
         var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         long lastId = 0;
+        var pageCount = 0;
+        var totalHint = 0;
 
         for (var pageIndex = 0; pageIndex < MaxCatalogPages && results.Count < MaxCatalogItems; pageIndex++)
         {
@@ -196,6 +310,9 @@ public sealed class AcisKernelPlatformSiteProvider :
             {
                 throw new InvalidOperationException($"平台目录拉取失败：{page.ResponseMessage}");
             }
+
+            pageCount++;
+            totalHint = Math.Max(totalHint, page.Total);
 
             if (page.Items.Count == 0)
             {
@@ -216,6 +333,11 @@ public sealed class AcisKernelPlatformSiteProvider :
                 }
             }
 
+            if (totalHint > 0 && results.Count >= totalHint)
+            {
+                break;
+            }
+
             if (page.NextLastId <= lastId)
             {
                 break;
@@ -224,21 +346,37 @@ public sealed class AcisKernelPlatformSiteProvider :
             lastId = page.NextLastId;
         }
 
-        return results;
+        return new CatalogLoadResult(results, pageCount, totalHint);
     }
 
-    private async Task<IReadOnlyDictionary<string, DeviceDetailResult>> LoadDeviceDetailsAsync(
+    private async Task<DetailLoadResult> LoadDeviceDetailsAsync(
         IReadOnlyList<CatalogCandidate> candidates,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(kernel);
 
-        var detailCandidates = candidates
-            .Where(NeedsDetail)
-            .OrderBy(candidate => candidate.DeviceCode, StringComparer.OrdinalIgnoreCase)
+        var uniqueCandidates = candidates
             .GroupBy(candidate => candidate.DeviceCode, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
-            .Take(Math.Min(MaxDetailRequests, candidates.Count))
+            .ToArray();
+
+        var coordinateCandidates = uniqueCandidates
+            .Where(NeedsCoordinateDetail)
+            .OrderBy(GetCoordinateDetailPriority)
+            .ThenBy(candidate => candidate.DeviceCode, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxCoordinateDetailRequests);
+
+        var metadataCandidates = uniqueCandidates
+            .Where(candidate => !NeedsCoordinateDetail(candidate) && NeedsMetadataDetail(candidate))
+            .OrderBy(candidate => string.IsNullOrWhiteSpace(candidate.DeviceName) ? 0 : 1)
+            .ThenBy(candidate => candidate.DeviceCode, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxMetadataDetailRequests);
+
+        var detailCandidates = coordinateCandidates
+            .Concat(metadataCandidates)
+            .GroupBy(candidate => candidate.DeviceCode, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Take(Math.Min(MaxDetailRequests, uniqueCandidates.Length))
             .ToArray();
 
         var details = new ConcurrentDictionary<string, DeviceDetailResult>(StringComparer.OrdinalIgnoreCase);
@@ -285,7 +423,7 @@ public sealed class AcisKernelPlatformSiteProvider :
                 }
             });
 
-        return details;
+        return new DetailLoadResult(details, detailCandidates.Length);
     }
 
     private static CatalogCandidate CreateCandidate(DeviceCatalogItem item)
@@ -298,53 +436,82 @@ public sealed class AcisKernelPlatformSiteProvider :
                 null,
                 null,
                 UnknownCoordinateType,
-                false);
+                false,
+                null);
         }
 
+        var projection = ExtractProjection(root, item.DeviceCode, item.DeviceName);
+
         return new CatalogCandidate(
-            string.IsNullOrWhiteSpace(item.DeviceCode) ? ReadString(root, "deviceCode") ?? string.Empty : item.DeviceCode.Trim(),
-            string.IsNullOrWhiteSpace(item.DeviceName) ? ReadString(root, "deviceName") ?? ReadString(root, "name") ?? string.Empty : item.DeviceName.Trim(),
-            ReadDouble(root, "longitude", "lng"),
-            ReadDouble(root, "latitude", "lat"),
-            ResolveCoordinateType(root),
-            ReadBool(root, "onlineStatus", "online", "isOnline"));
+            projection.DeviceCode,
+            projection.DeviceName,
+            projection.Longitude,
+            projection.Latitude,
+            projection.RawCoordinateType,
+            projection.IsCoordinateTypeExplicit,
+            projection.IsOnline);
     }
 
     private static DevicePlatformRecord MergeCandidate(CatalogCandidate candidate, DeviceDetailResult? detail)
     {
-        var detailCoordinateType = ResolveCoordinateType(detail?.RawResponse);
-        var rawCoordinateType = IsKnownCoordinateType(detailCoordinateType)
-            ? detailCoordinateType
-            : candidate.RawCoordinateType;
-
-        var rawLongitude = detail?.Longitude is decimal detailLongitude
-            ? (double)detailLongitude
-            : candidate.RawLongitude;
-        var rawLatitude = detail?.Latitude is decimal detailLatitude
-            ? (double)detailLatitude
-            : candidate.RawLatitude;
+        var detailProjection = detail is null ? null : BuildDetailProjection(detail);
+        var detailHasCompleteCoordinate = HasCompleteCoordinate(detailProjection?.Longitude, detailProjection?.Latitude);
+        var catalogHasCompleteCoordinate = HasCompleteCoordinate(candidate.RawLongitude, candidate.RawLatitude);
+        var rawLongitude = SelectCoordinateValue(candidate.RawLongitude, candidate.RawLatitude, detailProjection?.Longitude, detailProjection?.Latitude, isLongitude: true);
+        var rawLatitude = SelectCoordinateValue(candidate.RawLongitude, candidate.RawLatitude, detailProjection?.Longitude, detailProjection?.Latitude, isLongitude: false);
+        var rawCoordinateType = ResolveFinalCoordinateType(candidate, detailProjection, rawLongitude, rawLatitude);
+        var isCoordinateEnrichedFromDetail = detailHasCompleteCoordinate
+            && (!catalogHasCompleteCoordinate || CoordinatesDiffer(candidate.RawLongitude, candidate.RawLatitude, detailProjection!.Longitude, detailProjection.Latitude));
 
         return new DevicePlatformRecord
         {
             DeviceCode = candidate.DeviceCode,
-            DeviceName = string.IsNullOrWhiteSpace(detail?.DeviceName) ? candidate.DeviceName : detail.DeviceName.Trim(),
+            DeviceName = PreferDetailName(candidate.DeviceName, detailProjection?.DeviceName),
             RawLongitude = rawLongitude,
             RawLatitude = rawLatitude,
             RawCoordinateType = rawCoordinateType,
-            IsOnline = detail?.IsOnline ?? candidate.IsOnline
+            IsCoordinateEnrichedFromDetail = isCoordinateEnrichedFromDetail,
+            IsOnline = detailProjection?.IsOnline ?? candidate.IsOnline
         };
     }
 
-    private static bool NeedsDetail(CatalogCandidate candidate)
+    private static bool NeedsCoordinateDetail(CatalogCandidate candidate)
     {
-        if (string.IsNullOrWhiteSpace(candidate.DeviceName))
-        {
-            return true;
-        }
-
         return !candidate.RawLongitude.HasValue
             || !candidate.RawLatitude.HasValue
+            || !candidate.IsCoordinateTypeExplicit
+            || !IsKnownCoordinateType(candidate.RawCoordinateType);
+    }
+
+    private static bool NeedsMetadataDetail(CatalogCandidate candidate)
+    {
+        return string.IsNullOrWhiteSpace(candidate.DeviceName)
             || !candidate.IsOnline.HasValue;
+    }
+
+    private static int GetCoordinateDetailPriority(CatalogCandidate candidate)
+    {
+        if (!candidate.RawLongitude.HasValue && !candidate.RawLatitude.HasValue)
+        {
+            return 0;
+        }
+
+        if (!candidate.RawLongitude.HasValue || !candidate.RawLatitude.HasValue)
+        {
+            return 1;
+        }
+
+        if (!candidate.IsCoordinateTypeExplicit || !IsKnownCoordinateType(candidate.RawCoordinateType))
+        {
+            return 2;
+        }
+
+        if (string.IsNullOrWhiteSpace(candidate.DeviceName))
+        {
+            return 3;
+        }
+
+        return !candidate.IsOnline.HasValue ? 4 : 5;
     }
 
     private bool TryGetCachedDetail(string deviceCode, out DeviceDetailResult detail)
@@ -424,7 +591,7 @@ public sealed class AcisKernelPlatformSiteProvider :
     {
         foreach (var propertyName in propertyNames)
         {
-            if (!element.TryGetProperty(propertyName, out var value))
+            if (!TryFindPropertyValue(element, propertyName, out var value))
             {
                 continue;
             }
@@ -447,7 +614,7 @@ public sealed class AcisKernelPlatformSiteProvider :
     {
         foreach (var propertyName in propertyNames)
         {
-            if (!element.TryGetProperty(propertyName, out var value))
+            if (!TryFindPropertyValue(element, propertyName, out var value))
             {
                 continue;
             }
@@ -458,7 +625,7 @@ public sealed class AcisKernelPlatformSiteProvider :
             }
 
             if (value.ValueKind == JsonValueKind.String
-                && double.TryParse(value.GetString(), out var stringValue))
+                && double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var stringValue))
             {
                 return stringValue;
             }
@@ -471,7 +638,7 @@ public sealed class AcisKernelPlatformSiteProvider :
     {
         foreach (var propertyName in propertyNames)
         {
-            if (!element.TryGetProperty(propertyName, out var value))
+            if (!TryFindPropertyValue(element, propertyName, out var value))
             {
                 continue;
             }
@@ -515,28 +682,58 @@ public sealed class AcisKernelPlatformSiteProvider :
 
     private static string ResolveCoordinateType(JsonElement element)
     {
-        var coordinateType = ReadString(
+        return TryResolveCoordinateType(element, out var coordinateType)
+            ? coordinateType
+            : UnknownCoordinateType;
+    }
+
+    private static string ResolveCoordinateType(string? raw)
+    {
+        return TryResolveCoordinateType(raw, out var coordinateType)
+            ? coordinateType
+            : UnknownCoordinateType;
+    }
+
+    private static bool TryResolveCoordinateType(JsonElement element, out string coordinateType)
+    {
+        var coordinateTypeValue = ReadString(
             element,
             "coordinateType",
             "coordinateSystem",
             "coordType",
             "coordSystem",
             "mapType",
-            "sourceCoordType");
+            "sourceCoordType",
+            "coordProvider",
+            "coordinateMode",
+            "coordinateFlag",
+            "coordSource",
+            "locationCoordType");
 
-        return ResolveCoordinateType(coordinateType);
-    }
-
-    private static string ResolveCoordinateType(string? raw)
-    {
-        if (TryParseJson(raw ?? string.Empty, out var root))
+        if (TryResolveCoordinateType(coordinateTypeValue, out coordinateType))
         {
-            return ResolveCoordinateType(root);
+            return true;
         }
 
+        return TryResolveCoordinateTypeFromText(element.GetRawText(), out coordinateType);
+    }
+
+    private static bool TryResolveCoordinateType(string? raw, out string coordinateType)
+    {
+        if (TryParseJson(raw ?? string.Empty, out var root) && TryResolveCoordinateType(root, out coordinateType))
+        {
+            return true;
+        }
+
+        return TryResolveCoordinateTypeFromText(raw, out coordinateType);
+    }
+
+    private static bool TryResolveCoordinateTypeFromText(string? raw, out string coordinateType)
+    {
         if (string.IsNullOrWhiteSpace(raw))
         {
-            return UnknownCoordinateType;
+            coordinateType = UnknownCoordinateType;
+            return false;
         }
 
         var normalized = raw.Trim().ToLowerInvariant();
@@ -544,7 +741,8 @@ public sealed class AcisKernelPlatformSiteProvider :
             || normalized.Contains("bd09", StringComparison.OrdinalIgnoreCase)
             || normalized.Contains("百度", StringComparison.OrdinalIgnoreCase))
         {
-            return "bd09";
+            coordinateType = "bd09";
+            return true;
         }
 
         if (normalized.Contains("gcj02", StringComparison.OrdinalIgnoreCase)
@@ -552,20 +750,25 @@ public sealed class AcisKernelPlatformSiteProvider :
             || normalized.Contains("amap", StringComparison.OrdinalIgnoreCase)
             || normalized.Contains("高德", StringComparison.OrdinalIgnoreCase))
         {
-            return "gcj02";
+            coordinateType = "gcj02";
+            return true;
         }
 
-        if (normalized.Contains("wgs84", StringComparison.OrdinalIgnoreCase))
+        if (normalized.Contains("wgs84", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("gps", StringComparison.OrdinalIgnoreCase))
         {
-            return "wgs84";
+            coordinateType = "wgs84";
+            return true;
         }
 
         if (normalized.Contains("unknown", StringComparison.OrdinalIgnoreCase))
         {
-            return UnknownCoordinateType;
+            coordinateType = UnknownCoordinateType;
+            return true;
         }
 
-        return normalized;
+        coordinateType = UnknownCoordinateType;
+        return false;
     }
 
     private static bool IsKnownCoordinateType(string? coordinateType)
@@ -574,12 +777,259 @@ public sealed class AcisKernelPlatformSiteProvider :
             && !string.Equals(coordinateType, UnknownCoordinateType, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool TryFindPropertyValue(JsonElement element, string propertyName, out JsonElement value, int depth = 0)
+    {
+        value = default;
+        if (depth > 8)
+        {
+            return false;
+        }
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        value = property.Value;
+                        return true;
+                    }
+                }
+
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (TryFindPropertyValue(property.Value, propertyName, out value, depth + 1))
+                    {
+                        return true;
+                    }
+                }
+
+                break;
+
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (TryFindPropertyValue(item, propertyName, out value, depth + 1))
+                    {
+                        return true;
+                    }
+                }
+
+                break;
+        }
+
+        return false;
+    }
+
+    private static PayloadProjection ExtractProjection(
+        JsonElement element,
+        string? fallbackDeviceCode = null,
+        string? fallbackDeviceName = null)
+    {
+        var hasCoordinateTypeSignal = TryResolveCoordinateType(element, out var coordinateType);
+
+        return new PayloadProjection(
+            NormalizeText(ReadString(element, "deviceCode", "id", "gbId")) ?? NormalizeText(fallbackDeviceCode) ?? string.Empty,
+            NormalizeText(ReadString(element, "deviceName", "name", "pointName", "cameraName")) ?? NormalizeText(fallbackDeviceName) ?? string.Empty,
+            ReadDouble(element, "longitude", "lng", "lon", "mapLongitude", "deviceLongitude"),
+            ReadDouble(element, "latitude", "lat", "mapLatitude", "deviceLatitude"),
+            coordinateType,
+            hasCoordinateTypeSignal,
+            ReadBool(element, "onlineStatus", "online", "isOnline", "onlineFlag"),
+            NormalizeText(ReadString(element, "lastSyncTime", "reportTime", "importTime", "updateTime")));
+    }
+
+    private static PayloadProjection BuildDetailProjection(DeviceDetailResult detail)
+    {
+        var projection = new PayloadProjection(
+            NormalizeText(detail.DeviceCode) ?? string.Empty,
+            NormalizeText(detail.DeviceName) ?? string.Empty,
+            detail.Longitude is decimal detailLongitude ? (double)detailLongitude : null,
+            detail.Latitude is decimal detailLatitude ? (double)detailLatitude : null,
+            UnknownCoordinateType,
+            false,
+            detail.IsOnline,
+            NormalizeText(detail.LastSyncTime));
+
+        if (TryParseJson(detail.RawResponse, out var rawRoot))
+        {
+            projection = MergeProjection(projection, ExtractProjection(rawRoot, detail.DeviceCode, detail.DeviceName));
+        }
+
+        foreach (var snapshot in detail.Snapshots.Where(snapshot => snapshot.IsSuccess))
+        {
+            if (TryParseJson(snapshot.RawResponse, out var snapshotRoot))
+            {
+                projection = MergeProjection(
+                    projection,
+                    ExtractProjection(snapshotRoot, snapshot.DeviceCode ?? detail.DeviceCode, snapshot.DeviceName ?? detail.DeviceName));
+                continue;
+            }
+
+            projection = MergeProjection(
+                projection,
+                new PayloadProjection(
+                    NormalizeText(snapshot.DeviceCode) ?? NormalizeText(detail.DeviceCode) ?? string.Empty,
+                    NormalizeText(snapshot.DeviceName) ?? NormalizeText(detail.DeviceName) ?? string.Empty,
+                    snapshot.Longitude is decimal snapshotLongitude ? (double)snapshotLongitude : null,
+                    snapshot.Latitude is decimal snapshotLatitude ? (double)snapshotLatitude : null,
+                    UnknownCoordinateType,
+                    false,
+                    snapshot.IsOnline,
+                    NormalizeText(snapshot.LastSyncTime)));
+        }
+
+        return projection;
+    }
+
+    private static PayloadProjection MergeProjection(PayloadProjection current, PayloadProjection candidate)
+    {
+        var longitude = SelectCoordinateValue(current.Longitude, current.Latitude, candidate.Longitude, candidate.Latitude, isLongitude: true);
+        var latitude = SelectCoordinateValue(current.Longitude, current.Latitude, candidate.Longitude, candidate.Latitude, isLongitude: false);
+
+        var coordinateType = current.RawCoordinateType;
+        var isCoordinateTypeExplicit = current.IsCoordinateTypeExplicit;
+        if (candidate.IsCoordinateTypeExplicit && (!isCoordinateTypeExplicit || !IsKnownCoordinateType(coordinateType)))
+        {
+            coordinateType = candidate.RawCoordinateType;
+            isCoordinateTypeExplicit = true;
+        }
+        else if (IsKnownCoordinateType(candidate.RawCoordinateType) && !IsKnownCoordinateType(coordinateType))
+        {
+            coordinateType = candidate.RawCoordinateType;
+            isCoordinateTypeExplicit = candidate.IsCoordinateTypeExplicit;
+        }
+
+        return new PayloadProjection(
+            NormalizeText(current.DeviceCode) ?? NormalizeText(candidate.DeviceCode) ?? string.Empty,
+            PreferDetailName(current.DeviceName, candidate.DeviceName),
+            longitude,
+            latitude,
+            coordinateType,
+            isCoordinateTypeExplicit,
+            current.IsOnline ?? candidate.IsOnline,
+            NormalizeText(current.LastSyncTime) ?? NormalizeText(candidate.LastSyncTime));
+    }
+
+    private static double? SelectCoordinateValue(
+        double? currentLongitude,
+        double? currentLatitude,
+        double? candidateLongitude,
+        double? candidateLatitude,
+        bool isLongitude)
+    {
+        var currentHasPair = HasCompleteCoordinate(currentLongitude, currentLatitude);
+        var candidateHasPair = HasCompleteCoordinate(candidateLongitude, candidateLatitude);
+
+        if (candidateHasPair)
+        {
+            return isLongitude ? candidateLongitude : candidateLatitude;
+        }
+
+        if (currentHasPair)
+        {
+            return isLongitude ? currentLongitude : currentLatitude;
+        }
+
+        return isLongitude
+            ? candidateLongitude ?? currentLongitude
+            : candidateLatitude ?? currentLatitude;
+    }
+
+    private static string ResolveFinalCoordinateType(
+        CatalogCandidate candidate,
+        PayloadProjection? detailProjection,
+        double? rawLongitude,
+        double? rawLatitude)
+    {
+        if (detailProjection is not null && IsKnownCoordinateType(detailProjection.RawCoordinateType))
+        {
+            return detailProjection.RawCoordinateType;
+        }
+
+        if (IsKnownCoordinateType(candidate.RawCoordinateType))
+        {
+            return candidate.RawCoordinateType;
+        }
+
+        return HasCompleteCoordinate(rawLongitude, rawLatitude)
+            ? DefaultPlatformCoordinateType
+            : UnknownCoordinateType;
+    }
+
+    private static bool HasCompleteCoordinate(double? longitude, double? latitude)
+    {
+        return longitude.HasValue && latitude.HasValue;
+    }
+
+    private static bool CoordinatesDiffer(double? firstLongitude, double? firstLatitude, double? secondLongitude, double? secondLatitude)
+    {
+        if (!HasCompleteCoordinate(firstLongitude, firstLatitude) || !HasCompleteCoordinate(secondLongitude, secondLatitude))
+        {
+            return false;
+        }
+
+        return Math.Abs(firstLongitude!.Value - secondLongitude!.Value) > 0.000001d
+            || Math.Abs(firstLatitude!.Value - secondLatitude!.Value) > 0.000001d;
+    }
+
+    private static string PreferDetailName(string current, string? candidate)
+    {
+        var normalizedCurrent = NormalizeText(current);
+        var normalizedCandidate = NormalizeText(candidate);
+
+        if (string.IsNullOrWhiteSpace(normalizedCurrent))
+        {
+            return normalizedCandidate ?? string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedCandidate))
+        {
+            return normalizedCurrent;
+        }
+
+        return normalizedCandidate.Length > normalizedCurrent.Length
+            ? normalizedCandidate
+            : normalizedCurrent;
+    }
+
+    private static string? NormalizeText(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string ToProtocolKey(SitePreviewProtocol protocol)
+    {
+        return protocol switch
+        {
+            SitePreviewProtocol.WebRtc => "webrtc",
+            SitePreviewProtocol.Flv => "flv",
+            SitePreviewProtocol.Hls => "hls",
+            SitePreviewProtocol.H5 => "h5",
+            _ => "unknown"
+        };
+    }
+
+    private static SitePreviewProtocol ToPreviewProtocol(string? protocol)
+    {
+        return protocol?.Trim().ToLowerInvariant() switch
+        {
+            "webrtc" => SitePreviewProtocol.WebRtc,
+            "flv" => SitePreviewProtocol.Flv,
+            "hls" => SitePreviewProtocol.Hls,
+            "h5" => SitePreviewProtocol.H5,
+            _ => SitePreviewProtocol.Unknown
+        };
+    }
+
     private sealed record CatalogCandidate(
         string DeviceCode,
         string DeviceName,
         double? RawLongitude,
         double? RawLatitude,
         string RawCoordinateType,
+        bool IsCoordinateTypeExplicit,
         bool? IsOnline);
 
     private sealed class DevicePlatformRecord
@@ -594,8 +1044,20 @@ public sealed class AcisKernelPlatformSiteProvider :
 
         public required string RawCoordinateType { get; init; }
 
+        public required bool IsCoordinateEnrichedFromDetail { get; init; }
+
         public bool? IsOnline { get; init; }
     }
+
+    private sealed record PayloadProjection(
+        string DeviceCode,
+        string DeviceName,
+        double? Longitude,
+        double? Latitude,
+        string RawCoordinateType,
+        bool IsCoordinateTypeExplicit,
+        bool? IsOnline,
+        string? LastSyncTime);
 
     private sealed record PlatformCacheEntry(
         IReadOnlyList<PlatformSiteSnapshot> Snapshots,
@@ -605,8 +1067,19 @@ public sealed class AcisKernelPlatformSiteProvider :
         DeviceDetailResult Detail,
         DateTimeOffset ExpiresAt);
 
+    private sealed record CatalogLoadResult(
+        IReadOnlyList<DeviceCatalogItem> Items,
+        int PageCount,
+        int TotalHint);
+
+    private sealed record DetailLoadResult(
+        IReadOnlyDictionary<string, DeviceDetailResult> Details,
+        int SelectedCount);
+
     private sealed record PlatformLoadResult(
         IReadOnlyList<PlatformSiteSnapshot> Snapshots,
         int CatalogCount,
-        int DetailCount);
+        int CatalogPageCount,
+        int DetailCount,
+        int FinalSelectedCount);
 }

@@ -17,11 +17,16 @@ public sealed class LocalDiagnosticService : ILocalDiagnosticService, IDisposabl
         logPath = Path.Combine(directoryPath, fileName);
     }
 
+    public event EventHandler<LocalDiagnosticWrittenEventArgs>? Written;
+
+    public string LogPath => logPath;
+
     public async Task WriteAsync(string eventName, string message, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(eventName);
 
-        var line = $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff}] [{eventName}] {message}{Environment.NewLine}";
+        var occurredAt = DateTimeOffset.Now;
+        var line = $"[{occurredAt:yyyy-MM-dd HH:mm:ss.fff}] [{eventName}] {message}{Environment.NewLine}";
 
         await writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -32,10 +37,24 @@ public sealed class LocalDiagnosticService : ILocalDiagnosticService, IDisposabl
         {
             writeLock.Release();
         }
+
+        Written?.Invoke(this, new LocalDiagnosticWrittenEventArgs(occurredAt, eventName, message));
     }
 
     public void Dispose()
     {
         writeLock.Dispose();
     }
+}
+
+public sealed class LocalDiagnosticWrittenEventArgs(
+    DateTimeOffset occurredAt,
+    string eventName,
+    string message) : EventArgs
+{
+    public DateTimeOffset OccurredAt { get; } = occurredAt;
+
+    public string EventName { get; } = eventName;
+
+    public string Message { get; } = message;
 }

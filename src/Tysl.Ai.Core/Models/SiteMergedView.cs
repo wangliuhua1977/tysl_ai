@@ -16,11 +16,19 @@ public sealed record SiteMergedView
 
     public required bool IsMonitored { get; init; }
 
+    public required bool IsIgnored { get; init; }
+
+    public DateTimeOffset? IgnoredAt { get; init; }
+
+    public string? IgnoredReason { get; init; }
+
     public double? PlatformRawLongitude { get; init; }
 
     public double? PlatformRawLatitude { get; init; }
 
     public required string PlatformRawCoordinateType { get; init; }
+
+    public required bool IsPlatformCoordinateEnrichedFromDetail { get; init; }
 
     public double? ManualLongitude { get; init; }
 
@@ -30,7 +38,19 @@ public sealed record SiteMergedView
 
     public double? DisplayLatitude { get; init; }
 
+    public required CoordinateDisplayStatus CoordinateDisplayStatus { get; init; }
+
     public required bool HasMapPoint { get; init; }
+
+    public required bool HasDisplayCoordinate { get; init; }
+
+    public required UnmappedReason UnmappedReason { get; init; }
+
+    public required string UnmappedReasonText { get; init; }
+
+    public required string CoordinateDisplayStatusText { get; init; }
+
+    public required string CoordinateGovernanceHintText { get; init; }
 
     public required CoordinateSource CoordinateSource { get; init; }
 

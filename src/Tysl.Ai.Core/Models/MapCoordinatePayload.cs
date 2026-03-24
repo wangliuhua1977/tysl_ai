@@ -14,6 +14,10 @@ public sealed record MapCoordinatePayload
 
     public double? ManualLatitude { get; init; }
 
+    public required CoordinateDisplayStatus CoordinateDisplayStatus { get; init; }
+
+    public required UnmappedReason UnmappedReason { get; init; }
+
     public required CoordinateSource CoordinateSource { get; init; }
 
     public required string CoordinateSourceText { get; init; }

@@ -33,6 +33,7 @@ public sealed class AcisApiKernel : IDisposable
     private static readonly TimeSpan DeviceDetailCacheLifetime = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan DeviceDetailPartialCacheLifetime = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan DeviceDetailFailureCacheLifetime = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan DeviceDetailEndpointCooldownLifetime = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DeviceAlertCacheLifetime = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan DeviceAlertFailureCacheLifetime = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PreviewSuccessCacheLifetime = TimeSpan.FromSeconds(30);
@@ -45,6 +46,7 @@ public sealed class AcisApiKernel : IDisposable
     private readonly ConcurrentDictionary<string, CacheItem<DeviceDetailResult>> _deviceDetailCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CacheItem<DeviceAlertBatchResult>> _deviceAlertCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CacheItem<PreviewResolution>> _previewCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _endpointCooldowns = new(StringComparer.OrdinalIgnoreCase);
     private TokenCacheEntry? _token;
 
     public AcisApiKernel(AcisKernelOptions options, HttpClient? httpClient = null, IAcisKernelLogger? logger = null)
@@ -304,25 +306,29 @@ public sealed class AcisApiKernel : IDisposable
         }
 
         var token = await GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
-        var candidateEndpoints = new[]
-        {
-            Options.Ctyun.Endpoints.GetCusDeviceByDeviceCode,
-            Options.Ctyun.Endpoints.ShowDevice,
-            Options.Ctyun.Endpoints.GetDeviceInfoByDeviceCode
-        };
+        var candidateEndpoints = BuildDeviceDetailEndpoints().ToArray();
 
         var snapshots = new List<DeviceDetailSnapshot>();
-        DeviceDetailSnapshot? best = null;
+        DeviceDetailSnapshot? merged = null;
 
         foreach (var endpoint in candidateEndpoints)
         {
-            if (string.Equals(endpoint, Options.Ctyun.Endpoints.GetDeviceInfoByDeviceCode, StringComparison.OrdinalIgnoreCase)
-                && snapshots.Any(snapshot => snapshot.IsSuccess))
+            if (TryGetEndpointCooldown(endpoint, out var cooldownUntil))
             {
-                _logger.Info(
+                snapshots.Add(new DeviceDetailSnapshot(
+                    endpoint,
+                    false,
+                    30041,
+                    "详情接口冷却中",
+                    null,
+                    null,
+                    null,
+                    null,
+                    string.Empty));
+                _logger.Warn(
                     "PointDetail",
-                    $"Skipping fallback endpoint after prior success: deviceCode={cacheKey}, endpoint={endpoint}, snapshotCount={snapshots.Count}");
-                break;
+                    $"Skipping endpoint during cooldown: deviceCode={cacheKey}, endpoint={endpoint}, cooldownUntil={cooldownUntil:yyyy-MM-dd HH:mm:ss}");
+                continue;
             }
 
             var response = await PostProtectedJsonAsync(
@@ -337,6 +343,11 @@ public sealed class AcisApiKernel : IDisposable
 
             if (!response.IsSuccess)
             {
+                if (ShouldCooldownEndpoint(endpoint, response.ResponseCode))
+                {
+                    PutEndpointCooldown(endpoint, DeviceDetailEndpointCooldownLifetime);
+                }
+
                 snapshots.Add(new DeviceDetailSnapshot(endpoint, false, response.ResponseCode, response.ResponseMessage, null, null, null, null, response.RawResponse));
                 continue;
             }
@@ -357,21 +368,9 @@ public sealed class AcisApiKernel : IDisposable
 
             snapshots.Add(snapshot);
 
-            if (best is null)
-            {
-                best = snapshot;
-            }
-            else
-            {
-                var bestScore = ScoreSnapshot(best);
-                var currentScore = ScoreSnapshot(snapshot);
-                if (currentScore > bestScore)
-                {
-                    best = snapshot;
-                }
-            }
+            merged = merged is null ? snapshot : MergeSnapshot(merged, snapshot);
 
-            if (best.Longitude.HasValue && best.Latitude.HasValue && best.IsOnline.HasValue)
+            if (HasUsableDetail(merged))
             {
                 break;
             }
@@ -379,14 +378,14 @@ public sealed class AcisApiKernel : IDisposable
 
         var final = new DeviceDetailResult
         {
-            DeviceCode = best?.DeviceCode ?? cacheKey,
-            DeviceName = best?.DeviceName,
-            Longitude = best?.Longitude,
-            Latitude = best?.Latitude,
-            IsOnline = best?.IsOnline,
-            LastSyncTime = best?.LastSyncTime,
+            DeviceCode = merged?.DeviceCode ?? cacheKey,
+            DeviceName = merged?.DeviceName,
+            Longitude = merged?.Longitude,
+            Latitude = merged?.Latitude,
+            IsOnline = merged?.IsOnline,
+            LastSyncTime = merged?.LastSyncTime,
             Snapshots = snapshots,
-            RawResponse = best?.RawResponse ?? snapshots.LastOrDefault()?.RawResponse ?? string.Empty
+            RawResponse = merged?.RawResponse ?? snapshots.LastOrDefault()?.RawResponse ?? string.Empty
         };
 
         var ttl = final.HasCoordinate ? DeviceDetailCacheLifetime
@@ -478,6 +477,7 @@ public sealed class AcisApiKernel : IDisposable
     public async Task<PreviewResolution> ResolvePreviewAsync(
         string deviceCode,
         AcisPreviewIntent intent = AcisPreviewIntent.ClickPreview,
+        IReadOnlyList<string>? protocolOrderOverride = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(deviceCode))
@@ -486,9 +486,16 @@ public sealed class AcisApiKernel : IDisposable
         }
 
         var normalized = deviceCode.Trim();
-        var protocols = intent == AcisPreviewIntent.ClickPreview
-            ? (Options.Preview.ClickProtocolOrder?.Length > 0 ? Options.Preview.ClickProtocolOrder : new[] { "flv", "hls", "webrtc", "h5" })
-            : (Options.Preview.InspectionProtocolOrder?.Length > 0 ? Options.Preview.InspectionProtocolOrder : new[] { "flv", "hls" });
+        string[] protocols = protocolOrderOverride is { Count: > 0 }
+            ? protocolOrderOverride
+                .Select(protocol => protocol?.Trim().ToLowerInvariant())
+                .Where(protocol => !string.IsNullOrWhiteSpace(protocol))
+                .Select(protocol => protocol!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+            : intent == AcisPreviewIntent.ClickPreview
+                ? (Options.Preview.ClickProtocolOrder?.Length > 0 ? Options.Preview.ClickProtocolOrder : new[] { "webrtc", "flv", "hls" })
+                : (Options.Preview.InspectionProtocolOrder?.Length > 0 ? Options.Preview.InspectionProtocolOrder : new[] { "flv", "hls" });
 
         PreviewResolution? preferredFailure = null;
         var attempted = new List<string>();
@@ -496,6 +503,10 @@ public sealed class AcisApiKernel : IDisposable
         foreach (var protocol in protocols)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(protocol))
+            {
+                continue;
+            }
 
             var cacheKey = $"{normalized}|{protocol}";
             if (TryGetCache(_previewCache, cacheKey, out var cached))
@@ -512,18 +523,45 @@ public sealed class AcisApiKernel : IDisposable
             }
 
             attempted.Add(protocol);
-            var current = await TryResolveSingleProtocolAsync(normalized, protocol, attempted, cancellationToken).ConfigureAwait(false);
+            PreviewResolution current;
+            try
+            {
+                current = await TryResolveSingleProtocolAsync(normalized, protocol, attempted, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.Info(
+                    "CTYunPreview",
+                    $"deviceCode={normalized}, selectedProtocol={protocol}, attemptedProtocols={string.Join(">", attempted)}, requestException={ex.GetType().Name}, requestExceptionMessage={ex.Message}");
+                current = PreviewResolution.Failure(
+                    deviceCode: normalized,
+                    selectedProtocol: protocol,
+                    attemptedProtocols: attempted.ToArray(),
+                    mediaApiPath: ResolveProtocolPlan(protocol).Endpoint,
+                    responseCode: -1,
+                    responseMessage: ex.Message,
+                    streamAcquireResult: "preview api request failed",
+                    failureCategory: PreviewFailureCategory.PlayerProtocolNotSupported,
+                    failureReason: ex.Message);
+            }
             PutCache(_previewCache, cacheKey, current, current.IsSuccess ? PreviewSuccessCacheLifetime : PreviewFailureCacheLifetime);
 
             if (current.IsSuccess)
             {
+                _logger.Info(
+                    "CTYunPreview",
+                    $"deviceCode={normalized}, attemptedProtocols={string.Join(">", attempted)}, finalProtocol={current.ParsedProtocolType ?? current.SelectedProtocol}, finalPreviewUrl={current.PreviewUrl}");
                 return current;
             }
 
             preferredFailure = ChoosePreferred(preferredFailure, current);
         }
 
-        return preferredFailure ?? PreviewResolution.Failure(
+        var failure = preferredFailure ?? PreviewResolution.Failure(
             deviceCode: normalized,
             selectedProtocol: string.Empty,
             attemptedProtocols: attempted.ToArray(),
@@ -533,6 +571,10 @@ public sealed class AcisApiKernel : IDisposable
             streamAcquireResult: "无流地址",
             failureCategory: PreviewFailureCategory.NoStreamAddress,
             failureReason: "所有协议回退后仍失败。");
+        _logger.Info(
+            "CTYunPreview",
+            $"deviceCode={normalized}, attemptedProtocols={string.Join(">", attempted)}, finalResult=failure, failureReason={failure.FailureReason}");
+        return failure;
     }
 
     public async Task<CoordinateConvertResult> ConvertCoordinatesAsync(
@@ -631,6 +673,107 @@ public sealed class AcisApiKernel : IDisposable
             HtmlUri = new Uri(path),
             SourceUrl = request.SourceUrl
         };
+    }
+
+    public Task<WebRtcPlayNegotiationResult> NegotiateWebRtcPlayAsync(
+        string playbackUrl,
+        string offerSdp,
+        CancellationToken cancellationToken = default)
+    {
+        return NegotiateWebRtcPlayAsync(null, playbackUrl, offerSdp, cancellationToken);
+    }
+
+    public async Task<WebRtcPlayNegotiationResult> NegotiateWebRtcPlayAsync(
+        string? apiUrl,
+        string playbackUrl,
+        string offerSdp,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(playbackUrl))
+        {
+            throw new ArgumentException("playbackUrl is required.", nameof(playbackUrl));
+        }
+
+        if (string.IsNullOrWhiteSpace(offerSdp))
+        {
+            throw new ArgumentException("offerSdp is required.", nameof(offerSdp));
+        }
+
+        var resolvedApiUrl = string.IsNullOrWhiteSpace(apiUrl)
+            ? BuildWebRtcPlayApiUrl(playbackUrl)
+            : apiUrl;
+        var payload = JsonSerializer.Serialize(new
+        {
+            api = resolvedApiUrl,
+            streamurl = playbackUrl,
+            clientip = (string?)null,
+            sdp = offerSdp
+        });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, resolvedApiUrl)
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+
+        _logger.Info("CTYunWebRtc", $"Negotiating WebRTC play: apiUrl={resolvedApiUrl}, streamUrl={playbackUrl}");
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+        _logger.Info("CTYunWebRtc", $"WebRTC play API responded: apiUrl={resolvedApiUrl}, status={(int)response.StatusCode} {response.StatusCode}");
+
+        if (!response.IsSuccessStatusCode)
+        {
+            return WebRtcPlayNegotiationResult.Failure(
+                resolvedApiUrl,
+                $"WebRTC play API returned {(int)response.StatusCode} {response.StatusCode}.",
+                body);
+        }
+
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        var responseCode = root.TryGetProperty("code", out var codeElement) && codeElement.TryGetInt32(out var codeValue)
+            ? codeValue
+            : -1;
+        var answerSdp = ReadString(root, "sdp");
+        var sessionId = ReadString(root, "sessionid");
+        var server = ReadString(root, "server");
+        var failureReason = ReadString(root, "msg")
+            ?? ReadString(root, "message")
+            ?? "WebRTC answer unavailable.";
+
+        return responseCode == 0 && !string.IsNullOrWhiteSpace(answerSdp)
+            ? WebRtcPlayNegotiationResult.Success(resolvedApiUrl, answerSdp!, sessionId, server, body)
+            : WebRtcPlayNegotiationResult.Failure(resolvedApiUrl, failureReason, body, responseCode, sessionId, server);
+    }
+
+    public static string BuildWebRtcPlayApiUrl(string playbackUrl)
+    {
+        if (string.IsNullOrWhiteSpace(playbackUrl))
+        {
+            throw new ArgumentException("playbackUrl is required.", nameof(playbackUrl));
+        }
+
+        if (!Uri.TryCreate(playbackUrl, UriKind.Absolute, out var uri))
+        {
+            throw new InvalidOperationException($"Invalid WebRTC playback URL: {playbackUrl}");
+        }
+
+        var segments = uri.AbsolutePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var apiPath = segments.Length > 0 && segments[0].Equals("webrtc-gateway", StringComparison.OrdinalIgnoreCase)
+            ? "/webrtc-gateway/rtc/v1/play/"
+            : "/rtc/v1/play/";
+
+        var builder = new UriBuilder(uri)
+        {
+            Scheme = Uri.UriSchemeHttps,
+            Port = uri.IsDefaultPort ? -1 : uri.Port,
+            Path = apiPath,
+            Query = uri.Query.TrimStart('?')
+        };
+
+        return builder.Uri.ToString();
     }
 
     public async Task WriteDiagnosticAsync(string category, string message, CancellationToken cancellationToken = default)
@@ -861,7 +1004,7 @@ public sealed class AcisApiKernel : IDisposable
         {
             "flv" => HostSupportResult.Supported(),
             "hls" => HostSupportResult.Supported(),
-            "webrtc" => HostSupportResult.Unsupported("已拿到 WEBRTC 真实 URL，但当前播放器宿主暂不支持该协议。"),
+            "webrtc" => HostSupportResult.Supported(),
             _ => HostSupportResult.Supported()
         };
     }
@@ -873,14 +1016,150 @@ public sealed class AcisApiKernel : IDisposable
                && token.AccessTokenExpiresAtUtc > now.AddSeconds(Math.Max(0, reuseBeforeExpirySeconds));
     }
 
-    private static int ScoreSnapshot(DeviceDetailSnapshot snapshot)
+    private IEnumerable<string> BuildDeviceDetailEndpoints()
     {
-        var score = 0;
-        if (snapshot.IsSuccess) score += 10;
-        if (snapshot.Longitude.HasValue && snapshot.Latitude.HasValue) score += 5;
-        if (snapshot.IsOnline.HasValue) score += 3;
-        if (!string.IsNullOrWhiteSpace(snapshot.LastSyncTime)) score += 1;
-        return score;
+        var deduplicated = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var endpoints = new[]
+        {
+            Options.Ctyun.Endpoints.GetCusDeviceByDeviceCode,
+            Options.Ctyun.Endpoints.ShowDevice,
+            Options.Ctyun.Endpoints.GetDeviceInfoByDeviceCode
+        };
+
+        foreach (var endpoint in endpoints)
+        {
+            var normalized = endpoint?.Trim();
+            if (string.IsNullOrWhiteSpace(normalized) || !deduplicated.Add(normalized))
+            {
+                continue;
+            }
+
+            yield return normalized;
+        }
+    }
+
+    private static DeviceDetailSnapshot MergeSnapshot(DeviceDetailSnapshot current, DeviceDetailSnapshot candidate)
+    {
+        var currentHasCoordinate = current.Longitude.HasValue && current.Latitude.HasValue;
+        var candidateHasCoordinate = candidate.Longitude.HasValue && candidate.Latitude.HasValue;
+
+        return new DeviceDetailSnapshot(
+            candidate.Endpoint,
+            current.IsSuccess || candidate.IsSuccess,
+            candidate.IsSuccess ? candidate.ResponseCode : current.ResponseCode,
+            candidate.IsSuccess ? candidate.ResponseMessage : current.ResponseMessage,
+            PreferNonEmpty(current.DeviceCode, candidate.DeviceCode),
+            PreferDetailName(current.DeviceName, candidate.DeviceName),
+            SelectCoordinate(current.Longitude, current.Latitude, candidate.Longitude, candidate.Latitude, isLongitude: true),
+            SelectCoordinate(current.Longitude, current.Latitude, candidate.Longitude, candidate.Latitude, isLongitude: false),
+            SelectRawResponse(current.RawResponse, candidate.RawResponse, currentHasCoordinate, candidateHasCoordinate),
+            current.IsOnline ?? candidate.IsOnline,
+            PreferNonEmpty(current.LastSyncTime, candidate.LastSyncTime));
+    }
+
+    private static bool HasUsableDetail(DeviceDetailSnapshot snapshot)
+    {
+        return !string.IsNullOrWhiteSpace(snapshot.DeviceName)
+            && snapshot.Longitude.HasValue
+            && snapshot.Latitude.HasValue;
+    }
+
+    private static decimal? SelectCoordinate(
+        decimal? currentLongitude,
+        decimal? currentLatitude,
+        decimal? candidateLongitude,
+        decimal? candidateLatitude,
+        bool isLongitude)
+    {
+        var currentHasPair = currentLongitude.HasValue && currentLatitude.HasValue;
+        var candidateHasPair = candidateLongitude.HasValue && candidateLatitude.HasValue;
+
+        if (candidateHasPair)
+        {
+            return isLongitude ? candidateLongitude : candidateLatitude;
+        }
+
+        if (currentHasPair)
+        {
+            return isLongitude ? currentLongitude : currentLatitude;
+        }
+
+        return isLongitude
+            ? candidateLongitude ?? currentLongitude
+            : candidateLatitude ?? currentLatitude;
+    }
+
+    private static string PreferDetailName(string? current, string? candidate)
+    {
+        var normalizedCurrent = NormalizeText(current);
+        var normalizedCandidate = NormalizeText(candidate);
+
+        if (string.IsNullOrWhiteSpace(normalizedCurrent))
+        {
+            return normalizedCandidate ?? string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedCandidate))
+        {
+            return normalizedCurrent;
+        }
+
+        return normalizedCandidate.Length > normalizedCurrent.Length
+            ? normalizedCandidate
+            : normalizedCurrent;
+    }
+
+    private static string PreferNonEmpty(string? current, string? candidate)
+    {
+        return NormalizeText(current) ?? NormalizeText(candidate) ?? string.Empty;
+    }
+
+    private static string SelectRawResponse(
+        string current,
+        string candidate,
+        bool currentHasCoordinate,
+        bool candidateHasCoordinate)
+    {
+        if (candidateHasCoordinate && !currentHasCoordinate)
+        {
+            return candidate;
+        }
+
+        return string.IsNullOrWhiteSpace(current) ? candidate : current;
+    }
+
+    private static string? NormalizeText(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private bool TryGetEndpointCooldown(string endpoint, out DateTimeOffset cooldownUntil)
+    {
+        cooldownUntil = default;
+        if (!_endpointCooldowns.TryGetValue(endpoint, out var expiresAt))
+        {
+            return false;
+        }
+
+        if (expiresAt <= DateTimeOffset.UtcNow)
+        {
+            _endpointCooldowns.TryRemove(endpoint, out _);
+            return false;
+        }
+
+        cooldownUntil = expiresAt;
+        return true;
+    }
+
+    private void PutEndpointCooldown(string endpoint, TimeSpan lifetime)
+    {
+        _endpointCooldowns[endpoint] = DateTimeOffset.UtcNow.Add(lifetime);
+    }
+
+    private static bool ShouldCooldownEndpoint(string endpoint, int responseCode)
+    {
+        return responseCode == 30041
+            && endpoint.Contains("getDeviceInfoByDeviceCode", StringComparison.OrdinalIgnoreCase);
     }
 
     private static PreviewResolution ChoosePreferred(PreviewResolution? current, PreviewResolution candidate)
@@ -1080,7 +1359,7 @@ public sealed class HttpOptions
 
 public sealed class PreviewOptions
 {
-    public string[] ClickProtocolOrder { get; set; } = ["flv", "hls", "webrtc", "h5"];
+    public string[] ClickProtocolOrder { get; set; } = ["webrtc", "flv", "hls"];
     public string[] InspectionProtocolOrder { get; set; } = ["flv", "hls"];
 }
 
@@ -1387,6 +1666,55 @@ public sealed class PreviewHostResult
     public string SourceUrl { get; set; } = string.Empty;
 }
 
+public sealed class WebRtcPlayNegotiationResult
+{
+    public bool IsSuccess { get; private init; }
+    public string ApiUrl { get; private init; } = string.Empty;
+    public string? AnswerSdp { get; private init; }
+    public int ResponseCode { get; private init; }
+    public string? SessionId { get; private init; }
+    public string? Server { get; private init; }
+    public string FailureReason { get; private init; } = string.Empty;
+    public string ResponseBody { get; private init; } = string.Empty;
+
+    public static WebRtcPlayNegotiationResult Success(
+        string apiUrl,
+        string answerSdp,
+        string? sessionId,
+        string? server,
+        string responseBody)
+        => new()
+        {
+            IsSuccess = true,
+            ApiUrl = apiUrl,
+            AnswerSdp = answerSdp,
+            ResponseCode = 0,
+            SessionId = sessionId,
+            Server = server,
+            FailureReason = string.Empty,
+            ResponseBody = responseBody
+        };
+
+    public static WebRtcPlayNegotiationResult Failure(
+        string apiUrl,
+        string failureReason,
+        string responseBody,
+        int responseCode = -1,
+        string? sessionId = null,
+        string? server = null)
+        => new()
+        {
+            IsSuccess = false,
+            ApiUrl = apiUrl,
+            AnswerSdp = null,
+            ResponseCode = responseCode,
+            SessionId = sessionId,
+            Server = server,
+            FailureReason = failureReason,
+            ResponseBody = responseBody
+        };
+}
+
 public sealed class HostSupportResult
 {
     public bool IsSupported { get; private init; }
@@ -1444,7 +1772,11 @@ public sealed class PreviewProtocolPlan
         {
             new KeyValuePair<string, string>("accessToken", accessToken),
             new KeyValuePair<string, string>("enterpriseUser", enterpriseUser),
-            new KeyValuePair<string, string>("deviceCode", deviceCode)
+            new KeyValuePair<string, string>("deviceCode", deviceCode),
+            new KeyValuePair<string, string>("mediaType", "0"),
+            new KeyValuePair<string, string>("netType", "0"),
+            new KeyValuePair<string, string>("channel", "0"),
+            new KeyValuePair<string, string>("mute", "0")
         }
     };
 
@@ -1992,7 +2324,7 @@ public sealed class FileAcisKernelLogger : IAcisKernelLogger
     }
 }
 
-internal static class PreviewHostHtmlBuilder
+internal static class LegacyPreviewHostHtmlBuilder
 {
     public static string Build(string deviceCode, string sourceUrl, string protocol, string? title)
     {
@@ -2111,7 +2443,7 @@ video.addEventListener("error", () => fail("player_load_failed", "video.error tr
   }
 
   if (protocol === "webrtc") {
-    fail("player_not_supported", "当前宿主未集成 WebRTC 承载播放器");
+    setStatus("WebRTC 预览宿主已迁移到新版实现");
     return;
   }
 
@@ -2121,6 +2453,387 @@ video.addEventListener("error", () => fail("player_load_failed", "video.error tr
   }
 
   fail("url_unloadable", "unknown protocol");
+})();
+</script>
+</body>
+</html>
+""";
+    }
+}
+
+internal static class PreviewHostHtmlBuilder
+{
+    public static string Build(string deviceCode, string sourceUrl, string protocol, string? title)
+    {
+        var safeTitle = string.IsNullOrWhiteSpace(title) ? deviceCode : title;
+        var safeUrl = JsonSerializer.Serialize(sourceUrl);
+        var safeProtocol = JsonSerializer.Serialize(protocol);
+        var safeDeviceCode = JsonSerializer.Serialize(deviceCode);
+        var safeTitleJson = JsonSerializer.Serialize(safeTitle);
+        var safeWebRtcApiUrl = JsonSerializer.Serialize(
+            string.Equals(protocol, "webrtc", StringComparison.OrdinalIgnoreCase)
+                ? AcisApiKernel.BuildWebRtcPlayApiUrl(sourceUrl)
+                : null);
+        var readyTimeoutSeconds = string.Equals(protocol, "webrtc", StringComparison.OrdinalIgnoreCase) ? "12" : "10";
+
+        return $$"""
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{{safeTitle}}</title>
+<style>
+html, body { margin:0; padding:0; width:100%; height:100%; background:#04090f; color:#d7e6ff; font-family:"Segoe UI","Microsoft YaHei",sans-serif; }
+body { overflow:hidden; }
+#root { width:100%; height:100%; position:relative; background:radial-gradient(circle at top left, rgba(39,88,156,.32), transparent 34%), radial-gradient(circle at bottom right, rgba(10,38,78,.45), transparent 40%), #04090f; }
+video { width:100%; height:100%; object-fit:cover; background:#000; }
+#status { position:absolute; left:12px; right:12px; top:12px; z-index:2; padding:9px 12px; border:1px solid rgba(103,153,238,.22); border-radius:999px; background:rgba(5,10,19,.7); color:#cfe0ff; font-size:12px; line-height:1.4; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.min.js"></script>
+</head>
+<body>
+<div id="root">
+  <div id="status">等待预览连接。</div>
+  <video id="player" controls autoplay muted playsinline></video>
+</div>
+<script>
+const session = {
+  deviceCode: {{safeDeviceCode}},
+  protocol: {{safeProtocol}},
+  sourceUrl: {{safeUrl}},
+  title: {{safeTitleJson}},
+  webRtcApiUrl: {{safeWebRtcApiUrl}},
+  readyTimeoutSeconds: {{readyTimeoutSeconds}}
+};
+const statusEl = document.getElementById("status");
+const video = document.getElementById("player");
+const state = { adapter: null, ready: false, readyTimer: null };
+
+function send(message) {
+  const payload = typeof message === "object" ? message : { type: "text", value: String(message) };
+  try {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage(payload);
+    } else {
+      console.log("preview-host-message", payload);
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function setStatus(text) {
+  statusEl.textContent = text;
+}
+
+function clearReadyTimer() {
+  if (state.readyTimer) {
+    window.clearTimeout(state.readyTimer);
+    state.readyTimer = null;
+  }
+}
+
+function resetVideo() {
+  try {
+    video.pause();
+  } catch (_) {
+  }
+
+  video.removeAttribute("src");
+  video.srcObject = null;
+  video.load();
+}
+
+function teardownAdapter() {
+  clearReadyTimer();
+
+  if (state.adapter && typeof state.adapter.stop === "function") {
+    try {
+      state.adapter.stop();
+    } catch (_) {
+    }
+  }
+
+  state.adapter = null;
+  state.ready = false;
+  resetVideo();
+}
+
+function fail(category, reason) {
+  teardownAdapter();
+  setStatus(session.protocol === "webrtc" ? "WebRTC 预览连接失败。" : "备用预览连接失败。");
+  send({ type: "playback_failed", deviceCode: session.deviceCode, protocol: session.protocol, category, reason, sourceUrl: session.sourceUrl });
+}
+
+function markReady() {
+  if (state.ready) {
+    return;
+  }
+
+  state.ready = true;
+  clearReadyTimer();
+  setStatus(session.protocol === "webrtc" ? "WebRTC 实时预览已连接。" : "备用预览已连接。");
+  send({ type: "playback_ready", deviceCode: session.deviceCode, protocol: session.protocol, sourceUrl: session.sourceUrl });
+}
+
+function startReadyTimer(seconds, category) {
+  clearReadyTimer();
+  state.readyTimer = window.setTimeout(() => {
+    if (!state.ready) {
+      fail(category || "ready_timeout", "ready timeout");
+    }
+  }, Math.max(4, seconds || 10) * 1000);
+}
+
+function waitForIceGatheringComplete(peer, timeoutMs) {
+  if (peer.iceGatheringState === "complete") {
+    return Promise.resolve();
+  }
+
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      peer.removeEventListener("icegatheringstatechange", handleStateChange);
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+      resolve();
+    };
+
+    const handleStateChange = () => {
+      if (peer.iceGatheringState === "complete") {
+        finish();
+      }
+    };
+
+    const timerId = window.setTimeout(finish, timeoutMs);
+    peer.addEventListener("icegatheringstatechange", handleStateChange);
+  });
+}
+
+function createWebRtcPlaybackHost() {
+  let peer = null;
+  let mediaStream = null;
+
+  return {
+    async start() {
+      if (!session.webRtcApiUrl) {
+        fail("webrtc_api_missing", "missing webrtc api url");
+        return;
+      }
+
+      setStatus("WebRTC 预览连接中。");
+      send({ type: "host_initialized", deviceCode: session.deviceCode, protocol: "webrtc" });
+
+      peer = new RTCPeerConnection({ bundlePolicy: "max-bundle", rtcpMuxPolicy: "require" });
+      mediaStream = new MediaStream();
+      video.srcObject = mediaStream;
+
+      peer.ontrack = event => {
+        mediaStream.addTrack(event.track);
+        video.play().catch(() => {});
+      };
+
+      peer.onconnectionstatechange = () => {
+        if (peer.connectionState === "connected") {
+          video.play().catch(() => {});
+          markReady();
+          return;
+        }
+
+        if (!state.ready && ["failed", "disconnected", "closed"].includes(peer.connectionState)) {
+          fail("webrtc_connection_failed", peer.connectionState);
+        }
+      };
+
+      peer.oniceconnectionstatechange = () => {
+        if (!state.ready && ["failed", "disconnected", "closed"].includes(peer.iceConnectionState)) {
+          fail("webrtc_ice_failed", peer.iceConnectionState);
+        }
+      };
+
+      peer.addTransceiver("audio", { direction: "recvonly" });
+      peer.addTransceiver("video", { direction: "recvonly" });
+
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      await waitForIceGatheringComplete(peer, 1500);
+
+      const payload = JSON.stringify({
+        api: session.webRtcApiUrl,
+        streamurl: session.sourceUrl,
+        clientip: null,
+        sdp: peer.localDescription ? peer.localDescription.sdp : null
+      });
+
+      if (!peer.localDescription || !peer.localDescription.sdp) {
+        fail("webrtc_offer_missing", "missing local description");
+        return;
+      }
+
+      startReadyTimer(session.readyTimeoutSeconds, "webrtc_ready_timeout");
+
+      const response = await fetch(session.webRtcApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      });
+      const body = await response.text();
+
+      if (!response.ok) {
+        fail("webrtc_answer_failed", `http_${response.status}`);
+        return;
+      }
+
+      const result = JSON.parse(body);
+      if (!result || result.code !== 0 || !result.sdp) {
+        fail("webrtc_answer_failed", result && (result.msg || result.message) ? result.msg || result.message : "missing answer");
+        return;
+      }
+
+      await peer.setRemoteDescription({ type: "answer", sdp: result.sdp });
+    },
+
+    stop() {
+      if (peer) {
+        try {
+          peer.ontrack = null;
+          peer.onconnectionstatechange = null;
+          peer.oniceconnectionstatechange = null;
+          peer.close();
+        } catch (_) {
+        }
+      }
+
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => {
+          try {
+            track.stop();
+          } catch (_) {
+          }
+        });
+      }
+
+      peer = null;
+      mediaStream = null;
+    }
+  };
+}
+
+function createMediaPlaybackHost(kind) {
+  let cleanup = null;
+
+  return {
+    async start() {
+      send({ type: "host_initialized", deviceCode: session.deviceCode, protocol: kind });
+      setStatus("正在建立备用预览。");
+
+      if (kind === "flv") {
+        if (!(window.mpegts && window.mpegts.isSupported())) {
+          fail("flv_not_supported", "mpegts.js unavailable");
+          return;
+        }
+
+        const player = window.mpegts.createPlayer({ type: "flv", isLive: true, url: session.sourceUrl });
+        player.attachMediaElement(video);
+        player.load();
+        player.play().catch(() => fail("flv_play_failed", "play failed"));
+        player.on(window.mpegts.Events.ERROR, () => fail("flv_stream_failed", "stream failed"));
+        cleanup = () => {
+          try { player.pause(); } catch (_) {}
+          try { player.unload(); } catch (_) {}
+          try { player.detachMediaElement(); } catch (_) {}
+          try { player.destroy(); } catch (_) {}
+        };
+        startReadyTimer(session.readyTimeoutSeconds, "flv_ready_timeout");
+        return;
+      }
+
+      if (kind === "hls") {
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = session.sourceUrl;
+          video.play().catch(() => fail("hls_play_failed", "play failed"));
+          cleanup = () => resetVideo();
+          startReadyTimer(session.readyTimeoutSeconds, "hls_ready_timeout");
+          return;
+        }
+
+        if (!(window.Hls && window.Hls.isSupported())) {
+          fail("hls_not_supported", "hls.js unavailable");
+          return;
+        }
+
+        const hls = new Hls({ liveDurationInfinity: true, enableWorker: true });
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data && data.fatal) {
+            fail("hls_stream_failed", data.details || "stream failed");
+          }
+        });
+        hls.loadSource(session.sourceUrl);
+        hls.attachMedia(video);
+        video.play().catch(() => fail("hls_play_failed", "play failed"));
+        cleanup = () => {
+          try { hls.destroy(); } catch (_) {}
+        };
+        startReadyTimer(session.readyTimeoutSeconds, "hls_ready_timeout");
+        return;
+      }
+
+      fail("unsupported_protocol", kind);
+    },
+
+    stop() {
+      if (cleanup) {
+        try {
+          cleanup();
+        } catch (_) {
+        }
+      }
+
+      cleanup = null;
+    }
+  };
+}
+
+video.addEventListener("playing", () => markReady());
+video.addEventListener("error", () => {
+  if (!state.ready) {
+    fail("media_error", "video error");
+  }
+});
+
+window.addEventListener("beforeunload", () => teardownAdapter());
+
+(async function bootstrap() {
+  send({ type: "navigation_started", deviceCode: session.deviceCode, protocol: session.protocol, sourceUrl: session.sourceUrl, title: session.title });
+
+  if (session.protocol === "h5") {
+    window.location.href = session.sourceUrl;
+    return;
+  }
+
+  state.adapter = session.protocol === "webrtc"
+    ? createWebRtcPlaybackHost()
+    : createMediaPlaybackHost(session.protocol);
+
+  if (!state.adapter) {
+    fail("unsupported_protocol", session.protocol);
+    return;
+  }
+
+  try {
+    await state.adapter.start();
+  } catch (error) {
+    fail("host_start_failed", error && error.message ? error.message : String(error));
+  }
 })();
 </script>
 </body>
