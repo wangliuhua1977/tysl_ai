@@ -27,6 +27,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private readonly IDispatchService dispatchService;
     private readonly ILocalDiagnosticService diagnosticService;
     private readonly IMapStylePreferenceStore mapStylePreferenceStore;
+    private readonly ISitePreviewService sitePreviewService;
     private readonly DispatcherTimer refreshTimer;
     private readonly bool isMapHostConfigured;
     private DemoCoordinate? coordinatePickCandidate;
@@ -56,6 +57,16 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private int pointCount;
     private string platformStatusDetail = "正在准备平台设备源。";
     private string platformStatusText = "平台准备中";
+    private SitePreviewSession? previewSession;
+    private CancellationTokenSource? previewResolveCts;
+    private PreviewPlaybackState previewPlaybackState = PreviewPlaybackState.Idle;
+    private SitePreviewProtocol previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
+    private string? previewFallbackFailureReason;
+    private SitePreviewProtocol previewPreferredProtocol = SitePreviewProtocol.Unknown;
+    private bool previewRequested;
+    private string previewProtocolText = "待开启";
+    private string? previewSessionJson;
+    private string previewStatusText = "点击开启预览。";
     private string searchText = string.Empty;
     private SiteDetailViewModel? selectedDetail;
     private SiteMergedView? selectedDetailSource;
@@ -67,6 +78,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     public ShellViewModel(
         ISiteMapQueryService siteMapQueryService,
+        ISitePreviewService sitePreviewService,
         ISiteLocalProfileService siteLocalProfileService,
         IDispatchService dispatchService,
         ILocalDiagnosticService diagnosticService,
@@ -75,6 +87,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         string? initialMapStyleKey)
     {
         this.siteMapQueryService = siteMapQueryService;
+        this.sitePreviewService = sitePreviewService;
         this.siteLocalProfileService = siteLocalProfileService;
         this.dispatchService = dispatchService;
         this.diagnosticService = diagnosticService;
@@ -105,6 +118,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         IgnoredPoints = [];
         ToggleFilterPanelCommand = new RelayCommand(() => IsFilterPanelExpanded = !IsFilterPanelExpanded);
         EditSelectedSiteCommand = new AsyncRelayCommand(OpenEditEditorAsync, () => SelectedDetail is not null);
+        OpenPreviewCommand = new AsyncRelayCommand(OpenPreviewAsync, () => SelectedDetail is not null);
+        ClosePreviewCommand = new RelayCommand(ClosePreview, () => PreviewSessionJson is not null || previewRequested);
         ToggleMonitoringCommand = new AsyncRelayCommand(ToggleMonitoringAsync, () => SelectedDetail is not null);
         ToggleIgnoreCommand = new AsyncRelayCommand(ToggleIgnoreAsync, () => SelectedDetail is not null);
         ConfirmRecoveryCommand = new AsyncRelayCommand(ConfirmRecoveryAsync, () => SelectedDetail?.CanConfirmRecovery == true);
@@ -187,6 +202,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public RelayCommand ToggleFilterPanelCommand { get; }
 
     public AsyncRelayCommand EditSelectedSiteCommand { get; }
+
+    public AsyncRelayCommand OpenPreviewCommand { get; }
+
+    public RelayCommand ClosePreviewCommand { get; }
 
     public AsyncRelayCommand ToggleMonitoringCommand { get; }
 
@@ -271,6 +290,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             }
 
             EditSelectedSiteCommand.NotifyCanExecuteChanged();
+            OpenPreviewCommand.NotifyCanExecuteChanged();
+            ClosePreviewCommand.NotifyCanExecuteChanged();
             ToggleMonitoringCommand.NotifyCanExecuteChanged();
             ToggleIgnoreCommand.NotifyCanExecuteChanged();
             ConfirmRecoveryCommand.NotifyCanExecuteChanged();
@@ -307,6 +328,24 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     {
         get => platformStatusDetail;
         private set => SetProperty(ref platformStatusDetail, value);
+    }
+
+    public string PreviewStatusText
+    {
+        get => previewStatusText;
+        private set => SetProperty(ref previewStatusText, value);
+    }
+
+    public string PreviewProtocolText
+    {
+        get => previewProtocolText;
+        private set => SetProperty(ref previewProtocolText, value);
+    }
+
+    public string? PreviewSessionJson
+    {
+        get => previewSessionJson;
+        private set => SetProperty(ref previewSessionJson, value);
     }
 
     public string InspectionStatusText
@@ -458,6 +497,316 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         RefreshSelectedDetail();
     }
 
+    private void HandlePreviewPlaybackReadyLegacy(string protocol)
+    {
+        if (previewSession is null)
+        {
+            return;
+        }
+
+        var selectedProtocol = ParsePreviewProtocol(protocol);
+        PreviewProtocolText = $"当前协议：{GetProtocolLabel(selectedProtocol)}";
+        PreviewStatusText = selectedProtocol == SitePreviewProtocol.WebRtc
+            ? "WebRTC 实时预览已连接。"
+            : $"WebRTC 不可用，已切换备用预览（{GetProtocolLabel(selectedProtocol)}）。";
+    }
+
+    private void HandlePreviewPlaybackFailedLegacy(string protocol)
+    {
+        if (previewSession is null || selectedDetail is null)
+        {
+            return;
+        }
+
+        var failedProtocol = ParsePreviewProtocol(protocol);
+        _ = WriteDiagnosticAsync(
+            "preview-playback-failed",
+            $"deviceCode={selectedDetail.DeviceCode}, protocol={protocol}");
+
+        if (failedProtocol == SitePreviewProtocol.WebRtc)
+        {
+            PreviewStatusText = "WebRTC 不可用，正在切换备用预览。";
+            _ = StartPreviewAsync(selectedDetail.DeviceCode, SitePreviewProtocol.WebRtc);
+            return;
+        }
+
+        if (failedProtocol == SitePreviewProtocol.Flv)
+        {
+            PreviewStatusText = "备用预览切换中。";
+            _ = StartPreviewAsync(selectedDetail.DeviceCode, SitePreviewProtocol.Flv);
+            return;
+        }
+
+        PreviewProtocolText = "待开启";
+        PreviewStatusText = "预览暂不可用，请稍后重试。";
+        PreviewSessionJson = null;
+        previewSession = null;
+        ClosePreviewCommand.NotifyCanExecuteChanged();
+    }
+
+    public void HandlePreviewHostInitialized(string deviceCode, string playbackSessionId, string protocol)
+    {
+        if (!IsCurrentPreviewSession(deviceCode, playbackSessionId))
+        {
+            return;
+        }
+
+        var initializedProtocol = ParsePreviewProtocol(protocol);
+        if (initializedProtocol != SitePreviewProtocol.WebRtc)
+        {
+            return;
+        }
+
+        previewPlaybackState = PreviewPlaybackState.WebRtcHostInitializing;
+        PreviewProtocolText = $"当前协议：{GetProtocolLabel(initializedProtocol)}";
+        PreviewStatusText = "WebRTC 预览连接中。";
+    }
+
+    public void HandlePreviewPlaybackReady(string deviceCode, string playbackSessionId, string protocol)
+    {
+        var currentSession = previewSession;
+        if (currentSession is null || !IsCurrentPreviewSession(currentSession, deviceCode, playbackSessionId))
+        {
+            return;
+        }
+
+        var selectedProtocol = ParsePreviewProtocol(protocol);
+        previewPlaybackState = selectedProtocol switch
+        {
+            SitePreviewProtocol.WebRtc => PreviewPlaybackState.WebRtcPlaybackReady,
+            SitePreviewProtocol.Flv => PreviewPlaybackState.FlvPlaybackReady,
+            SitePreviewProtocol.Hls => PreviewPlaybackState.HlsPlaybackReady,
+            _ => previewPlaybackState
+        };
+
+        PreviewProtocolText = $"当前协议：{GetProtocolLabel(selectedProtocol)}";
+        PreviewStatusText = selectedProtocol == SitePreviewProtocol.WebRtc
+            ? "WebRTC 实时预览已连接。"
+            : $"WebRTC 不可用，已切换备用预览（{GetProtocolLabel(selectedProtocol)}）。";
+        var preferredProtocol = GetEffectivePreferredProtocol(currentSession);
+        var usedFallback = selectedProtocol != SitePreviewProtocol.WebRtc || currentSession.UsedFallback;
+
+        _ = WriteDiagnosticAsync(
+            "preview-playback-ready",
+            $"deviceCode={currentSession.DeviceCode}, sessionId={currentSession.PlaybackSessionId}, preferredProtocol={ToProtocolKey(preferredProtocol)}, finalProtocol={ToProtocolKey(selectedProtocol)}, fallbackTriggered={usedFallback}, failureProtocol={ToProtocolKey(previewFallbackFailureProtocol)}, failureReason={previewFallbackFailureReason ?? "none"}");
+
+        _ = RecordPreviewPlaybackAsync(
+            currentSession.DeviceCode,
+            currentSession.PlaybackSessionId,
+            preferredProtocol,
+            selectedProtocol,
+            true,
+            usedFallback,
+            previewFallbackFailureProtocol,
+            previewFallbackFailureReason);
+
+        previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
+        previewFallbackFailureReason = null;
+    }
+
+    public void HandlePreviewPlaybackFailed(
+        string deviceCode,
+        string playbackSessionId,
+        string protocol,
+        string? category,
+        string? reason)
+    {
+        var currentSession = previewSession;
+        if (currentSession is null || !IsCurrentPreviewSession(currentSession, deviceCode, playbackSessionId))
+        {
+            return;
+        }
+
+        var failedProtocol = ParsePreviewProtocol(protocol);
+        var failureReason = BuildPreviewFailureReason(category, reason);
+        _ = WriteDiagnosticAsync(
+            "preview-playback-failed",
+            $"deviceCode={deviceCode}, sessionId={playbackSessionId}, protocol={protocol}, category={category ?? "unknown"}, reason={reason ?? "none"}");
+
+        if (!previewRequested || isDisposed)
+        {
+            var preferredProtocol = GetEffectivePreferredProtocol(currentSession);
+            _ = RecordPreviewPlaybackAsync(
+                currentSession.DeviceCode,
+                currentSession.PlaybackSessionId,
+                preferredProtocol,
+                failedProtocol,
+                false,
+                currentSession.UsedFallback || failedProtocol != SitePreviewProtocol.WebRtc,
+                failedProtocol,
+                failureReason);
+            return;
+        }
+
+        if (failedProtocol == SitePreviewProtocol.WebRtc)
+        {
+            previewPlaybackState = PreviewPlaybackState.WebRtcPlaybackFailed;
+            previewFallbackFailureProtocol = failedProtocol;
+            previewFallbackFailureReason = failureReason;
+            PreviewStatusText = "WebRTC 不可用，正在切换备用预览。";
+            _ = WriteDiagnosticAsync(
+                "Preview",
+                $"fallback to flv: deviceCode={currentSession.DeviceCode}, sessionId={currentSession.PlaybackSessionId}, category={category ?? "unknown"}, reason={reason ?? "none"}");
+            _ = StartPreviewAsync(currentSession.DeviceCode, SitePreviewProtocol.WebRtc);
+            return;
+        }
+
+        if (failedProtocol == SitePreviewProtocol.Flv)
+        {
+            previewPlaybackState = PreviewPlaybackState.FallbackToHls;
+            previewFallbackFailureProtocol = failedProtocol;
+            previewFallbackFailureReason = failureReason;
+            PreviewStatusText = "FLV 不可用，正在切换 HLS 预览。";
+            _ = WriteDiagnosticAsync(
+                "Preview",
+                $"fallback to hls: deviceCode={currentSession.DeviceCode}, sessionId={currentSession.PlaybackSessionId}, category={category ?? "unknown"}, reason={reason ?? "none"}");
+            _ = StartPreviewAsync(currentSession.DeviceCode, SitePreviewProtocol.Flv);
+            return;
+        }
+
+        var finalPreferredProtocol = GetEffectivePreferredProtocol(currentSession);
+        _ = RecordPreviewPlaybackAsync(
+            currentSession.DeviceCode,
+            currentSession.PlaybackSessionId,
+            finalPreferredProtocol,
+            failedProtocol,
+            false,
+            currentSession.UsedFallback || failedProtocol != SitePreviewProtocol.WebRtc,
+            failedProtocol,
+            failureReason);
+
+        previewPlaybackState = PreviewPlaybackState.Unavailable;
+        previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
+        previewFallbackFailureReason = null;
+        PreviewProtocolText = "待开启";
+        PreviewStatusText = "预览暂不可用，请稍后重试。";
+        PreviewSessionJson = null;
+        previewSession = null;
+        ClosePreviewCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool IsCurrentPreviewSession(string deviceCode, string playbackSessionId)
+    {
+        var currentSession = previewSession;
+        return currentSession is not null
+               && IsCurrentPreviewSession(currentSession, deviceCode, playbackSessionId);
+    }
+
+    private static bool IsCurrentPreviewSession(
+        SitePreviewSession currentSession,
+        string deviceCode,
+        string playbackSessionId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceCode) || string.IsNullOrWhiteSpace(playbackSessionId))
+        {
+            return false;
+        }
+
+        return string.Equals(currentSession.DeviceCode, deviceCode.Trim(), StringComparison.OrdinalIgnoreCase)
+               && string.Equals(currentSession.PlaybackSessionId, playbackSessionId.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task RecordPreviewPlaybackAsync(
+        string deviceCode,
+        string playbackSessionId,
+        SitePreviewProtocol preferredProtocol,
+        SitePreviewProtocol protocol,
+        bool isSuccess,
+        bool usedFallback,
+        SitePreviewProtocol failureProtocol,
+        string? failureReason)
+    {
+        if (string.IsNullOrWhiteSpace(deviceCode))
+        {
+            return;
+        }
+
+        var normalizedFailureProtocol = isSuccess && !usedFallback
+            ? SitePreviewProtocol.Unknown
+            : failureProtocol;
+        var normalizedFailureReason = string.IsNullOrWhiteSpace(failureReason)
+            ? null
+            : failureReason.Trim();
+
+        try
+        {
+            await sitePreviewService.RecordPlaybackAsync(
+                new SitePreviewPlaybackRecord
+                {
+                    DeviceCode = deviceCode.Trim(),
+                    PlaybackSessionId = playbackSessionId.Trim(),
+                    PreferredProtocol = preferredProtocol,
+                    Protocol = protocol,
+                    IsSuccess = isSuccess,
+                    UsedFallback = usedFallback,
+                    FailureProtocol = normalizedFailureProtocol,
+                    FailureReason = normalizedFailureReason,
+                    OccurredAt = DateTimeOffset.UtcNow
+                });
+        }
+        catch (OperationCanceledException)
+        {
+            // Ignore background cancellation while persisting preview runtime state.
+        }
+        catch (Exception ex)
+        {
+            await WriteDiagnosticAsync(
+                "preview-playback-record-failed",
+                $"deviceCode={deviceCode}, protocol={ToProtocolKey(protocol)}, success={isSuccess}, usedFallback={usedFallback}, type={ex.GetType().FullName}, message={ex.Message}");
+        }
+    }
+
+    private static string? BuildPreviewFailureReason(string? category, string? reason)
+    {
+        var normalizedCategory = string.IsNullOrWhiteSpace(category)
+            ? null
+            : category.Trim().ToLowerInvariant();
+        var normalizedReason = string.IsNullOrWhiteSpace(reason)
+            ? null
+            : reason.Trim();
+
+        var categoryText = normalizedCategory switch
+        {
+            "host_runtime_failed" => "预览宿主运行失败",
+            "ready_timeout" => "预览就绪超时",
+            "webrtc_api_missing" => "WebRTC 接口地址缺失",
+            "webrtc_connection_failed" => "WebRTC 连接建立失败",
+            "webrtc_ice_failed" => "WebRTC ICE 协商失败",
+            "webrtc_offer_missing" => "WebRTC Offer 生成失败",
+            "webrtc_answer_invalid" => "WebRTC Answer 无效",
+            "webrtc_answer_failed" => "WebRTC 应答协商失败",
+            "webrtc_ready_timeout" => "WebRTC 预览就绪超时",
+            "flv_not_supported" => "当前环境不支持 FLV 预览",
+            "flv_play_failed" => "FLV 播放启动失败",
+            "flv_stream_failed" => "FLV 流播放失败",
+            "flv_ready_timeout" => "FLV 预览就绪超时",
+            "hls_not_supported" => "当前环境不支持 HLS 预览",
+            "hls_play_failed" => "HLS 播放启动失败",
+            "hls_stream_failed" => "HLS 流播放失败",
+            "hls_ready_timeout" => "HLS 预览就绪超时",
+            "unsupported_protocol" => "预览协议不受支持",
+            _ => null
+        };
+
+        if (categoryText is null)
+        {
+            return normalizedCategory is null
+                ? normalizedReason
+                : normalizedReason is null
+                    ? $"预览播放失败（{normalizedCategory}）"
+                    : $"预览播放失败（{normalizedCategory}: {normalizedReason}）";
+        }
+
+        if (normalizedReason is null
+            || string.Equals(categoryText, normalizedReason, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedCategory, normalizedReason, StringComparison.OrdinalIgnoreCase))
+        {
+            return categoryText;
+        }
+
+        return $"{categoryText}（{normalizedReason}）";
+    }
+
     public void HandleEditorClosed(SiteEditorViewModel editor)
     {
         if (ReferenceEquals(activeEditor, editor))
@@ -483,6 +832,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         isDisposed = true;
         refreshTimer.Stop();
         refreshTimer.Tick -= HandleRefreshTimerTick;
+        previewResolveCts?.Cancel();
+        previewResolveCts?.Dispose();
+        previewResolveCts = null;
+        previewPlaybackState = PreviewPlaybackState.Idle;
+        previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
+        previewFallbackFailureReason = null;
+        previewPreferredProtocol = SitePreviewProtocol.Unknown;
     }
 
     private async void HandleRefreshTimerTick(object? sender, EventArgs e)
@@ -592,6 +948,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             selectedPointDeviceCode = null;
             selectedDetailSource = null;
             SelectedDetail = null;
+            CancelPreviewResolve();
+            previewSession = null;
+            PreviewSessionJson = null;
+            PreviewProtocolText = "待开启";
+            PreviewStatusText = "选择点位后可开启预览。";
+            ClosePreviewCommand.NotifyCanExecuteChanged();
             RefreshMapHostState();
         }
         catch (Exception ex)
@@ -617,6 +979,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         {
             selectedDetailSource = null;
             SelectedDetail = null;
+            await RestartPreviewIfNeededAsync(null);
             return;
         }
 
@@ -627,6 +990,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             SelectedDetail = detail is null
                 ? null
                 : SiteDetailViewModel.FromSnapshot(detail, GetRenderedCoordinate(detail.DeviceCode));
+            await RestartPreviewIfNeededAsync(detail?.DeviceCode);
         }
         catch (Exception ex)
         {
@@ -639,6 +1003,283 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 Notify("详情加载失败", "点位详情暂不可用，请稍后重试。");
             }
         }
+    }
+
+    private Task OpenPreviewAsync()
+    {
+        if (SelectedDetail is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        previewRequested = true;
+        return StartPreviewAsync(SelectedDetail.DeviceCode);
+    }
+
+    private void ClosePreview()
+    {
+        var currentSession = previewSession;
+        previewRequested = false;
+        CancelPreviewResolve();
+        previewPlaybackState = PreviewPlaybackState.Idle;
+        previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
+        previewFallbackFailureReason = null;
+        previewPreferredProtocol = SitePreviewProtocol.Unknown;
+        previewSession = null;
+        PreviewSessionJson = null;
+        PreviewProtocolText = "待开启";
+        PreviewStatusText = SelectedDetail is null ? "选择点位后可开启预览。" : "点击开启预览。";
+        ClosePreviewCommand.NotifyCanExecuteChanged();
+        if (currentSession is not null)
+        {
+            _ = WriteDiagnosticAsync(
+                "preview-close-requested",
+                $"deviceCode={currentSession.DeviceCode}, sessionId={currentSession.PlaybackSessionId}, protocol={ToProtocolKey(currentSession.SelectedProtocol)}");
+        }
+    }
+
+    public void PrepareForShutdown()
+    {
+        var currentSession = previewSession;
+        previewRequested = false;
+        CancelPreviewResolve();
+        previewPlaybackState = PreviewPlaybackState.Idle;
+        previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
+        previewFallbackFailureReason = null;
+        previewPreferredProtocol = SitePreviewProtocol.Unknown;
+        previewSession = null;
+        PreviewSessionJson = null;
+        PreviewProtocolText = "待开启";
+        PreviewStatusText = "预览已关闭。";
+        ClosePreviewCommand.NotifyCanExecuteChanged();
+        if (currentSession is not null)
+        {
+            _ = WriteDiagnosticAsync(
+                "preview-shutdown-requested",
+                $"deviceCode={currentSession.DeviceCode}, sessionId={currentSession.PlaybackSessionId}, protocol={ToProtocolKey(currentSession.SelectedProtocol)}");
+        }
+    }
+
+    private async Task StartPreviewAsyncLegacy(string deviceCode, SitePreviewProtocol? failedProtocol = null)
+    {
+        if (string.IsNullOrWhiteSpace(deviceCode))
+        {
+            return;
+        }
+
+        CancelPreviewResolve();
+
+        var cancellationTokenSource = new CancellationTokenSource();
+        previewResolveCts = cancellationTokenSource;
+        previewSession = null;
+        PreviewSessionJson = null;
+        PreviewProtocolText = "准备中";
+        PreviewStatusText = failedProtocol switch
+        {
+            SitePreviewProtocol.WebRtc => "WebRTC 不可用，正在切换备用预览。",
+            SitePreviewProtocol.Flv => "FLV 不可用，正在切换 HLS 预览。",
+            _ => "正在建立预览。"
+        };
+        ClosePreviewCommand.NotifyCanExecuteChanged();
+
+        SitePreviewResolveResult result;
+        try
+        {
+            result = failedProtocol.HasValue
+                ? await sitePreviewService.ResolveFallbackPreviewAsync(deviceCode, failedProtocol.Value, cancellationTokenSource.Token)
+                : await sitePreviewService.ResolveUserPreviewAsync(deviceCode, cancellationTokenSource.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _ = WriteDiagnosticAsync(
+                "preview-resolve-exception",
+                $"deviceCode={deviceCode}, failedProtocol={failedProtocol?.ToString() ?? "none"}, type={ex.GetType().FullName}, message={ex.Message}");
+            PreviewProtocolText = "待开启";
+            PreviewStatusText = "预览暂不可用，请稍后重试。";
+            ClosePreviewCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        if (!ReferenceEquals(previewResolveCts, cancellationTokenSource) || isDisposed)
+        {
+            return;
+        }
+
+        if (!result.IsSuccess || result.Session is null)
+        {
+            previewSession = null;
+            PreviewSessionJson = null;
+            PreviewProtocolText = "待开启";
+            PreviewStatusText = failedProtocol.HasValue
+                ? "备用预览也不可用，请稍后重试。"
+                : "预览暂不可用，请稍后重试。";
+            ClosePreviewCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        previewSession = result.Session;
+        PreviewSessionJson = JsonSerializer.Serialize(ToPreviewPlaybackSession(result.Session), MapHostJsonOptions);
+        PreviewProtocolText = $"当前协议：{GetProtocolLabel(result.Session.SelectedProtocol)}";
+        PreviewStatusText = result.Session.SelectedProtocol == SitePreviewProtocol.WebRtc
+            ? "正在建立 WebRTC 实时预览。"
+            : "WebRTC 不可用，已切换备用预览。";
+        ClosePreviewCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task StartPreviewAsync(string deviceCode, SitePreviewProtocol? failedProtocol = null)
+    {
+        if (string.IsNullOrWhiteSpace(deviceCode))
+        {
+            return;
+        }
+
+        CancelPreviewResolve();
+
+        var cancellationTokenSource = new CancellationTokenSource();
+        previewResolveCts = cancellationTokenSource;
+        previewSession = null;
+        PreviewSessionJson = null;
+        if (!failedProtocol.HasValue)
+        {
+            previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
+            previewFallbackFailureReason = null;
+            previewPreferredProtocol = SitePreviewProtocol.WebRtc;
+        }
+
+        previewPlaybackState = failedProtocol switch
+        {
+            SitePreviewProtocol.WebRtc => PreviewPlaybackState.FallbackToFlv,
+            SitePreviewProtocol.Flv => PreviewPlaybackState.FallbackToHls,
+            _ => PreviewPlaybackState.Idle
+        };
+        PreviewProtocolText = "准备中";
+        PreviewStatusText = failedProtocol switch
+        {
+            SitePreviewProtocol.WebRtc => "WebRTC 不可用，正在切换备用预览。",
+            SitePreviewProtocol.Flv => "FLV 不可用，正在切换 HLS 预览。",
+            _ => "正在建立预览。"
+        };
+        ClosePreviewCommand.NotifyCanExecuteChanged();
+
+        SitePreviewResolveResult result;
+        try
+        {
+            result = failedProtocol.HasValue
+                ? await sitePreviewService.ResolveFallbackPreviewAsync(deviceCode, failedProtocol.Value, cancellationTokenSource.Token)
+                : await sitePreviewService.ResolveUserPreviewAsync(deviceCode, cancellationTokenSource.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _ = WriteDiagnosticAsync(
+                "preview-resolve-exception",
+                $"deviceCode={deviceCode}, failedProtocol={failedProtocol?.ToString() ?? "none"}, type={ex.GetType().FullName}, message={ex.Message}");
+            previewPlaybackState = PreviewPlaybackState.Unavailable;
+            PreviewProtocolText = "待开启";
+            PreviewStatusText = "预览暂不可用，请稍后重试。";
+            ClosePreviewCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        if (!ReferenceEquals(previewResolveCts, cancellationTokenSource) || isDisposed)
+        {
+            return;
+        }
+
+        if (!result.IsSuccess || result.Session is null)
+        {
+            previewPlaybackState = PreviewPlaybackState.Unavailable;
+            previewSession = null;
+            PreviewSessionJson = null;
+            PreviewProtocolText = "待开启";
+            PreviewStatusText = failedProtocol.HasValue
+                ? "备用预览也不可用，请稍后重试。"
+                : "预览暂不可用，请稍后重试。";
+            ClosePreviewCommand.NotifyCanExecuteChanged();
+            _ = WriteDiagnosticAsync(
+                "preview-session-unavailable",
+                $"deviceCode={deviceCode}, preferredProtocol={ToProtocolKey(previewPreferredProtocol == SitePreviewProtocol.Unknown ? GetRequestedPreviewProtocol(failedProtocol) : previewPreferredProtocol)}, failureReason={result.FailureReason ?? "unknown"}, fallbackStage={failedProtocol?.ToString() ?? "none"}");
+            return;
+        }
+
+        previewSession = result.Session;
+        if (!failedProtocol.HasValue && result.Session.AttemptedProtocols.Count > 0)
+        {
+            previewPreferredProtocol = result.Session.AttemptedProtocols[0];
+        }
+
+        var preferredProtocol = GetEffectivePreferredProtocol(result.Session);
+        PreviewSessionJson = JsonSerializer.Serialize(ToPreviewPlaybackSession(result.Session), MapHostJsonOptions);
+        PreviewProtocolText = $"当前协议：{GetProtocolLabel(result.Session.SelectedProtocol)}";
+        _ = WriteDiagnosticAsync(
+            "preview-session-resolved",
+            $"deviceCode={result.Session.DeviceCode}, sessionId={result.Session.PlaybackSessionId}, preferredProtocol={ToProtocolKey(preferredProtocol)}, finalProtocol={ToProtocolKey(result.Session.SelectedProtocol)}, fallbackTriggered={result.Session.UsedFallback || result.Session.SelectedProtocol != preferredProtocol}, attempted={string.Join(">", result.Session.AttemptedProtocols.Select(ToProtocolKey))}, sourceUrl={result.Session.SourceUrl}");
+
+        if (result.Session.SelectedProtocol == SitePreviewProtocol.WebRtc)
+        {
+            previewPlaybackState = PreviewPlaybackState.WebRtcUrlAcquired;
+            PreviewStatusText = "WebRTC 预览连接中。";
+            if (result.Session.WebRtcUrlAcquired)
+            {
+                _ = WriteDiagnosticAsync(
+                    "Preview",
+                    $"WebRTC URL acquired: deviceCode={result.Session.DeviceCode}, protocol={ToProtocolKey(result.Session.SelectedProtocol)}, sourceUrl={result.Session.SourceUrl}");
+            }
+        }
+        else
+        {
+            previewPlaybackState = result.Session.SelectedProtocol == SitePreviewProtocol.Flv
+                ? PreviewPlaybackState.FallbackToFlv
+                : PreviewPlaybackState.FallbackToHls;
+            PreviewStatusText = "WebRTC 不可用，已切换备用预览。";
+        }
+
+        ClosePreviewCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task RestartPreviewIfNeededAsync(string? deviceCode)
+    {
+        if (previewRequested
+            && !string.IsNullOrWhiteSpace(deviceCode)
+            && previewSession is not null
+            && PreviewSessionJson is not null
+            && string.Equals(previewSession.DeviceCode, deviceCode, StringComparison.OrdinalIgnoreCase))
+        {
+            ClosePreviewCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        CancelPreviewResolve();
+        previewSession = null;
+        PreviewSessionJson = null;
+        PreviewProtocolText = "待开启";
+        previewPreferredProtocol = SitePreviewProtocol.Unknown;
+
+        if (!previewRequested || string.IsNullOrWhiteSpace(deviceCode))
+        {
+            PreviewStatusText = string.IsNullOrWhiteSpace(deviceCode)
+                ? "选择点位后可开启预览。"
+                : "点击开启预览。";
+            ClosePreviewCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        PreviewStatusText = "正在切换预览。";
+        await StartPreviewAsync(deviceCode);
+    }
+
+    private void CancelPreviewResolve()
+    {
+        previewResolveCts?.Cancel();
+        previewResolveCts?.Dispose();
+        previewResolveCts = null;
     }
 
     private Task OpenEditEditorAsync()
@@ -1138,6 +1779,78 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             : normalized;
     }
 
+    private static PreviewPlaybackSessionDto ToPreviewPlaybackSession(SitePreviewSession session)
+    {
+        return new PreviewPlaybackSessionDto
+        {
+            PlaybackSessionId = session.PlaybackSessionId,
+            DeviceCode = session.DeviceCode,
+            Protocol = ToProtocolKey(session.SelectedProtocol),
+            SourceUrl = session.SourceUrl,
+            WebRtcApiUrl = session.WebRtcApiUrl,
+            WebRtcUrlAcquired = session.WebRtcUrlAcquired,
+            ReadyTimeoutSeconds = session.ReadyTimeoutSeconds
+        };
+    }
+
+    private static SitePreviewProtocol ParsePreviewProtocol(string? protocol)
+    {
+        return protocol?.Trim().ToLowerInvariant() switch
+        {
+            "webrtc" => SitePreviewProtocol.WebRtc,
+            "flv" => SitePreviewProtocol.Flv,
+            "hls" => SitePreviewProtocol.Hls,
+            "h5" => SitePreviewProtocol.H5,
+            _ => SitePreviewProtocol.Unknown
+        };
+    }
+
+    private static string GetProtocolLabel(SitePreviewProtocol protocol)
+    {
+        return protocol switch
+        {
+            SitePreviewProtocol.WebRtc => "WebRTC",
+            SitePreviewProtocol.Flv => "FLV",
+            SitePreviewProtocol.Hls => "HLS",
+            SitePreviewProtocol.H5 => "H5",
+            _ => "未知"
+        };
+    }
+
+    private static string ToProtocolKey(SitePreviewProtocol protocol)
+    {
+        return protocol switch
+        {
+            SitePreviewProtocol.WebRtc => "webrtc",
+            SitePreviewProtocol.Flv => "flv",
+            SitePreviewProtocol.Hls => "hls",
+            SitePreviewProtocol.H5 => "h5",
+            _ => "unknown"
+        };
+    }
+
+    private SitePreviewProtocol GetEffectivePreferredProtocol(SitePreviewSession session)
+    {
+        if (previewPreferredProtocol != SitePreviewProtocol.Unknown)
+        {
+            return previewPreferredProtocol;
+        }
+
+        return session.AttemptedProtocols.Count > 0
+            ? session.AttemptedProtocols[0]
+            : session.SelectedProtocol;
+    }
+
+    private static SitePreviewProtocol GetRequestedPreviewProtocol(SitePreviewProtocol? failedProtocol)
+    {
+        return failedProtocol switch
+        {
+            SitePreviewProtocol.WebRtc => SitePreviewProtocol.Flv,
+            SitePreviewProtocol.Flv => SitePreviewProtocol.Hls,
+            _ => SitePreviewProtocol.WebRtc
+        };
+    }
+
     private void Notify(string title, string message)
     {
         NotificationRequested?.Invoke(this, new NotificationRequestedEventArgs(title, message));
@@ -1147,4 +1860,18 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     {
         return diagnosticService.WriteAsync(eventName, message);
     }
+}
+
+internal enum PreviewPlaybackState
+{
+    Idle = 0,
+    WebRtcUrlAcquired = 1,
+    WebRtcHostInitializing = 2,
+    WebRtcPlaybackReady = 3,
+    WebRtcPlaybackFailed = 4,
+    FallbackToFlv = 5,
+    FlvPlaybackReady = 6,
+    FallbackToHls = 7,
+    HlsPlaybackReady = 8,
+    Unavailable = 9
 }

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using Tysl.Ai.App.Acceptance;
 using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.Infrastructure.Background;
 using Tysl.Ai.Infrastructure.Configuration;
@@ -21,6 +22,7 @@ public partial class App : Application
     private int exitCleanupStarted;
     private ILocalDiagnosticService? diagnosticService;
     private AcisKernelPlatformSiteProvider? platformSiteProvider;
+    private PreviewAcceptanceRunner? previewAcceptanceRunner;
     private SilentInspectionHostedService? silentInspectionHostedService;
     private WeComWebhookSender? webhookSender;
 
@@ -68,6 +70,9 @@ public partial class App : Application
             repository,
             runtimeStateRepository,
             dispatchRecordRepository);
+        ISitePreviewService sitePreviewService = new SitePreviewService(
+            platformSiteProvider,
+            runtimeStateRepository);
 
         ISilentInspectionService silentInspectionService = new SilentInspectionService(
             platformSiteProvider,
@@ -84,6 +89,7 @@ public partial class App : Application
 
         var shellViewModel = new ShellViewModel(
             siteMapQueryService,
+            sitePreviewService,
             siteLocalProfileService,
             dispatchService,
             diagnosticService,
@@ -92,6 +98,7 @@ public partial class App : Application
             amapLoadResult.Options?.MapStyle);
         var shellWindow = new ShellWindow(
             BuildMapHostConfiguration(amapLoadResult),
+            sitePreviewService,
             diagnosticService)
         {
             DataContext = shellViewModel
@@ -99,6 +106,18 @@ public partial class App : Application
 
         MainWindow = shellWindow;
         shellWindow.Show();
+
+        if (e.Args.Any(arg => string.Equals(arg, "--preview-acceptance-v2", StringComparison.OrdinalIgnoreCase))
+            && platformSiteProvider is not null
+            && diagnosticService is LocalDiagnosticService localDiagnosticService)
+        {
+            previewAcceptanceRunner = new PreviewAcceptanceRunner(
+                shellWindow,
+                shellViewModel,
+                platformSiteProvider,
+                localDiagnosticService);
+            previewAcceptanceRunner.Start();
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -128,6 +147,8 @@ public partial class App : Application
 
         silentInspectionHostedService?.Dispose();
         silentInspectionHostedService = null;
+        previewAcceptanceRunner?.Dispose();
+        previewAcceptanceRunner = null;
         webhookSender?.Dispose();
         webhookSender = null;
         platformSiteProvider?.Dispose();

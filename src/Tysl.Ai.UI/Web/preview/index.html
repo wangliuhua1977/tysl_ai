@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Preview Host</title>
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #04090f;
+  color: #d7e6ff;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+body {
+  overflow: hidden;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background:
+    radial-gradient(circle at top left, rgba(39, 88, 156, 0.32), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(10, 38, 78, 0.45), transparent 40%),
+    #04090f;
+}
+
+video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+#status {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  z-index: 2;
+  padding: 9px 12px;
+  border: 1px solid rgba(103, 153, 238, 0.22);
+  border-radius: 999px;
+  background: rgba(5, 10, 19, 0.7);
+  color: #cfe0ff;
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.min.js"></script>
+</head>
+<body>
+<div id="root">
+  <div id="status">等待预览指令。</div>
+  <video id="player" autoplay muted playsinline></video>
+</div>
+<script>
+const statusEl = document.getElementById("status");
+const video = document.getElementById("player");
+
+const state = {
+  session: null,
+  adapter: null,
+  ready: false,
+  readyTimer: null,
+  requestId: null
+};
+
+function createReleaseStats(reason) {
+  return {
+    reason: reason || "none",
+    peerClosed: false,
+    mediaTracksStopped: 0,
+    flvPlayersDisposed: 0,
+    hlsPlayersDisposed: 0
+  };
+}
+
+function post(type, payload = {}) {
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage({ type, payload });
+  }
+}
+
+function setStatus(text) {
+  statusEl.textContent = text;
+}
+
+function clearReadyTimer() {
+  if (state.readyTimer) {
+    window.clearTimeout(state.readyTimer);
+    state.readyTimer = null;
+  }
+}
+
+function resetVideo() {
+  try {
+    video.pause();
+  } catch (_) {
+  }
+
+  video.removeAttribute("src");
+  video.srcObject = null;
+  video.load();
+}
+
+function teardownAdapter(reason) {
+  clearReadyTimer();
+  const session = state.session;
+  let releaseStats = createReleaseStats(reason || "adapter_stop");
+
+  if (state.adapter && typeof state.adapter.stop === "function") {
+    try {
+      releaseStats = state.adapter.stop() || releaseStats;
+    } catch (_) {
+    }
+  }
+
+  state.adapter = null;
+  state.ready = false;
+  state.requestId = null;
+  resetVideo();
+  if (session) {
+    post("playback_stopped", {
+      playbackSessionId: session.playbackSessionId || "",
+      deviceCode: session.deviceCode || "",
+      protocol: session.protocol || "",
+      reason: releaseStats.reason,
+      peerClosed: !!releaseStats.peerClosed,
+      mediaTracksStopped: releaseStats.mediaTracksStopped || 0,
+      flvPlayersDisposed: releaseStats.flvPlayersDisposed || 0,
+      hlsPlayersDisposed: releaseStats.hlsPlayersDisposed || 0
+    });
+  }
+
+  return releaseStats;
+}
+
+function stop(reason) {
+  teardownAdapter(reason || "manual_stop");
+  state.session = null;
+  setStatus("等待预览指令。");
+  post("playback_idle");
+}
+
+function startReadyTimer(seconds, category) {
+  clearReadyTimer();
+  state.readyTimer = window.setTimeout(() => {
+    if (!state.ready) {
+      fail(category || "ready_timeout", "ready timeout");
+    }
+  }, Math.max(4, seconds || 10) * 1000);
+}
+
+function markReady() {
+  if (state.ready || !state.session) {
+    return;
+  }
+
+  state.ready = true;
+  clearReadyTimer();
+  setStatus(state.session.protocol === "webrtc" ? "WebRTC 实时预览已连接。" : "备用预览已连接。");
+  post("playback_ready", {
+    deviceCode: state.session.deviceCode || "",
+    playbackSessionId: state.session.playbackSessionId || "",
+    protocol: state.session.protocol || ""
+  });
+}
+
+function fail(category, reason) {
+  const session = state.session;
+  teardownAdapter("failure");
+  state.session = null;
+
+  setStatus(session && session.protocol === "webrtc" ? "WebRTC 预览连接失败。" : "备用预览连接失败。");
+  post("playback_failed", {
+    deviceCode: session && session.deviceCode ? session.deviceCode : "",
+    playbackSessionId: session && session.playbackSessionId ? session.playbackSessionId : "",
+    protocol: session && session.protocol ? session.protocol : "",
+    category,
+    reason
+  });
+}
+
+function notifyHostInitialized(protocol) {
+  if (!state.session) {
+    return;
+  }
+
+  post("host_initialized", {
+    deviceCode: state.session.deviceCode || "",
+    playbackSessionId: state.session.playbackSessionId || "",
+    protocol
+  });
+}
+
+function waitForIceGatheringComplete(peer, timeoutMs) {
+  if (peer.iceGatheringState === "complete") {
+    return Promise.resolve();
+  }
+
+  return new Promise(resolve => {
+    let isDone = false;
+    const finish = () => {
+      if (isDone) {
+        return;
+      }
+
+      isDone = true;
+      peer.removeEventListener("icegatheringstatechange", handleStateChange);
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+      resolve();
+    };
+
+    const handleStateChange = () => {
+      if (peer.iceGatheringState === "complete") {
+        finish();
+      }
+    };
+
+    const timerId = window.setTimeout(finish, timeoutMs);
+    peer.addEventListener("icegatheringstatechange", handleStateChange);
+  });
+}
+
+function createWebRtcPlaybackHost(session) {
+  let peer = null;
+  let mediaStream = null;
+  let localRequestId = null;
+
+  return {
+    protocol: "webrtc",
+
+    async start() {
+      if (!session.webRtcApiUrl) {
+        fail("webrtc_api_missing", "missing webrtc api url");
+        return;
+      }
+
+      setStatus("WebRTC 预览连接中。");
+
+      peer = new RTCPeerConnection({
+        bundlePolicy: "max-bundle",
+        rtcpMuxPolicy: "require"
+      });
+      mediaStream = new MediaStream();
+      video.srcObject = mediaStream;
+      state.ready = false;
+
+      peer.ontrack = event => {
+        mediaStream.addTrack(event.track);
+        video.play().catch(() => {});
+      };
+
+      peer.onconnectionstatechange = () => {
+        if (peer.connectionState === "connected") {
+          video.play().catch(() => {});
+          markReady();
+          return;
+        }
+
+        if (!state.ready && ["failed", "disconnected", "closed"].includes(peer.connectionState)) {
+          fail("webrtc_connection_failed", peer.connectionState);
+        }
+      };
+
+      peer.oniceconnectionstatechange = () => {
+        if (!state.ready && ["failed", "disconnected", "closed"].includes(peer.iceConnectionState)) {
+          fail("webrtc_ice_failed", peer.iceConnectionState);
+        }
+      };
+
+      peer.addTransceiver("audio", { direction: "recvonly" });
+      peer.addTransceiver("video", { direction: "recvonly" });
+
+      notifyHostInitialized("webrtc");
+
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      await waitForIceGatheringComplete(peer, 1500);
+
+      if (!peer.localDescription || !peer.localDescription.sdp) {
+        fail("webrtc_offer_missing", "missing local description");
+        return;
+      }
+
+      localRequestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      state.requestId = localRequestId;
+      startReadyTimer(session.readyTimeoutSeconds || 12, "webrtc_ready_timeout");
+
+      post("webrtc_offer", {
+        requestId: localRequestId,
+        deviceCode: session.deviceCode || "",
+        playbackSessionId: session.playbackSessionId || "",
+        protocol: "webrtc",
+        apiUrl: session.webRtcApiUrl,
+        streamUrl: session.sourceUrl,
+        offerSdp: peer.localDescription.sdp
+      });
+    },
+
+    async handleMessage(message) {
+      if (!peer || !message || !message.type) {
+        return;
+      }
+
+      if (message.type === "webrtc_answer") {
+        if (!message.payload || message.payload.requestId !== localRequestId) {
+          return;
+        }
+
+        try {
+          await peer.setRemoteDescription({
+            type: "answer",
+            sdp: message.payload.answerSdp
+          });
+        } catch (_) {
+          fail("webrtc_answer_invalid", "invalid answer");
+        }
+
+        return;
+      }
+
+      if (message.type === "webrtc_answer_failed") {
+        if (message.payload && message.payload.requestId === localRequestId) {
+          fail("webrtc_answer_failed", message.payload.reason || "webrtc negotiation failed");
+        }
+      }
+    },
+
+    stop() {
+      const releaseStats = createReleaseStats("adapter_stop");
+      if (peer) {
+        try {
+          peer.ontrack = null;
+          peer.onconnectionstatechange = null;
+          peer.oniceconnectionstatechange = null;
+          peer.close();
+          releaseStats.peerClosed = true;
+        } catch (_) {
+        }
+      }
+
+      if (mediaStream) {
+        const tracks = mediaStream.getTracks();
+        releaseStats.mediaTracksStopped = tracks.length;
+        tracks.forEach(track => {
+          try {
+            track.stop();
+          } catch (_) {
+          }
+        });
+      }
+
+      peer = null;
+      mediaStream = null;
+      localRequestId = null;
+      return releaseStats;
+    }
+  };
+}
+
+function createMediaPlaybackHost(protocol, session) {
+  let cleanup = null;
+
+  return {
+    protocol,
+
+    async start() {
+      notifyHostInitialized(protocol);
+      setStatus("正在建立备用预览。");
+
+      if (protocol === "flv") {
+        if (!(window.mpegts && window.mpegts.isSupported())) {
+          fail("flv_not_supported", "mpegts.js unavailable");
+          return;
+        }
+
+        const player = window.mpegts.createPlayer({
+          type: "flv",
+          isLive: true,
+          url: session.sourceUrl
+        });
+        player.attachMediaElement(video);
+        player.load();
+        player.play().catch(() => fail("flv_play_failed", "play failed"));
+        player.on(window.mpegts.Events.ERROR, () => fail("flv_stream_failed", "stream failed"));
+        cleanup = () => {
+          try { player.pause(); } catch (_) {}
+          try { player.unload(); } catch (_) {}
+          try { player.detachMediaElement(); } catch (_) {}
+          try { player.destroy(); } catch (_) {}
+        };
+        startReadyTimer(session.readyTimeoutSeconds || 10, "flv_ready_timeout");
+        return;
+      }
+
+      if (protocol === "hls") {
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = session.sourceUrl;
+          video.play().catch(() => fail("hls_play_failed", "play failed"));
+          cleanup = () => resetVideo();
+          startReadyTimer(session.readyTimeoutSeconds || 10, "hls_ready_timeout");
+          return;
+        }
+
+        if (!(window.Hls && window.Hls.isSupported())) {
+          fail("hls_not_supported", "hls.js unavailable");
+          return;
+        }
+
+        const hls = new Hls({ liveDurationInfinity: true, enableWorker: true });
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data && data.fatal) {
+            fail("hls_stream_failed", data.details || "stream failed");
+          }
+        });
+        hls.loadSource(session.sourceUrl);
+        hls.attachMedia(video);
+        video.play().catch(() => fail("hls_play_failed", "play failed"));
+        cleanup = () => {
+          try { hls.destroy(); } catch (_) {}
+        };
+        startReadyTimer(session.readyTimeoutSeconds || 10, "hls_ready_timeout");
+        return;
+      }
+
+      fail("unsupported_protocol", protocol);
+    },
+
+    async handleMessage() {
+    },
+
+    stop() {
+      const releaseStats = createReleaseStats("adapter_stop");
+      if (cleanup) {
+        try {
+          cleanup();
+        } catch (_) {
+        }
+      }
+
+      if (protocol === "flv") {
+        releaseStats.flvPlayersDisposed = 1;
+      } else if (protocol === "hls") {
+        releaseStats.hlsPlayersDisposed = 1;
+      }
+
+      cleanup = null;
+      return releaseStats;
+    }
+  };
+}
+
+function createPlaybackHost(session) {
+  if (session.protocol === "webrtc") {
+    return createWebRtcPlaybackHost(session);
+  }
+
+  if (session.protocol === "flv" || session.protocol === "hls") {
+    return createMediaPlaybackHost(session.protocol, session);
+  }
+
+  return null;
+}
+
+async function play(session) {
+  stop("switch_session");
+
+  if (!session || !session.protocol) {
+    return;
+  }
+
+  state.session = session;
+  state.ready = false;
+  video.muted = true;
+
+  if (session.protocol === "h5") {
+    window.location.href = session.sourceUrl;
+    return;
+  }
+
+  const adapter = createPlaybackHost(session);
+  if (!adapter) {
+    fail("unsupported_protocol", session.protocol);
+    return;
+  }
+
+  state.adapter = adapter;
+
+  try {
+    await adapter.start();
+  } catch (error) {
+    fail("host_start_failed", error && error.message ? error.message : String(error));
+  }
+}
+
+video.addEventListener("playing", () => {
+  markReady();
+});
+
+video.addEventListener("error", () => {
+  if (state.session && !state.ready) {
+    fail("media_error", "video error");
+  }
+});
+
+if (window.chrome && window.chrome.webview) {
+  window.chrome.webview.addEventListener("message", async event => {
+    if (!state.adapter || typeof state.adapter.handleMessage !== "function") {
+      return;
+    }
+
+    try {
+      await state.adapter.handleMessage(event.data || {});
+    } catch (error) {
+      fail("host_message_failed", error && error.message ? error.message : String(error));
+    }
+  });
+}
+
+window.addEventListener("beforeunload", () => stop("before_unload"));
+
+window.TyslPreviewHost = {
+  play,
+  stop
+};
+
+post("host_ready");
+</script>
+</body>
+</html>

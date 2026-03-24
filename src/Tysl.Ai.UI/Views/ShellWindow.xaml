@@ -271,6 +271,29 @@
                                                Text="{Binding SelectedDetail.DispatchHeadlineText, TargetNullValue=未触发派单 / 未恢复}" />
                                 </Border>
                             </StackPanel>
+
+                            <TextBlock Margin="0,18,0,0" Style="{StaticResource SubsectionTitleTextStyle}" Text="实时预览" />
+                            <TextBlock Margin="0,8,0,0"
+                                       Style="{StaticResource CaptionTextStyle}"
+                                       Text="{Binding PreviewStatusText}" />
+                            <TextBlock Margin="0,4,0,0"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       Text="{Binding PreviewProtocolText}" />
+                            <WrapPanel Margin="0,10,0,0">
+                                <Button Margin="0,0,8,8"
+                                        Command="{Binding OpenPreviewCommand}"
+                                        Style="{StaticResource FlatActionButtonStyle}"
+                                        Content="开启预览" />
+                                <Button Margin="0,0,0,8"
+                                        Command="{Binding ClosePreviewCommand}"
+                                        Style="{StaticResource FlatActionButtonStyle}"
+                                        Content="关闭预览" />
+                            </WrapPanel>
+                            <controlsView:PreviewHostControl x:Name="PreviewHost"
+                                                             Height="224"
+                                                             Margin="0,2,0,0"
+                                                             SessionJson="{Binding PreviewSessionJson}" />
+
                             <TextBlock Margin="0,18,0,0" Style="{StaticResource SubsectionTitleTextStyle}" Text="基础信息" />
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>

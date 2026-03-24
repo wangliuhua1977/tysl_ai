@@ -14,6 +14,22 @@ public sealed record SiteRuntimeState
 
     public required PreviewResolveState LastPreviewResolveState { get; init; }
 
+    public DateTimeOffset? LastPreviewAt { get; init; }
+
+    public string? LastPreviewSessionId { get; init; }
+
+    public required SitePreviewProtocol LastPreviewPreferredProtocol { get; init; }
+
+    public required SitePreviewProtocol LastPreviewProtocol { get; init; }
+
+    public bool? LastPreviewSucceeded { get; init; }
+
+    public required bool LastPreviewUsedFallback { get; init; }
+
+    public required SitePreviewProtocol LastPreviewFailureProtocol { get; init; }
+
+    public string? LastPreviewFailureReason { get; init; }
+
     public string? LastSnapshotPath { get; init; }
 
     public DateTimeOffset? LastSnapshotAt { get; init; }

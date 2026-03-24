@@ -26,6 +26,14 @@ public sealed class SiteRuntimeStateRepository : ISiteRuntimeStateRepository
                 last_online_state,
                 last_product_state,
                 last_preview_resolve_state,
+                last_preview_at,
+                last_preview_session_id,
+                last_preview_preferred_protocol,
+                last_preview_protocol,
+                last_preview_succeeded,
+                last_preview_used_fallback,
+                last_preview_failure_protocol,
+                last_preview_failure_reason,
                 last_snapshot_path,
                 last_snapshot_at,
                 last_fault_code,
@@ -61,6 +69,14 @@ public sealed class SiteRuntimeStateRepository : ISiteRuntimeStateRepository
                 last_online_state,
                 last_product_state,
                 last_preview_resolve_state,
+                last_preview_at,
+                last_preview_session_id,
+                last_preview_preferred_protocol,
+                last_preview_protocol,
+                last_preview_succeeded,
+                last_preview_used_fallback,
+                last_preview_failure_protocol,
+                last_preview_failure_reason,
                 last_snapshot_path,
                 last_snapshot_at,
                 last_fault_code,
@@ -95,6 +111,14 @@ public sealed class SiteRuntimeStateRepository : ISiteRuntimeStateRepository
                 last_online_state,
                 last_product_state,
                 last_preview_resolve_state,
+                last_preview_at,
+                last_preview_session_id,
+                last_preview_preferred_protocol,
+                last_preview_protocol,
+                last_preview_succeeded,
+                last_preview_used_fallback,
+                last_preview_failure_protocol,
+                last_preview_failure_reason,
                 last_snapshot_path,
                 last_snapshot_at,
                 last_fault_code,
@@ -109,6 +133,14 @@ public sealed class SiteRuntimeStateRepository : ISiteRuntimeStateRepository
                 $lastOnlineState,
                 $lastProductState,
                 $lastPreviewResolveState,
+                $lastPreviewAt,
+                $lastPreviewSessionId,
+                $lastPreviewPreferredProtocol,
+                $lastPreviewProtocol,
+                $lastPreviewSucceeded,
+                $lastPreviewUsedFallback,
+                $lastPreviewFailureProtocol,
+                $lastPreviewFailureReason,
                 $lastSnapshotPath,
                 $lastSnapshotAt,
                 $lastFaultCode,
@@ -122,6 +154,14 @@ public sealed class SiteRuntimeStateRepository : ISiteRuntimeStateRepository
                 last_online_state = excluded.last_online_state,
                 last_product_state = excluded.last_product_state,
                 last_preview_resolve_state = excluded.last_preview_resolve_state,
+                last_preview_at = excluded.last_preview_at,
+                last_preview_session_id = excluded.last_preview_session_id,
+                last_preview_preferred_protocol = excluded.last_preview_preferred_protocol,
+                last_preview_protocol = excluded.last_preview_protocol,
+                last_preview_succeeded = excluded.last_preview_succeeded,
+                last_preview_used_fallback = excluded.last_preview_used_fallback,
+                last_preview_failure_protocol = excluded.last_preview_failure_protocol,
+                last_preview_failure_reason = excluded.last_preview_failure_reason,
                 last_snapshot_path = excluded.last_snapshot_path,
                 last_snapshot_at = excluded.last_snapshot_at,
                 last_fault_code = excluded.last_fault_code,
@@ -136,6 +176,16 @@ public sealed class SiteRuntimeStateRepository : ISiteRuntimeStateRepository
         command.Parameters.AddWithValue("$lastOnlineState", (int)state.LastOnlineState);
         command.Parameters.AddWithValue("$lastProductState", (object?)state.LastProductState ?? DBNull.Value);
         command.Parameters.AddWithValue("$lastPreviewResolveState", (int)state.LastPreviewResolveState);
+        command.Parameters.AddWithValue("$lastPreviewAt", ToDbValue(state.LastPreviewAt));
+        command.Parameters.AddWithValue("$lastPreviewSessionId", (object?)state.LastPreviewSessionId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$lastPreviewPreferredProtocol", (int)state.LastPreviewPreferredProtocol);
+        command.Parameters.AddWithValue("$lastPreviewProtocol", (int)state.LastPreviewProtocol);
+        command.Parameters.AddWithValue(
+            "$lastPreviewSucceeded",
+            state.LastPreviewSucceeded.HasValue ? state.LastPreviewSucceeded.Value ? 1 : 0 : DBNull.Value);
+        command.Parameters.AddWithValue("$lastPreviewUsedFallback", state.LastPreviewUsedFallback ? 1 : 0);
+        command.Parameters.AddWithValue("$lastPreviewFailureProtocol", (int)state.LastPreviewFailureProtocol);
+        command.Parameters.AddWithValue("$lastPreviewFailureReason", (object?)state.LastPreviewFailureReason ?? DBNull.Value);
         command.Parameters.AddWithValue("$lastSnapshotPath", (object?)state.LastSnapshotPath ?? DBNull.Value);
         command.Parameters.AddWithValue("$lastSnapshotAt", ToDbValue(state.LastSnapshotAt));
         command.Parameters.AddWithValue("$lastFaultCode", (int)state.LastFaultCode);
@@ -156,13 +206,21 @@ public sealed class SiteRuntimeStateRepository : ISiteRuntimeStateRepository
             LastOnlineState = (DemoOnlineState)reader.GetInt64(2),
             LastProductState = reader.IsDBNull(3) ? null : reader.GetString(3),
             LastPreviewResolveState = (PreviewResolveState)reader.GetInt64(4),
-            LastSnapshotPath = reader.IsDBNull(5) ? null : reader.GetString(5),
-            LastSnapshotAt = ParseDateTimeOffset(reader, 6),
-            LastFaultCode = (RuntimeFaultCode)reader.GetInt64(7),
-            LastFaultSummary = reader.IsDBNull(8) ? null : reader.GetString(8),
-            ConsecutiveFailureCount = reader.GetInt32(9),
-            LastInspectionRunState = (InspectionRunState)reader.GetInt64(10),
-            UpdatedAt = DateTimeOffset.Parse(reader.GetString(11))
+            LastPreviewAt = ParseDateTimeOffset(reader, 5),
+            LastPreviewSessionId = reader.IsDBNull(6) ? null : reader.GetString(6),
+            LastPreviewPreferredProtocol = (SitePreviewProtocol)reader.GetInt64(7),
+            LastPreviewProtocol = (SitePreviewProtocol)reader.GetInt64(8),
+            LastPreviewSucceeded = ParseNullableBool(reader, 9),
+            LastPreviewUsedFallback = reader.GetInt64(10) == 1,
+            LastPreviewFailureProtocol = (SitePreviewProtocol)reader.GetInt64(11),
+            LastPreviewFailureReason = reader.IsDBNull(12) ? null : reader.GetString(12),
+            LastSnapshotPath = reader.IsDBNull(13) ? null : reader.GetString(13),
+            LastSnapshotAt = ParseDateTimeOffset(reader, 14),
+            LastFaultCode = (RuntimeFaultCode)reader.GetInt64(15),
+            LastFaultSummary = reader.IsDBNull(16) ? null : reader.GetString(16),
+            ConsecutiveFailureCount = reader.GetInt32(17),
+            LastInspectionRunState = (InspectionRunState)reader.GetInt64(18),
+            UpdatedAt = DateTimeOffset.Parse(reader.GetString(19))
         };
     }
 
@@ -176,5 +234,10 @@ public sealed class SiteRuntimeStateRepository : ISiteRuntimeStateRepository
     private static DateTimeOffset? ParseDateTimeOffset(SqliteDataReader reader, int ordinal)
     {
         return reader.IsDBNull(ordinal) ? null : DateTimeOffset.Parse(reader.GetString(ordinal));
+    }
+
+    private static bool? ParseNullableBool(SqliteDataReader reader, int ordinal)
+    {
+        return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal) == 1;
     }
 }

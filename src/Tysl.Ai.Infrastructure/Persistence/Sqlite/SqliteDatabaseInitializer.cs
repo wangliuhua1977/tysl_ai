@@ -100,6 +100,14 @@ public sealed class SqliteDatabaseInitializer
                 last_online_state INTEGER NOT NULL,
                 last_product_state TEXT NULL,
                 last_preview_resolve_state INTEGER NOT NULL,
+                last_preview_at TEXT NULL,
+                last_preview_session_id TEXT NULL,
+                last_preview_preferred_protocol INTEGER NOT NULL DEFAULT 0,
+                last_preview_protocol INTEGER NOT NULL DEFAULT 0,
+                last_preview_succeeded INTEGER NULL,
+                last_preview_used_fallback INTEGER NOT NULL DEFAULT 0,
+                last_preview_failure_protocol INTEGER NOT NULL DEFAULT 0,
+                last_preview_failure_reason TEXT NULL,
                 last_snapshot_path TEXT NULL,
                 last_snapshot_at TEXT NULL,
                 last_fault_code INTEGER NOT NULL,
@@ -111,6 +119,7 @@ public sealed class SqliteDatabaseInitializer
             """;
 
         await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureSiteRuntimeStateSchemaAsync(connection, cancellationToken);
     }
 
     private static async Task CreateSnapshotRecordTableAsync(
@@ -552,6 +561,60 @@ public sealed class SqliteDatabaseInitializer
             "site_local_profile",
             "ignored_reason",
             "ALTER TABLE site_local_profile ADD COLUMN ignored_reason TEXT NULL;",
+            cancellationToken);
+    }
+
+    private static async Task EnsureSiteRuntimeStateSchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_at",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_at TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_session_id",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_session_id TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_preferred_protocol",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_preferred_protocol INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_protocol",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_protocol INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_succeeded",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_succeeded INTEGER NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_used_fallback",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_used_fallback INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_failure_protocol",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_failure_protocol INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_runtime_state",
+            "last_preview_failure_reason",
+            "ALTER TABLE site_runtime_state ADD COLUMN last_preview_failure_reason TEXT NULL;",
             cancellationToken);
     }
 

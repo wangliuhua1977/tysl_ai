@@ -477,6 +477,7 @@ public sealed class AcisApiKernel : IDisposable
     public async Task<PreviewResolution> ResolvePreviewAsync(
         string deviceCode,
         AcisPreviewIntent intent = AcisPreviewIntent.ClickPreview,
+        IReadOnlyList<string>? protocolOrderOverride = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(deviceCode))
@@ -485,9 +486,16 @@ public sealed class AcisApiKernel : IDisposable
         }
 
         var normalized = deviceCode.Trim();
-        var protocols = intent == AcisPreviewIntent.ClickPreview
-            ? (Options.Preview.ClickProtocolOrder?.Length > 0 ? Options.Preview.ClickProtocolOrder : new[] { "flv", "hls", "webrtc", "h5" })
-            : (Options.Preview.InspectionProtocolOrder?.Length > 0 ? Options.Preview.InspectionProtocolOrder : new[] { "flv", "hls" });
+        string[] protocols = protocolOrderOverride is { Count: > 0 }
+            ? protocolOrderOverride
+                .Select(protocol => protocol?.Trim().ToLowerInvariant())
+                .Where(protocol => !string.IsNullOrWhiteSpace(protocol))
+                .Select(protocol => protocol!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+            : intent == AcisPreviewIntent.ClickPreview
+                ? (Options.Preview.ClickProtocolOrder?.Length > 0 ? Options.Preview.ClickProtocolOrder : new[] { "webrtc", "flv", "hls" })
+                : (Options.Preview.InspectionProtocolOrder?.Length > 0 ? Options.Preview.InspectionProtocolOrder : new[] { "flv", "hls" });
 
         PreviewResolution? preferredFailure = null;
         var attempted = new List<string>();
@@ -495,6 +503,10 @@ public sealed class AcisApiKernel : IDisposable
         foreach (var protocol in protocols)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(protocol))
+            {
+                continue;
+            }
 
             var cacheKey = $"{normalized}|{protocol}";
             if (TryGetCache(_previewCache, cacheKey, out var cached))
@@ -511,18 +523,45 @@ public sealed class AcisApiKernel : IDisposable
             }
 
             attempted.Add(protocol);
-            var current = await TryResolveSingleProtocolAsync(normalized, protocol, attempted, cancellationToken).ConfigureAwait(false);
+            PreviewResolution current;
+            try
+            {
+                current = await TryResolveSingleProtocolAsync(normalized, protocol, attempted, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.Info(
+                    "CTYunPreview",
+                    $"deviceCode={normalized}, selectedProtocol={protocol}, attemptedProtocols={string.Join(">", attempted)}, requestException={ex.GetType().Name}, requestExceptionMessage={ex.Message}");
+                current = PreviewResolution.Failure(
+                    deviceCode: normalized,
+                    selectedProtocol: protocol,
+                    attemptedProtocols: attempted.ToArray(),
+                    mediaApiPath: ResolveProtocolPlan(protocol).Endpoint,
+                    responseCode: -1,
+                    responseMessage: ex.Message,
+                    streamAcquireResult: "preview api request failed",
+                    failureCategory: PreviewFailureCategory.PlayerProtocolNotSupported,
+                    failureReason: ex.Message);
+            }
             PutCache(_previewCache, cacheKey, current, current.IsSuccess ? PreviewSuccessCacheLifetime : PreviewFailureCacheLifetime);
 
             if (current.IsSuccess)
             {
+                _logger.Info(
+                    "CTYunPreview",
+                    $"deviceCode={normalized}, attemptedProtocols={string.Join(">", attempted)}, finalProtocol={current.ParsedProtocolType ?? current.SelectedProtocol}, finalPreviewUrl={current.PreviewUrl}");
                 return current;
             }
 
             preferredFailure = ChoosePreferred(preferredFailure, current);
         }
 
-        return preferredFailure ?? PreviewResolution.Failure(
+        var failure = preferredFailure ?? PreviewResolution.Failure(
             deviceCode: normalized,
             selectedProtocol: string.Empty,
             attemptedProtocols: attempted.ToArray(),
@@ -532,6 +571,10 @@ public sealed class AcisApiKernel : IDisposable
             streamAcquireResult: "无流地址",
             failureCategory: PreviewFailureCategory.NoStreamAddress,
             failureReason: "所有协议回退后仍失败。");
+        _logger.Info(
+            "CTYunPreview",
+            $"deviceCode={normalized}, attemptedProtocols={string.Join(">", attempted)}, finalResult=failure, failureReason={failure.FailureReason}");
+        return failure;
     }
 
     public async Task<CoordinateConvertResult> ConvertCoordinatesAsync(
@@ -630,6 +673,107 @@ public sealed class AcisApiKernel : IDisposable
             HtmlUri = new Uri(path),
             SourceUrl = request.SourceUrl
         };
+    }
+
+    public Task<WebRtcPlayNegotiationResult> NegotiateWebRtcPlayAsync(
+        string playbackUrl,
+        string offerSdp,
+        CancellationToken cancellationToken = default)
+    {
+        return NegotiateWebRtcPlayAsync(null, playbackUrl, offerSdp, cancellationToken);
+    }
+
+    public async Task<WebRtcPlayNegotiationResult> NegotiateWebRtcPlayAsync(
+        string? apiUrl,
+        string playbackUrl,
+        string offerSdp,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(playbackUrl))
+        {
+            throw new ArgumentException("playbackUrl is required.", nameof(playbackUrl));
+        }
+
+        if (string.IsNullOrWhiteSpace(offerSdp))
+        {
+            throw new ArgumentException("offerSdp is required.", nameof(offerSdp));
+        }
+
+        var resolvedApiUrl = string.IsNullOrWhiteSpace(apiUrl)
+            ? BuildWebRtcPlayApiUrl(playbackUrl)
+            : apiUrl;
+        var payload = JsonSerializer.Serialize(new
+        {
+            api = resolvedApiUrl,
+            streamurl = playbackUrl,
+            clientip = (string?)null,
+            sdp = offerSdp
+        });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, resolvedApiUrl)
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+
+        _logger.Info("CTYunWebRtc", $"Negotiating WebRTC play: apiUrl={resolvedApiUrl}, streamUrl={playbackUrl}");
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+        _logger.Info("CTYunWebRtc", $"WebRTC play API responded: apiUrl={resolvedApiUrl}, status={(int)response.StatusCode} {response.StatusCode}");
+
+        if (!response.IsSuccessStatusCode)
+        {
+            return WebRtcPlayNegotiationResult.Failure(
+                resolvedApiUrl,
+                $"WebRTC play API returned {(int)response.StatusCode} {response.StatusCode}.",
+                body);
+        }
+
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        var responseCode = root.TryGetProperty("code", out var codeElement) && codeElement.TryGetInt32(out var codeValue)
+            ? codeValue
+            : -1;
+        var answerSdp = ReadString(root, "sdp");
+        var sessionId = ReadString(root, "sessionid");
+        var server = ReadString(root, "server");
+        var failureReason = ReadString(root, "msg")
+            ?? ReadString(root, "message")
+            ?? "WebRTC answer unavailable.";
+
+        return responseCode == 0 && !string.IsNullOrWhiteSpace(answerSdp)
+            ? WebRtcPlayNegotiationResult.Success(resolvedApiUrl, answerSdp!, sessionId, server, body)
+            : WebRtcPlayNegotiationResult.Failure(resolvedApiUrl, failureReason, body, responseCode, sessionId, server);
+    }
+
+    public static string BuildWebRtcPlayApiUrl(string playbackUrl)
+    {
+        if (string.IsNullOrWhiteSpace(playbackUrl))
+        {
+            throw new ArgumentException("playbackUrl is required.", nameof(playbackUrl));
+        }
+
+        if (!Uri.TryCreate(playbackUrl, UriKind.Absolute, out var uri))
+        {
+            throw new InvalidOperationException($"Invalid WebRTC playback URL: {playbackUrl}");
+        }
+
+        var segments = uri.AbsolutePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var apiPath = segments.Length > 0 && segments[0].Equals("webrtc-gateway", StringComparison.OrdinalIgnoreCase)
+            ? "/webrtc-gateway/rtc/v1/play/"
+            : "/rtc/v1/play/";
+
+        var builder = new UriBuilder(uri)
+        {
+            Scheme = Uri.UriSchemeHttps,
+            Port = uri.IsDefaultPort ? -1 : uri.Port,
+            Path = apiPath,
+            Query = uri.Query.TrimStart('?')
+        };
+
+        return builder.Uri.ToString();
     }
 
     public async Task WriteDiagnosticAsync(string category, string message, CancellationToken cancellationToken = default)
@@ -860,7 +1004,7 @@ public sealed class AcisApiKernel : IDisposable
         {
             "flv" => HostSupportResult.Supported(),
             "hls" => HostSupportResult.Supported(),
-            "webrtc" => HostSupportResult.Unsupported("已拿到 WEBRTC 真实 URL，但当前播放器宿主暂不支持该协议。"),
+            "webrtc" => HostSupportResult.Supported(),
             _ => HostSupportResult.Supported()
         };
     }
@@ -1215,7 +1359,7 @@ public sealed class HttpOptions
 
 public sealed class PreviewOptions
 {
-    public string[] ClickProtocolOrder { get; set; } = ["flv", "hls", "webrtc", "h5"];
+    public string[] ClickProtocolOrder { get; set; } = ["webrtc", "flv", "hls"];
     public string[] InspectionProtocolOrder { get; set; } = ["flv", "hls"];
 }
 
@@ -1522,6 +1666,55 @@ public sealed class PreviewHostResult
     public string SourceUrl { get; set; } = string.Empty;
 }
 
+public sealed class WebRtcPlayNegotiationResult
+{
+    public bool IsSuccess { get; private init; }
+    public string ApiUrl { get; private init; } = string.Empty;
+    public string? AnswerSdp { get; private init; }
+    public int ResponseCode { get; private init; }
+    public string? SessionId { get; private init; }
+    public string? Server { get; private init; }
+    public string FailureReason { get; private init; } = string.Empty;
+    public string ResponseBody { get; private init; } = string.Empty;
+
+    public static WebRtcPlayNegotiationResult Success(
+        string apiUrl,
+        string answerSdp,
+        string? sessionId,
+        string? server,
+        string responseBody)
+        => new()
+        {
+            IsSuccess = true,
+            ApiUrl = apiUrl,
+            AnswerSdp = answerSdp,
+            ResponseCode = 0,
+            SessionId = sessionId,
+            Server = server,
+            FailureReason = string.Empty,
+            ResponseBody = responseBody
+        };
+
+    public static WebRtcPlayNegotiationResult Failure(
+        string apiUrl,
+        string failureReason,
+        string responseBody,
+        int responseCode = -1,
+        string? sessionId = null,
+        string? server = null)
+        => new()
+        {
+            IsSuccess = false,
+            ApiUrl = apiUrl,
+            AnswerSdp = null,
+            ResponseCode = responseCode,
+            SessionId = sessionId,
+            Server = server,
+            FailureReason = failureReason,
+            ResponseBody = responseBody
+        };
+}
+
 public sealed class HostSupportResult
 {
     public bool IsSupported { get; private init; }
@@ -1579,7 +1772,11 @@ public sealed class PreviewProtocolPlan
         {
             new KeyValuePair<string, string>("accessToken", accessToken),
             new KeyValuePair<string, string>("enterpriseUser", enterpriseUser),
-            new KeyValuePair<string, string>("deviceCode", deviceCode)
+            new KeyValuePair<string, string>("deviceCode", deviceCode),
+            new KeyValuePair<string, string>("mediaType", "0"),
+            new KeyValuePair<string, string>("netType", "0"),
+            new KeyValuePair<string, string>("channel", "0"),
+            new KeyValuePair<string, string>("mute", "0")
         }
     };
 
@@ -2127,7 +2324,7 @@ public sealed class FileAcisKernelLogger : IAcisKernelLogger
     }
 }
 
-internal static class PreviewHostHtmlBuilder
+internal static class LegacyPreviewHostHtmlBuilder
 {
     public static string Build(string deviceCode, string sourceUrl, string protocol, string? title)
     {
@@ -2246,7 +2443,7 @@ video.addEventListener("error", () => fail("player_load_failed", "video.error tr
   }
 
   if (protocol === "webrtc") {
-    fail("player_not_supported", "当前宿主未集成 WebRTC 承载播放器");
+    setStatus("WebRTC 预览宿主已迁移到新版实现");
     return;
   }
 
@@ -2256,6 +2453,387 @@ video.addEventListener("error", () => fail("player_load_failed", "video.error tr
   }
 
   fail("url_unloadable", "unknown protocol");
+})();
+</script>
+</body>
+</html>
+""";
+    }
+}
+
+internal static class PreviewHostHtmlBuilder
+{
+    public static string Build(string deviceCode, string sourceUrl, string protocol, string? title)
+    {
+        var safeTitle = string.IsNullOrWhiteSpace(title) ? deviceCode : title;
+        var safeUrl = JsonSerializer.Serialize(sourceUrl);
+        var safeProtocol = JsonSerializer.Serialize(protocol);
+        var safeDeviceCode = JsonSerializer.Serialize(deviceCode);
+        var safeTitleJson = JsonSerializer.Serialize(safeTitle);
+        var safeWebRtcApiUrl = JsonSerializer.Serialize(
+            string.Equals(protocol, "webrtc", StringComparison.OrdinalIgnoreCase)
+                ? AcisApiKernel.BuildWebRtcPlayApiUrl(sourceUrl)
+                : null);
+        var readyTimeoutSeconds = string.Equals(protocol, "webrtc", StringComparison.OrdinalIgnoreCase) ? "12" : "10";
+
+        return $$"""
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{{safeTitle}}</title>
+<style>
+html, body { margin:0; padding:0; width:100%; height:100%; background:#04090f; color:#d7e6ff; font-family:"Segoe UI","Microsoft YaHei",sans-serif; }
+body { overflow:hidden; }
+#root { width:100%; height:100%; position:relative; background:radial-gradient(circle at top left, rgba(39,88,156,.32), transparent 34%), radial-gradient(circle at bottom right, rgba(10,38,78,.45), transparent 40%), #04090f; }
+video { width:100%; height:100%; object-fit:cover; background:#000; }
+#status { position:absolute; left:12px; right:12px; top:12px; z-index:2; padding:9px 12px; border:1px solid rgba(103,153,238,.22); border-radius:999px; background:rgba(5,10,19,.7); color:#cfe0ff; font-size:12px; line-height:1.4; letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.min.js"></script>
+</head>
+<body>
+<div id="root">
+  <div id="status">等待预览连接。</div>
+  <video id="player" controls autoplay muted playsinline></video>
+</div>
+<script>
+const session = {
+  deviceCode: {{safeDeviceCode}},
+  protocol: {{safeProtocol}},
+  sourceUrl: {{safeUrl}},
+  title: {{safeTitleJson}},
+  webRtcApiUrl: {{safeWebRtcApiUrl}},
+  readyTimeoutSeconds: {{readyTimeoutSeconds}}
+};
+const statusEl = document.getElementById("status");
+const video = document.getElementById("player");
+const state = { adapter: null, ready: false, readyTimer: null };
+
+function send(message) {
+  const payload = typeof message === "object" ? message : { type: "text", value: String(message) };
+  try {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage(payload);
+    } else {
+      console.log("preview-host-message", payload);
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function setStatus(text) {
+  statusEl.textContent = text;
+}
+
+function clearReadyTimer() {
+  if (state.readyTimer) {
+    window.clearTimeout(state.readyTimer);
+    state.readyTimer = null;
+  }
+}
+
+function resetVideo() {
+  try {
+    video.pause();
+  } catch (_) {
+  }
+
+  video.removeAttribute("src");
+  video.srcObject = null;
+  video.load();
+}
+
+function teardownAdapter() {
+  clearReadyTimer();
+
+  if (state.adapter && typeof state.adapter.stop === "function") {
+    try {
+      state.adapter.stop();
+    } catch (_) {
+    }
+  }
+
+  state.adapter = null;
+  state.ready = false;
+  resetVideo();
+}
+
+function fail(category, reason) {
+  teardownAdapter();
+  setStatus(session.protocol === "webrtc" ? "WebRTC 预览连接失败。" : "备用预览连接失败。");
+  send({ type: "playback_failed", deviceCode: session.deviceCode, protocol: session.protocol, category, reason, sourceUrl: session.sourceUrl });
+}
+
+function markReady() {
+  if (state.ready) {
+    return;
+  }
+
+  state.ready = true;
+  clearReadyTimer();
+  setStatus(session.protocol === "webrtc" ? "WebRTC 实时预览已连接。" : "备用预览已连接。");
+  send({ type: "playback_ready", deviceCode: session.deviceCode, protocol: session.protocol, sourceUrl: session.sourceUrl });
+}
+
+function startReadyTimer(seconds, category) {
+  clearReadyTimer();
+  state.readyTimer = window.setTimeout(() => {
+    if (!state.ready) {
+      fail(category || "ready_timeout", "ready timeout");
+    }
+  }, Math.max(4, seconds || 10) * 1000);
+}
+
+function waitForIceGatheringComplete(peer, timeoutMs) {
+  if (peer.iceGatheringState === "complete") {
+    return Promise.resolve();
+  }
+
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      peer.removeEventListener("icegatheringstatechange", handleStateChange);
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+      resolve();
+    };
+
+    const handleStateChange = () => {
+      if (peer.iceGatheringState === "complete") {
+        finish();
+      }
+    };
+
+    const timerId = window.setTimeout(finish, timeoutMs);
+    peer.addEventListener("icegatheringstatechange", handleStateChange);
+  });
+}
+
+function createWebRtcPlaybackHost() {
+  let peer = null;
+  let mediaStream = null;
+
+  return {
+    async start() {
+      if (!session.webRtcApiUrl) {
+        fail("webrtc_api_missing", "missing webrtc api url");
+        return;
+      }
+
+      setStatus("WebRTC 预览连接中。");
+      send({ type: "host_initialized", deviceCode: session.deviceCode, protocol: "webrtc" });
+
+      peer = new RTCPeerConnection({ bundlePolicy: "max-bundle", rtcpMuxPolicy: "require" });
+      mediaStream = new MediaStream();
+      video.srcObject = mediaStream;
+
+      peer.ontrack = event => {
+        mediaStream.addTrack(event.track);
+        video.play().catch(() => {});
+      };
+
+      peer.onconnectionstatechange = () => {
+        if (peer.connectionState === "connected") {
+          video.play().catch(() => {});
+          markReady();
+          return;
+        }
+
+        if (!state.ready && ["failed", "disconnected", "closed"].includes(peer.connectionState)) {
+          fail("webrtc_connection_failed", peer.connectionState);
+        }
+      };
+
+      peer.oniceconnectionstatechange = () => {
+        if (!state.ready && ["failed", "disconnected", "closed"].includes(peer.iceConnectionState)) {
+          fail("webrtc_ice_failed", peer.iceConnectionState);
+        }
+      };
+
+      peer.addTransceiver("audio", { direction: "recvonly" });
+      peer.addTransceiver("video", { direction: "recvonly" });
+
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      await waitForIceGatheringComplete(peer, 1500);
+
+      const payload = JSON.stringify({
+        api: session.webRtcApiUrl,
+        streamurl: session.sourceUrl,
+        clientip: null,
+        sdp: peer.localDescription ? peer.localDescription.sdp : null
+      });
+
+      if (!peer.localDescription || !peer.localDescription.sdp) {
+        fail("webrtc_offer_missing", "missing local description");
+        return;
+      }
+
+      startReadyTimer(session.readyTimeoutSeconds, "webrtc_ready_timeout");
+
+      const response = await fetch(session.webRtcApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      });
+      const body = await response.text();
+
+      if (!response.ok) {
+        fail("webrtc_answer_failed", `http_${response.status}`);
+        return;
+      }
+
+      const result = JSON.parse(body);
+      if (!result || result.code !== 0 || !result.sdp) {
+        fail("webrtc_answer_failed", result && (result.msg || result.message) ? result.msg || result.message : "missing answer");
+        return;
+      }
+
+      await peer.setRemoteDescription({ type: "answer", sdp: result.sdp });
+    },
+
+    stop() {
+      if (peer) {
+        try {
+          peer.ontrack = null;
+          peer.onconnectionstatechange = null;
+          peer.oniceconnectionstatechange = null;
+          peer.close();
+        } catch (_) {
+        }
+      }
+
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => {
+          try {
+            track.stop();
+          } catch (_) {
+          }
+        });
+      }
+
+      peer = null;
+      mediaStream = null;
+    }
+  };
+}
+
+function createMediaPlaybackHost(kind) {
+  let cleanup = null;
+
+  return {
+    async start() {
+      send({ type: "host_initialized", deviceCode: session.deviceCode, protocol: kind });
+      setStatus("正在建立备用预览。");
+
+      if (kind === "flv") {
+        if (!(window.mpegts && window.mpegts.isSupported())) {
+          fail("flv_not_supported", "mpegts.js unavailable");
+          return;
+        }
+
+        const player = window.mpegts.createPlayer({ type: "flv", isLive: true, url: session.sourceUrl });
+        player.attachMediaElement(video);
+        player.load();
+        player.play().catch(() => fail("flv_play_failed", "play failed"));
+        player.on(window.mpegts.Events.ERROR, () => fail("flv_stream_failed", "stream failed"));
+        cleanup = () => {
+          try { player.pause(); } catch (_) {}
+          try { player.unload(); } catch (_) {}
+          try { player.detachMediaElement(); } catch (_) {}
+          try { player.destroy(); } catch (_) {}
+        };
+        startReadyTimer(session.readyTimeoutSeconds, "flv_ready_timeout");
+        return;
+      }
+
+      if (kind === "hls") {
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = session.sourceUrl;
+          video.play().catch(() => fail("hls_play_failed", "play failed"));
+          cleanup = () => resetVideo();
+          startReadyTimer(session.readyTimeoutSeconds, "hls_ready_timeout");
+          return;
+        }
+
+        if (!(window.Hls && window.Hls.isSupported())) {
+          fail("hls_not_supported", "hls.js unavailable");
+          return;
+        }
+
+        const hls = new Hls({ liveDurationInfinity: true, enableWorker: true });
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data && data.fatal) {
+            fail("hls_stream_failed", data.details || "stream failed");
+          }
+        });
+        hls.loadSource(session.sourceUrl);
+        hls.attachMedia(video);
+        video.play().catch(() => fail("hls_play_failed", "play failed"));
+        cleanup = () => {
+          try { hls.destroy(); } catch (_) {}
+        };
+        startReadyTimer(session.readyTimeoutSeconds, "hls_ready_timeout");
+        return;
+      }
+
+      fail("unsupported_protocol", kind);
+    },
+
+    stop() {
+      if (cleanup) {
+        try {
+          cleanup();
+        } catch (_) {
+        }
+      }
+
+      cleanup = null;
+    }
+  };
+}
+
+video.addEventListener("playing", () => markReady());
+video.addEventListener("error", () => {
+  if (!state.ready) {
+    fail("media_error", "video error");
+  }
+});
+
+window.addEventListener("beforeunload", () => teardownAdapter());
+
+(async function bootstrap() {
+  send({ type: "navigation_started", deviceCode: session.deviceCode, protocol: session.protocol, sourceUrl: session.sourceUrl, title: session.title });
+
+  if (session.protocol === "h5") {
+    window.location.href = session.sourceUrl;
+    return;
+  }
+
+  state.adapter = session.protocol === "webrtc"
+    ? createWebRtcPlaybackHost()
+    : createMediaPlaybackHost(session.protocol);
+
+  if (!state.adapter) {
+    fail("unsupported_protocol", session.protocol);
+    return;
+  }
+
+  try {
+    await state.adapter.start();
+  } catch (error) {
+    fail("host_start_failed", error && error.message ? error.message : String(error));
+  }
 })();
 </script>
 </body>

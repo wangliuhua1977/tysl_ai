@@ -10,13 +10,16 @@ namespace Tysl.Ai.UI.Views;
 public partial class ShellWindow : Window
 {
     private readonly ILocalDiagnosticService diagnosticService;
+    private readonly ISitePreviewService sitePreviewService;
     private SiteEditorDialog? editorDialog;
     private ShellViewModel? shellViewModel;
 
     public ShellWindow(
         AmapHostConfiguration mapHostConfiguration,
+        ISitePreviewService sitePreviewService,
         ILocalDiagnosticService diagnosticService)
     {
+        this.sitePreviewService = sitePreviewService ?? throw new ArgumentNullException(nameof(sitePreviewService));
         this.diagnosticService = diagnosticService ?? throw new ArgumentNullException(nameof(diagnosticService));
         InitializeComponent();
 
@@ -24,6 +27,11 @@ public partial class ShellWindow : Window
         AmapHost.PointSelected += HandleMapPointSelected;
         AmapHost.MapClicked += HandleMapClicked;
         AmapHost.RenderedPointsUpdated += HandleRenderedPointsUpdated;
+        PreviewHost.DiagnosticService = this.diagnosticService;
+        PreviewHost.PreviewService = this.sitePreviewService;
+        PreviewHost.HostInitialized += HandlePreviewHostInitialized;
+        PreviewHost.PlaybackReady += HandlePreviewPlaybackReady;
+        PreviewHost.PlaybackFailed += HandlePreviewPlaybackFailed;
 
         DataContextChanged += OnDataContextChanged;
         Closing += OnClosing;
@@ -61,6 +69,26 @@ public partial class ShellWindow : Window
     private void HandleRenderedPointsUpdated(object? sender, MapRenderedPointsEventArgs e)
     {
         shellViewModel?.HandleMapPointsRendered(e.Points);
+    }
+
+    private void HandlePreviewPlaybackReady(object? sender, PreviewPlaybackReadyEventArgs e)
+    {
+        shellViewModel?.HandlePreviewPlaybackReady(e.DeviceCode, e.PlaybackSessionId, e.Protocol);
+    }
+
+    private void HandlePreviewHostInitialized(object? sender, PreviewHostInitializedEventArgs e)
+    {
+        shellViewModel?.HandlePreviewHostInitialized(e.DeviceCode, e.PlaybackSessionId, e.Protocol);
+    }
+
+    private void HandlePreviewPlaybackFailed(object? sender, PreviewPlaybackFailedEventArgs e)
+    {
+        shellViewModel?.HandlePreviewPlaybackFailed(
+            e.DeviceCode,
+            e.PlaybackSessionId,
+            e.Protocol,
+            e.Category,
+            e.Reason);
     }
 
     private void HandleEditorDialogRequested(object? sender, SiteEditorDialogRequestedEventArgs e)
@@ -136,6 +164,9 @@ public partial class ShellWindow : Window
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
+        shellViewModel?.PrepareForShutdown();
+        PreviewHost.SessionJson = null;
+
         if (editorDialog is not null)
         {
             editorDialog.Closed -= HandleEditorDialogClosed;
@@ -152,7 +183,11 @@ public partial class ShellWindow : Window
         AmapHost.PointSelected -= HandleMapPointSelected;
         AmapHost.MapClicked -= HandleMapClicked;
         AmapHost.RenderedPointsUpdated -= HandleRenderedPointsUpdated;
+        PreviewHost.HostInitialized -= HandlePreviewHostInitialized;
+        PreviewHost.PlaybackReady -= HandlePreviewPlaybackReady;
+        PreviewHost.PlaybackFailed -= HandlePreviewPlaybackFailed;
         AmapHost.Dispose();
+        PreviewHost.Dispose();
 
         if (editorDialog is not null)
         {

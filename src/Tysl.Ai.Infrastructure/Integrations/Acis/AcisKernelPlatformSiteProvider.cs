@@ -11,6 +11,7 @@ namespace Tysl.Ai.Infrastructure.Integrations.Acis;
 public sealed class AcisKernelPlatformSiteProvider :
     IPlatformSiteProvider,
     IPlatformConnectionStateProvider,
+    IPlatformPreviewProvider,
     IDisposable
 {
     private const int CatalogPageSize = 50;
@@ -145,7 +146,103 @@ public sealed class AcisKernelPlatformSiteProvider :
                     "ACIS configuration unavailable."));
         }
 
-        return kernel.ResolvePreviewAsync(deviceCode, AcisPreviewIntent.Inspection, cancellationToken);
+        return kernel.ResolvePreviewAsync(deviceCode, AcisPreviewIntent.Inspection, cancellationToken: cancellationToken);
+    }
+
+    public async Task<SitePreviewResolveResult> ResolvePreviewAsync(
+        string deviceCode,
+        IReadOnlyList<SitePreviewProtocol> protocolOrder,
+        CancellationToken cancellationToken = default)
+    {
+        if (kernel is null)
+        {
+            return new SitePreviewResolveResult
+            {
+                IsSuccess = false,
+                AttemptedProtocols = protocolOrder.ToArray(),
+                FailureReason = "预览服务未配置。"
+            };
+        }
+
+        var resolution = await kernel.ResolvePreviewAsync(
+            deviceCode,
+            AcisPreviewIntent.ClickPreview,
+            protocolOrder.Select(ToProtocolKey).ToArray(),
+            cancellationToken);
+
+        if (!resolution.IsSuccess || string.IsNullOrWhiteSpace(resolution.PreviewUrl))
+        {
+            return new SitePreviewResolveResult
+            {
+                IsSuccess = false,
+                AttemptedProtocols = resolution.AttemptedProtocols.Select(ToPreviewProtocol).ToArray(),
+                FailureReason = resolution.FailureReason
+            };
+        }
+
+        var selectedProtocol = ToPreviewProtocol(resolution.ParsedProtocolType ?? resolution.SelectedProtocol);
+        var attemptedProtocols = resolution.AttemptedProtocols.Select(ToPreviewProtocol).ToArray();
+        var webRtcUrlAcquired = selectedProtocol == SitePreviewProtocol.WebRtc
+                                && !string.IsNullOrWhiteSpace(resolution.PreviewUrl);
+
+        if (webRtcUrlAcquired)
+        {
+            await TryWriteDiagnosticAsync(
+                "Preview",
+                $"WebRTC URL acquired: deviceCode={resolution.DeviceCode}, attempted={string.Join(">", resolution.AttemptedProtocols)}, url={resolution.PreviewUrl}",
+                cancellationToken);
+        }
+
+        return new SitePreviewResolveResult
+        {
+            IsSuccess = true,
+            AttemptedProtocols = attemptedProtocols,
+            Session = new SitePreviewSession
+            {
+                PlaybackSessionId = Guid.NewGuid().ToString("N"),
+                DeviceCode = resolution.DeviceCode,
+                SelectedProtocol = selectedProtocol,
+                AttemptedProtocols = attemptedProtocols,
+                SourceUrl = resolution.PreviewUrl,
+                WebRtcApiUrl = selectedProtocol == SitePreviewProtocol.WebRtc
+                    ? AcisApiKernel.BuildWebRtcPlayApiUrl(resolution.PreviewUrl)
+                    : null,
+                WebRtcUrlAcquired = webRtcUrlAcquired,
+                ReadyTimeoutSeconds = selectedProtocol == SitePreviewProtocol.WebRtc ? 12 : 10,
+                UsedFallback = attemptedProtocols.Length > 0 && selectedProtocol != attemptedProtocols[0]
+            }
+        };
+    }
+
+    public async Task<WebRtcPlaybackNegotiationResult> NegotiateWebRtcAsync(
+        string deviceCode,
+        string apiUrl,
+        string streamUrl,
+        string offerSdp,
+        CancellationToken cancellationToken = default)
+    {
+        if (kernel is null)
+        {
+            return new WebRtcPlaybackNegotiationResult
+            {
+                IsSuccess = false,
+                ApiUrl = apiUrl,
+                ResponseCode = -1,
+                FailureReason = "预览服务未配置。"
+            };
+        }
+
+        var result = await kernel.NegotiateWebRtcPlayAsync(apiUrl, streamUrl, offerSdp, cancellationToken);
+        return new WebRtcPlaybackNegotiationResult
+        {
+            IsSuccess = result.IsSuccess,
+            ApiUrl = result.ApiUrl,
+            AnswerSdp = result.AnswerSdp,
+            ResponseCode = result.ResponseCode,
+            SessionId = result.SessionId,
+            Server = result.Server,
+            FailureReason = result.IsSuccess ? null : result.FailureReason
+        };
     }
 
     public Task WriteDiagnosticAsync(
@@ -900,6 +997,30 @@ public sealed class AcisKernelPlatformSiteProvider :
     private static string? NormalizeText(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string ToProtocolKey(SitePreviewProtocol protocol)
+    {
+        return protocol switch
+        {
+            SitePreviewProtocol.WebRtc => "webrtc",
+            SitePreviewProtocol.Flv => "flv",
+            SitePreviewProtocol.Hls => "hls",
+            SitePreviewProtocol.H5 => "h5",
+            _ => "unknown"
+        };
+    }
+
+    private static SitePreviewProtocol ToPreviewProtocol(string? protocol)
+    {
+        return protocol?.Trim().ToLowerInvariant() switch
+        {
+            "webrtc" => SitePreviewProtocol.WebRtc,
+            "flv" => SitePreviewProtocol.Flv,
+            "hls" => SitePreviewProtocol.Hls,
+            "h5" => SitePreviewProtocol.H5,
+            _ => SitePreviewProtocol.Unknown
+        };
     }
 
     private sealed record CatalogCandidate(
