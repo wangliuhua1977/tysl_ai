@@ -77,6 +77,9 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
                 await Task.Delay(350).ConfigureAwait(false);
             }
 
+            await WriteWebRtcSuccessMetricsAsync(results).ConfigureAwait(false);
+            await WriteFallbackSampleAsync(results).ConfigureAwait(false);
+
             var directSuccess = results.FirstOrDefault(result => result.IsSuccess && result.FinalProtocol == SitePreviewProtocol.WebRtc);
             var fallbackSuccess = results.FirstOrDefault(result => result.IsSuccess && result.FinalProtocol is SitePreviewProtocol.Flv or SitePreviewProtocol.Hls);
             var alternate = results.FirstOrDefault(result =>
@@ -111,11 +114,15 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
             if (!string.IsNullOrWhiteSpace(directSuccess?.DeviceCode))
             {
                 await RunCloseWindowWhilePlayingScenarioAsync(directSuccess!.DeviceCode).ConfigureAwait(false);
-                return;
+            }
+            else
+            {
+                await WriteRunnerEventAsync("preview-acceptance-skip", "scenario=close-main-window-while-webrtc, reason=no_direct_webrtc_success_device");
+                await CloseMainWindowAsync().ConfigureAwait(false);
             }
 
-            await WriteRunnerEventAsync("preview-acceptance-skip", "scenario=close-main-window-while-webrtc, reason=no_direct_webrtc_success_device");
-            await CloseMainWindowAsync().ConfigureAwait(false);
+            await WriteSessionAndReleaseValidationAsync().ConfigureAwait(false);
+            await WriteExitChainValidationAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -280,6 +287,124 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
             "preview-acceptance-device-end",
             $"deviceCode={deviceCode}, success={result.IsSuccess}, preferredProtocol={ToProtocolKey(result.PreferredProtocol)}, finalProtocol={ToProtocolKey(result.FinalProtocol)}, fallbackTriggered={result.FallbackTriggered}, failureReason={result.FailureReason ?? "none"}, sessionId={result.LastSessionId ?? "none"}");
         return result;
+    }
+
+    private async Task WriteWebRtcSuccessMetricsAsync(IReadOnlyList<PreviewAttemptResult> results)
+    {
+        if (results.Count == 0)
+        {
+            await WriteRunnerEventAsync(
+                "preview-acceptance-webrtc-metrics",
+                "devices=0, resolved=0, preferredWebRtc=0, preferredWebRtcRate=0.00%, success=0, webrtcSuccess=0, webrtcSuccessRate=0.00%");
+            return;
+        }
+
+        var resolvedCount = results.Count(result => result.PreferredProtocol != SitePreviewProtocol.Unknown || result.FinalProtocol != SitePreviewProtocol.Unknown);
+        var preferredWebRtc = results.Count(result => result.PreferredProtocol == SitePreviewProtocol.WebRtc);
+        var successCount = results.Count(result => result.IsSuccess);
+        var webrtcSuccessCount = results.Count(result => result.IsSuccess && result.FinalProtocol == SitePreviewProtocol.WebRtc);
+        var preferredRate = preferredWebRtc * 100d / results.Count;
+        var webrtcSuccessRate = webrtcSuccessCount * 100d / results.Count;
+
+        await WriteRunnerEventAsync(
+            "preview-acceptance-webrtc-metrics",
+            FormattableString.Invariant(
+                $"devices={results.Count}, resolved={resolvedCount}, preferredWebRtc={preferredWebRtc}, preferredWebRtcRate={preferredRate:F2}%, success={successCount}, webrtcSuccess={webrtcSuccessCount}, webrtcSuccessRate={webrtcSuccessRate:F2}%"));
+    }
+
+    private async Task WriteFallbackSampleAsync(IReadOnlyList<PreviewAttemptResult> results)
+    {
+        var fallback = results.FirstOrDefault(result =>
+            result.IsSuccess
+            && result.PreferredProtocol == SitePreviewProtocol.WebRtc
+            && result.FinalProtocol is SitePreviewProtocol.Flv or SitePreviewProtocol.Hls
+            && result.FallbackTriggered);
+
+        if (fallback is null)
+        {
+            await WriteRunnerEventAsync(
+                "preview-acceptance-fallback-sample",
+                "status=missing, requirement=need_at_least_one_webrtc_fallback_success");
+            return;
+        }
+
+        await WriteRunnerEventAsync(
+            "preview-acceptance-fallback-sample",
+            $"status=ok, deviceCode={fallback.DeviceCode}, sessionId={fallback.LastSessionId ?? "none"}, preferredProtocol={ToProtocolKey(fallback.PreferredProtocol)}, finalProtocol={ToProtocolKey(fallback.FinalProtocol)}, failureReason={fallback.FailureReason ?? "none"}");
+    }
+
+    private async Task WriteSessionAndReleaseValidationAsync()
+    {
+        List<AcceptanceDiagnosticEvent> snapshot;
+        lock (syncRoot)
+        {
+            snapshot = [.. diagnosticEvents];
+        }
+
+        var playbackReadyEvents = snapshot
+            .Where(evt => evt.EventName == "preview-playback-ready" && !string.IsNullOrWhiteSpace(evt.GetValue("sessionId")))
+            .ToArray();
+        var resolvedSessionIds = snapshot
+            .Where(evt => evt.EventName == "preview-session-resolved")
+            .Select(evt => evt.GetValue("sessionId"))
+            .Where(sessionId => !string.IsNullOrWhiteSpace(sessionId))
+            .Select(sessionId => sessionId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var releasedSessionIds = snapshot
+            .Where(evt => evt.EventName == "preview-resources-released")
+            .Select(evt => evt.GetValue("sessionId"))
+            .Where(sessionId => !string.IsNullOrWhiteSpace(sessionId))
+            .Select(sessionId => sessionId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var readySessionsWithoutResolve = playbackReadyEvents
+            .Select(evt => evt.GetValue("sessionId")!)
+            .Where(sessionId => !resolvedSessionIds.Contains(sessionId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var readySessionsWithoutRelease = playbackReadyEvents
+            .Select(evt => evt.GetValue("sessionId")!)
+            .Where(sessionId => !releasedSessionIds.Contains(sessionId))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        await WriteRunnerEventAsync(
+            "preview-acceptance-session-trace",
+            $"resolvedSessions={resolvedSessionIds.Count}, readySessions={playbackReadyEvents.Length}, releasedSessions={releasedSessionIds.Count}, missingResolve={readySessionsWithoutResolve.Length}, missingRelease={readySessionsWithoutRelease.Length}");
+
+        if (readySessionsWithoutResolve.Length > 0)
+        {
+            await WriteRunnerEventAsync(
+                "preview-acceptance-session-trace-missing-resolve",
+                $"sessionIds={string.Join("|", readySessionsWithoutResolve)}");
+        }
+
+        if (readySessionsWithoutRelease.Length > 0)
+        {
+            await WriteRunnerEventAsync(
+                "preview-acceptance-session-trace-missing-release",
+                $"sessionIds={string.Join("|", readySessionsWithoutRelease)}");
+        }
+    }
+
+    private async Task WriteExitChainValidationAsync()
+    {
+        List<AcceptanceDiagnosticEvent> snapshot;
+        lock (syncRoot)
+        {
+            snapshot = [.. diagnosticEvents];
+        }
+
+        var closeWindowEvent = snapshot.LastOrDefault(evt => evt.EventName == "preview-acceptance-close-main-window");
+        var shutdownEvent = snapshot.LastOrDefault(evt => evt.EventName == "preview-shutdown-requested");
+        var releaseAfterShutdown = snapshot.LastOrDefault(evt =>
+            evt.EventName == "preview-resources-released"
+            && shutdownEvent is not null
+            && evt.OccurredAt >= shutdownEvent.OccurredAt);
+
+        await WriteRunnerEventAsync(
+            "preview-acceptance-exit-chain",
+            $"closedMainWindow={closeWindowEvent is not null}, shutdownRequested={shutdownEvent is not null}, releaseAfterShutdown={releaseAfterShutdown is not null}");
     }
 
     private async Task SelectDeviceAsync(string deviceCode)
