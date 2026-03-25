@@ -61,6 +61,7 @@ public partial class App : Application
             dispatchPolicyProvider,
             dispatchRecordRepository,
             repository,
+            runtimeStateRepository,
             platformSiteProvider,
             webhookSender);
         ISiteLocalProfileService siteLocalProfileService = new SiteLocalProfileService(repository);
@@ -111,11 +112,13 @@ public partial class App : Application
             && platformSiteProvider is not null
             && diagnosticService is LocalDiagnosticService localDiagnosticService)
         {
+            var targetDeviceCodes = ParsePreviewAcceptanceTargetDevices(e.Args);
             previewAcceptanceRunner = new PreviewAcceptanceRunner(
                 shellWindow,
                 shellViewModel,
                 platformSiteProvider,
-                localDiagnosticService);
+                localDiagnosticService,
+                targetDeviceCodes);
             previewAcceptanceRunner.Start();
         }
     }
@@ -212,11 +215,31 @@ public partial class App : Application
             IsConfigured = loadResult.IsReady,
             Key = options?.Key,
             SecurityJsCode = options?.SecurityJsCode,
-            MapStyle = string.IsNullOrWhiteSpace(options?.MapStyle) ? "default" : options.MapStyle,
+            MapStyle = string.IsNullOrWhiteSpace(options?.MapStyle) ? "amap://styles/grey" : options.MapStyle,
             Zoom = options?.Zoom is > 0 and <= 20 ? options.Zoom : 11,
             Center = options?.Center is { Length: 2 }
                 ? options.Center
                 : [120.585316, 30.028105]
         };
+    }
+
+    private static IReadOnlyList<string> ParsePreviewAcceptanceTargetDevices(string[] args)
+    {
+        foreach (var argument in args)
+        {
+            const string prefix = "--preview-acceptance-devices=";
+            if (!argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return argument[prefix.Length..]
+                .Split([',', ';', '|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(deviceCode => !string.IsNullOrWhiteSpace(deviceCode))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        return Array.Empty<string>();
     }
 }

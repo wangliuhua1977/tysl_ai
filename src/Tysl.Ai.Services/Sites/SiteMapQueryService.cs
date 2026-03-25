@@ -38,6 +38,9 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         var activeSites = mergeBundle.Sites
             .Where(site => !site.IsIgnored)
             .ToList();
+        var managedSites = activeSites
+            .Where(site => site.IsMonitored)
+            .ToList();
         var ignoredSites = mergeBundle.Sites
             .Where(site => site.IsIgnored)
             .ToList();
@@ -60,15 +63,16 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             PlatformStatusText = mergeBundle.ConnectionState.SummaryText,
             PlatformStatusDetailText = mergeBundle.ConnectionState.DetailText,
             IsPlatformConnected = mergeBundle.ConnectionState.IsConnected,
-            PointCount = activeSites.Count,
-            MonitoredCount = activeSites.Count(site => site.IsMonitored),
-            FaultCount = activeSites.Count(IsAttentionSite),
-            DispatchedCount = activeSites.Count(HasActiveDispatch),
+            PointCount = managedSites.Count,
+            MonitoredCount = managedSites.Count,
+            FaultCount = managedSites.Count(IsAttentionSite),
+            DispatchedCount = managedSites.Count(IsDispatchedSite),
+            PendingDispatchCount = managedSites.Count(IsPendingDispatchSite),
             CoverageSummary = new MapCoverageSummary
             {
-                TotalPointCount = activeSites.Count,
-                MappedPointCount = activeSites.Count(site => site.HasMapPoint),
-                UnmappedPointCount = activeSites.Count(site => !site.HasMapPoint),
+                TotalPointCount = managedSites.Count,
+                MappedPointCount = managedSites.Count(site => site.HasMapPoint),
+                UnmappedPointCount = managedSites.Count(site => !site.HasMapPoint),
                 FilteredPointCount = filteredSites.Count,
                 CurrentVisiblePointCount = visibleMapSites.Count,
                 FilteredUnmappedPointCount = filteredSites.Count(site => !site.HasMapPoint)
@@ -331,12 +335,14 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
     {
         return filter switch
         {
-            SiteDashboardFilter.Fault => IsAttentionSite(site),
+            SiteDashboardFilter.All => site.IsMonitored,
+            SiteDashboardFilter.Fault => site.IsMonitored && IsAttentionSite(site),
+            SiteDashboardFilter.Normal => site.IsMonitored && !IsAttentionSite(site),
             SiteDashboardFilter.Monitored => site.IsMonitored,
             SiteDashboardFilter.Disposed => site.HasDispatchRecord,
             SiteDashboardFilter.Unmapped => !site.HasMapPoint,
             SiteDashboardFilter.Ignored => site.IsIgnored,
-            _ => true
+            _ => site.IsMonitored
         };
     }
 
@@ -407,6 +413,28 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         return site.HasDispatchRecord
             && !site.RecoveredAt.HasValue
             && site.DispatchStatus != DispatchStatus.None;
+    }
+
+    private static bool IsDispatchedSite(SiteMergedView site)
+    {
+        if (site.IsIgnored || site.RecoveredAt.HasValue)
+        {
+            return false;
+        }
+
+        return site.DispatchStatus == DispatchStatus.Dispatched;
+    }
+
+    private static bool IsPendingDispatchSite(SiteMergedView site)
+    {
+        if (site.IsIgnored || site.RecoveredAt.HasValue)
+        {
+            return false;
+        }
+
+        return site.DispatchStatus is DispatchStatus.PendingDispatch
+            or DispatchStatus.SendFailed
+            or DispatchStatus.WebhookNotConfigured;
     }
 
     private static bool IsRecentlyRecovered(SiteMergedView site)

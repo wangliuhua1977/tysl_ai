@@ -33,7 +33,7 @@
         }
 
         return text.length > maxLength
-            ? `${text.slice(0, Math.max(1, maxLength - 1))}…`
+            ? `${text.slice(0, Math.max(1, maxLength - 3))}...`
             : text;
     }
 
@@ -86,17 +86,20 @@
 
     function buildMarkerContent(point, selected) {
         const selectedClass = selected ? " is-selected" : "";
+        const abnormalClass = point.isAbnormal ? " is-abnormal" : "";
         const dispatchStateKey = escapeHtml(point.dispatchStateKey || "none");
-        const visualState = escapeHtml(point.visualState || "normal");
         const label = escapeHtml(resolvePointName(point));
+        const title = escapeHtml(point.displayName || point.deviceName || point.deviceCode);
 
         return [
-            `<div class="marker-node marker-${visualState}${selectedClass}">`,
-            "  <span class=\"marker-icon\">",
-            "    <span class=\"marker-icon__core\"></span>",
+            `<div class="marker-node${selectedClass}${abnormalClass}">`,
+            "  <span class=\"marker-camera\">",
+            "    <span class=\"marker-camera__halo\"></span>",
+            "    <span class=\"marker-camera__body\"></span>",
+            "    <span class=\"marker-camera__stand\"></span>",
             `    <span class="marker-state marker-state--${dispatchStateKey}"></span>`,
             "  </span>",
-            `  <span class="marker-label" title="${label}">${label}</span>`,
+            `  <span class="marker-label" title="${title}">${label}</span>`,
             "</div>"
         ].join("");
     }
@@ -114,8 +117,16 @@
         hostState.markers.forEach((entry, deviceCode) => {
             const selected = deviceCode === hostState.selectedDeviceCode;
             entry.marker.setContent(buildMarkerContent(entry.point, selected));
-            entry.marker.setzIndex(selected ? 160 : 120);
+            entry.marker.setzIndex(resolveMarkerZIndex(entry.point, selected));
         });
+    }
+
+    function resolveMarkerZIndex(point, selected) {
+        if (selected) {
+            return 240;
+        }
+
+        return point && point.isAbnormal ? 188 : 120;
     }
 
     function convertBatch(points, type) {
@@ -325,7 +336,7 @@
                 content: buildMarkerContent(point, selected),
                 offset: new AMap.Pixel(markerOffset.x, markerOffset.y),
                 position: position,
-                zIndex: selected ? 160 : 120
+                zIndex: resolveMarkerZIndex(point, selected)
             });
 
             marker.on("click", function () {
@@ -394,6 +405,7 @@
         const mapStyle = resolveMapStyle(hostState.currentMapStyle);
         const options = {
             center: viewport?.center || hostState.config.center || [120.585316, 30.028105],
+            features: ["bg", "building"],
             pitch: 0,
             resizeEnable: true,
             rotateEnable: false,

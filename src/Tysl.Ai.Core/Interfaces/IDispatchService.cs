@@ -10,5 +10,7 @@ public interface IDispatchService
         SiteRuntimeState currentState,
         CancellationToken cancellationToken = default);
 
+    Task ManualDispatchAsync(string deviceCode, CancellationToken cancellationToken = default);
+
     Task ConfirmRecoveryAsync(long dispatchRecordId, CancellationToken cancellationToken = default);
 }

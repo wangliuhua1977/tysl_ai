@@ -17,10 +17,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     private static readonly IReadOnlyList<MapStyleOption> BuiltInMapStyleOptions =
     [
-        new("default", "默认地图"),
-        new("amap://styles/darkblue", "深色科技风"),
-        new("amap://styles/whitesmoke", "简洁浅色风"),
-        new("amap://styles/grey", "灰阶监控风")
+        new("amap://styles/grey", "低噪值守风"),
+        new("amap://styles/darkblue", "深蓝值守风"),
+        new("amap://styles/whitesmoke", "浅灰简洁风"),
+        new("default", "原生地图")
     ];
 
     private readonly SemaphoreSlim dashboardLoadLock = new(1, 1);
@@ -43,23 +43,27 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private bool hasIgnoredPoints;
     private bool hasUnmappedPoints;
     private bool hasVisiblePoints;
+    private bool isSecondaryPanelOpen;
     private string inspectionStatusDetail = "当前无纳入静默巡检的点位。";
     private string inspectionStatusText = "巡检待机";
     private bool isCoordinatePickActive;
     private bool isDisposed;
     private bool isFilterPanelExpanded = true;
-    private string mapCoverageDetailText = "“全部”包含全部点位；仅具备可用显示坐标的点位会落图。";
+    private string mapCoverageDetailText = "地图主视图只保留纳管点位；绿色正常，红色异常。";
     private string mapEmptyStateText;
     private string mapHostStateJson = "{\"points\":[],\"candidateCoordinate\":null,\"coordinatePickActive\":false}";
     private string mapInteractionHint;
     private int mappedPointCount;
     private int monitoredCount;
+    private int normalCount;
+    private int pendingDispatchCount;
     private int pointCount;
     private string platformStatusDetail = "正在准备平台设备源。";
     private string platformStatusText = "平台准备中";
     private SitePreviewSession? previewSession;
     private CancellationTokenSource? previewResolveCts;
     private PreviewPlaybackState previewPlaybackState = PreviewPlaybackState.Idle;
+    private bool isPreviewPlaybackReady;
     private SitePreviewProtocol previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
     private string? previewFallbackFailureReason;
     private SitePreviewProtocol previewPreferredProtocol = SitePreviewProtocol.Unknown;
@@ -67,9 +71,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private string? acceptanceForcedFailureCategory;
     private string? acceptanceForcedFailureReason;
     private bool previewRequested;
-    private string previewProtocolText = "待开启";
+    private string previewProtocolText = string.Empty;
     private string? previewSessionJson;
-    private string previewStatusText = "点击开启预览。";
+    private string previewStatusText = "选择点位后查看画面";
     private string searchText = string.Empty;
     private SiteDetailViewModel? selectedDetail;
     private SiteMergedView? selectedDetailSource;
@@ -77,6 +81,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private string selectedMapStyleKey;
     private SiteMapPointViewModel? selectedPoint;
     private string? selectedPointDeviceCode;
+    private SecondaryEntryMode secondaryEntryMode = SecondaryEntryMode.Unmapped;
     private int unmappedPointCount;
 
     public ShellViewModel(
@@ -105,12 +110,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         Filters =
         [
-            new DashboardFilterOption("全部", SiteDashboardFilter.All),
+            new DashboardFilterOption("全部纳管", SiteDashboardFilter.All),
             new DashboardFilterOption("异常", SiteDashboardFilter.Fault),
-            new DashboardFilterOption("已纳管", SiteDashboardFilter.Monitored),
-            new DashboardFilterOption("已处置", SiteDashboardFilter.Disposed),
-            new DashboardFilterOption("未落图", SiteDashboardFilter.Unmapped),
-            new DashboardFilterOption("已忽略", SiteDashboardFilter.Ignored)
+            new DashboardFilterOption("正常", SiteDashboardFilter.Normal)
         ];
 
         selectedFilter = Filters[0];
@@ -123,6 +125,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         EditSelectedSiteCommand = new AsyncRelayCommand(OpenEditEditorAsync, () => SelectedDetail is not null);
         OpenPreviewCommand = new AsyncRelayCommand(OpenPreviewAsync, () => SelectedDetail is not null);
         ClosePreviewCommand = new RelayCommand(ClosePreview, () => PreviewSessionJson is not null || previewRequested);
+        ManualDispatchCommand = new AsyncRelayCommand(ManualDispatchAsync, () => SelectedDetail?.CanManualDispatch == true);
         ToggleMonitoringCommand = new AsyncRelayCommand(ToggleMonitoringAsync, () => SelectedDetail is not null);
         ToggleIgnoreCommand = new AsyncRelayCommand(ToggleIgnoreAsync, () => SelectedDetail is not null);
         ConfirmRecoveryCommand = new AsyncRelayCommand(ConfirmRecoveryAsync, () => SelectedDetail?.CanConfirmRecovery == true);
@@ -131,6 +134,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         SelectUnmappedPointCommand = new RelayCommand<UnmappedPointDigestViewModel>(SelectUnmappedPoint);
         SelectIgnoredPointCommand = new RelayCommand<IgnoredPointDigestViewModel>(SelectIgnoredPoint);
         EditUnmappedPointCommand = new RelayCommand<UnmappedPointDigestViewModel>(EditUnmappedPoint);
+        OpenUnmappedSecondaryEntryCommand = new RelayCommand(OpenUnmappedSecondaryEntry);
+        OpenIgnoredSecondaryEntryCommand = new RelayCommand(OpenIgnoredSecondaryEntry);
+        CloseSecondaryPanelCommand = new RelayCommand(() => IsSecondaryPanelOpen = false);
 
         refreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -176,10 +182,22 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref faultCount, value);
     }
 
+    public int NormalCount
+    {
+        get => normalCount;
+        private set => SetProperty(ref normalCount, value);
+    }
+
     public int DispatchedCount
     {
         get => dispatchedCount;
         private set => SetProperty(ref dispatchedCount, value);
+    }
+
+    public int PendingDispatchCount
+    {
+        get => pendingDispatchCount;
+        private set => SetProperty(ref pendingDispatchCount, value);
     }
 
     public int CurrentMapVisibleCount
@@ -210,6 +228,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     public RelayCommand ClosePreviewCommand { get; }
 
+    public AsyncRelayCommand ManualDispatchCommand { get; }
+
     public AsyncRelayCommand ToggleMonitoringCommand { get; }
 
     public AsyncRelayCommand ToggleIgnoreCommand { get; }
@@ -225,6 +245,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public RelayCommand<IgnoredPointDigestViewModel> SelectIgnoredPointCommand { get; }
 
     public RelayCommand<UnmappedPointDigestViewModel> EditUnmappedPointCommand { get; }
+
+    public RelayCommand OpenUnmappedSecondaryEntryCommand { get; }
+
+    public RelayCommand OpenIgnoredSecondaryEntryCommand { get; }
+
+    public RelayCommand CloseSecondaryPanelCommand { get; }
 
     public bool IsFilterPanelExpanded
     {
@@ -251,7 +277,6 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref selectedFilter, value))
             {
-                OnPropertyChanged(nameof(IsIgnoredFilterSelected));
                 OnPropertyChanged(nameof(SecondarySectionTitle));
                 OnPropertyChanged(nameof(SecondarySectionDetail));
                 OnPropertyChanged(nameof(SecondarySectionEmptyText));
@@ -295,11 +320,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             EditSelectedSiteCommand.NotifyCanExecuteChanged();
             OpenPreviewCommand.NotifyCanExecuteChanged();
             ClosePreviewCommand.NotifyCanExecuteChanged();
+            ManualDispatchCommand.NotifyCanExecuteChanged();
             ToggleMonitoringCommand.NotifyCanExecuteChanged();
             ToggleIgnoreCommand.NotifyCanExecuteChanged();
             ConfirmRecoveryCommand.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(MonitorToggleText));
             OnPropertyChanged(nameof(IgnoreToggleText));
+            RaiseMediaStatePropertiesChanged();
         }
     }
 
@@ -348,7 +375,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public string? PreviewSessionJson
     {
         get => previewSessionJson;
-        private set => SetProperty(ref previewSessionJson, value);
+        private set
+        {
+            if (SetProperty(ref previewSessionJson, value))
+            {
+                RaiseMediaStatePropertiesChanged();
+            }
+        }
     }
 
     public string InspectionStatusText
@@ -424,6 +457,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     public string IgnoreToggleText => SelectedDetail?.IsIgnored == true ? "恢复关注" : "忽略点位";
 
+    public string ManualDispatchText => "派单到企业微信";
+
+    public string DispatchQueueText => $"{DispatchedCount} / {PendingDispatchCount}";
+
     public string MapCoverageText => $"当前地图显示 {CurrentMapVisibleCount} / 总点位 {PointCount}";
 
     public string MapCoverageDetailText
@@ -436,21 +473,67 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     public string UnmappedSectionDetail => "点击条目联动详情，可直接进入编辑补充信息。";
 
-    public bool IsIgnoredFilterSelected => SelectedFilter.Value == SiteDashboardFilter.Ignored;
+    public bool IsSecondaryPanelOpen
+    {
+        get => isSecondaryPanelOpen;
+        private set => SetProperty(ref isSecondaryPanelOpen, value);
+    }
 
-    public string SecondarySectionTitle => IsIgnoredFilterSelected
+    public bool IsIgnoredSecondaryMode => secondaryEntryMode == SecondaryEntryMode.Ignored;
+
+    public string SecondarySectionTitle => IsIgnoredSecondaryMode
         ? $"已忽略点位 {IgnoredPoints.Count}"
         : $"未落图治理 {UnmappedPointCount}";
 
-    public string SecondarySectionDetail => IsIgnoredFilterSelected
+    public string SecondarySectionDetail => IsIgnoredSecondaryMode
         ? "已忽略点位已退出地图、巡检和派单主线，可在右侧详情中恢复关注。"
         : "点击条目联动详情，可直接进入编辑补充信息。";
 
-    public string SecondarySectionEmptyText => IsIgnoredFilterSelected
+    public string SecondarySectionEmptyText => IsIgnoredSecondaryMode
         ? "当前无已忽略点位。"
         : "当前无未落图点位。";
 
-    public bool HasSecondaryItems => IsIgnoredFilterSelected ? HasIgnoredPoints : HasUnmappedPoints;
+    public bool HasSecondaryItems => IsIgnoredSecondaryMode ? HasIgnoredPoints : HasUnmappedPoints;
+
+    public bool IsPreviewPlaybackReady
+    {
+        get => isPreviewPlaybackReady;
+        private set
+        {
+            if (SetProperty(ref isPreviewPlaybackReady, value))
+            {
+                RaiseMediaStatePropertiesChanged();
+            }
+        }
+    }
+
+    public bool HasPreviewSession => !string.IsNullOrWhiteSpace(PreviewSessionJson);
+
+    public bool HasPreviewProtocolBadge => HasPreviewSession && !string.IsNullOrWhiteSpace(PreviewProtocolText);
+
+    public bool HasSnapshotFallback => !IsPreviewPlaybackReady && SelectedDetail?.HasSnapshot == true;
+
+    public bool ShowMediaSurface => IsPreviewPlaybackReady || HasSnapshotFallback;
+
+    public bool ShowMediaEmptyState => !IsPreviewPlaybackReady && !HasSnapshotFallback;
+
+    public string MediaEmptyStateText
+    {
+        get
+        {
+            if (HasPreviewSession)
+            {
+                return "正在连接画面";
+            }
+
+            if (SelectedDetail is null)
+            {
+                return "选择点位后查看画面";
+            }
+
+            return "暂无实时视频或截图";
+        }
+    }
 
     public void HandleMapClicked(double longitude, double latitude)
     {
@@ -481,7 +564,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _ = SelectDeviceAsync(deviceCode.Trim());
+        _ = HandleMapPointSelectedAsync(deviceCode.Trim());
     }
 
     public void HandleMapPointsRendered(IReadOnlyList<MapHostRenderedPointDto> points)
@@ -521,10 +604,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
 
         var selectedProtocol = ParsePreviewProtocol(protocol);
-        PreviewProtocolText = $"当前协议：{GetProtocolLabel(selectedProtocol)}";
+        PreviewProtocolText = GetProtocolBadgeText(selectedProtocol);
         PreviewStatusText = selectedProtocol == SitePreviewProtocol.WebRtc
-            ? "WebRTC 实时预览已连接。"
-            : $"WebRTC 不可用，已切换备用预览（{GetProtocolLabel(selectedProtocol)}）。";
+            ? "实时预览中。"
+            : $"已切换 {GetProtocolLabel(selectedProtocol)} 预览。";
     }
 
     private void HandlePreviewPlaybackFailedLegacy(string protocol)
@@ -553,7 +636,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
-        PreviewProtocolText = "待开启";
+        PreviewProtocolText = "未开启";
         PreviewStatusText = "预览暂不可用，请稍后重试。";
         PreviewSessionJson = null;
         previewSession = null;
@@ -574,8 +657,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
 
         previewPlaybackState = PreviewPlaybackState.WebRtcHostInitializing;
-        PreviewProtocolText = $"当前协议：{GetProtocolLabel(initializedProtocol)}";
-        PreviewStatusText = "WebRTC 预览连接中。";
+        IsPreviewPlaybackReady = false;
+        PreviewProtocolText = GetProtocolBadgeText(initializedProtocol);
+        PreviewStatusText = "正在连接";
     }
 
     public void HandlePreviewPlaybackReady(string deviceCode, string playbackSessionId, string protocol)
@@ -594,11 +678,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             SitePreviewProtocol.Hls => PreviewPlaybackState.HlsPlaybackReady,
             _ => previewPlaybackState
         };
+        IsPreviewPlaybackReady = true;
 
-        PreviewProtocolText = $"当前协议：{GetProtocolLabel(selectedProtocol)}";
+        PreviewProtocolText = GetProtocolBadgeText(selectedProtocol);
         PreviewStatusText = selectedProtocol == SitePreviewProtocol.WebRtc
-            ? "WebRTC 实时预览已连接。"
-            : $"WebRTC 不可用，已切换备用预览（{GetProtocolLabel(selectedProtocol)}）。";
+            ? "实时预览"
+            : $"{GetProtocolLabel(selectedProtocol)} 备用";
         var preferredProtocol = GetEffectivePreferredProtocol(currentSession);
         var usedFallback = selectedProtocol != SitePreviewProtocol.WebRtc || currentSession.UsedFallback;
 
@@ -635,6 +720,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         var failedProtocol = ParsePreviewProtocol(protocol);
         var failureReason = BuildPreviewFailureReason(category, reason);
+        IsPreviewPlaybackReady = false;
         _ = WriteDiagnosticAsync(
             "preview-playback-failed",
             $"deviceCode={deviceCode}, sessionId={playbackSessionId}, protocol={protocol}, category={category ?? "unknown"}, reason={reason ?? "none"}");
@@ -659,7 +745,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             previewPlaybackState = PreviewPlaybackState.WebRtcPlaybackFailed;
             previewFallbackFailureProtocol = failedProtocol;
             previewFallbackFailureReason = failureReason;
-            PreviewStatusText = "WebRTC 不可用，正在切换备用预览。";
+            PreviewStatusText = "切换到 FLV";
             _ = WriteDiagnosticAsync(
                 "Preview",
                 $"fallback to flv: deviceCode={currentSession.DeviceCode}, sessionId={currentSession.PlaybackSessionId}, category={category ?? "unknown"}, reason={reason ?? "none"}");
@@ -672,7 +758,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             previewPlaybackState = PreviewPlaybackState.FallbackToHls;
             previewFallbackFailureProtocol = failedProtocol;
             previewFallbackFailureReason = failureReason;
-            PreviewStatusText = "FLV 不可用，正在切换 HLS 预览。";
+            PreviewStatusText = "切换到 HLS";
             _ = WriteDiagnosticAsync(
                 "Preview",
                 $"fallback to hls: deviceCode={currentSession.DeviceCode}, sessionId={currentSession.PlaybackSessionId}, category={category ?? "unknown"}, reason={reason ?? "none"}");
@@ -694,8 +780,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         previewPlaybackState = PreviewPlaybackState.Unavailable;
         previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
         previewFallbackFailureReason = null;
-        PreviewProtocolText = "待开启";
-        PreviewStatusText = "预览暂不可用，请稍后重试。";
+        PreviewProtocolText = string.Empty;
+        PreviewStatusText = "暂无实时画面";
         PreviewSessionJson = null;
         previewSession = null;
         ClosePreviewCommand.NotifyCanExecuteChanged();
@@ -882,7 +968,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             UnmappedPointCount = snapshot.CoverageSummary.UnmappedPointCount;
             MonitoredCount = snapshot.MonitoredCount;
             FaultCount = snapshot.FaultCount;
+            NormalCount = Math.Max(0, snapshot.MonitoredCount - snapshot.FaultCount);
             DispatchedCount = snapshot.DispatchedCount;
+            PendingDispatchCount = snapshot.PendingDispatchCount;
             CurrentMapVisibleCount = snapshot.CoverageSummary.CurrentVisiblePointCount;
             MapCoverageDetailText = BuildMapCoverageDetailText(snapshot.CoverageSummary, SelectedFilter.Value);
             UpdateOverviewStatus(snapshot);
@@ -890,6 +978,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             LastRefreshText = snapshot.LastRefreshedAt.ToLocalTime().ToString("HH:mm:ss");
             OnPropertyChanged(nameof(LastRefreshText));
             OnPropertyChanged(nameof(MapCoverageText));
+            OnPropertyChanged(nameof(DispatchQueueText));
+            OnPropertyChanged(nameof(ManualDispatchText));
             OnPropertyChanged(nameof(UnmappedSectionTitle));
             OnPropertyChanged(nameof(SecondarySectionTitle));
             OnPropertyChanged(nameof(SecondarySectionDetail));
@@ -939,25 +1029,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            if (SelectedFilter.Value == SiteDashboardFilter.Ignored)
-            {
-                if (IgnoredPoints.FirstOrDefault() is { } firstIgnoredPoint)
-                {
-                    await SelectDeviceAsync(firstIgnoredPoint.DeviceCode, notifyOnError);
-                    return;
-                }
-            }
-
             var firstVisiblePoint = VisiblePoints.FirstOrDefault();
             if (firstVisiblePoint is not null)
             {
                 SelectedPoint = firstVisiblePoint;
-                return;
-            }
-
-            if (UnmappedPoints.FirstOrDefault() is { } firstUnmappedPoint)
-            {
-                await SelectDeviceAsync(firstUnmappedPoint.DeviceCode, notifyOnError);
                 return;
             }
 
@@ -966,10 +1041,11 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             selectedDetailSource = null;
             SelectedDetail = null;
             CancelPreviewResolve();
+            IsPreviewPlaybackReady = false;
             previewSession = null;
             PreviewSessionJson = null;
-            PreviewProtocolText = "待开启";
-            PreviewStatusText = "选择点位后可开启预览。";
+            PreviewProtocolText = string.Empty;
+            PreviewStatusText = "选择点位后查看画面";
             ClosePreviewCommand.NotifyCanExecuteChanged();
             RefreshMapHostState();
         }
@@ -1029,6 +1105,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return Task.CompletedTask;
         }
 
+        if (HasActiveOrPendingPreview()
+            && previewSession is not null
+            && string.Equals(previewSession.DeviceCode, SelectedDetail.DeviceCode, StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.CompletedTask;
+        }
+
         previewRequested = true;
         return StartPreviewAsync(SelectedDetail.DeviceCode);
     }
@@ -1040,13 +1123,14 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         CancelPreviewResolve();
         ResetAcceptanceForcedPreviewFailure();
         previewPlaybackState = PreviewPlaybackState.Idle;
+        IsPreviewPlaybackReady = false;
         previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
         previewFallbackFailureReason = null;
         previewPreferredProtocol = SitePreviewProtocol.Unknown;
         previewSession = null;
         PreviewSessionJson = null;
-        PreviewProtocolText = "待开启";
-        PreviewStatusText = SelectedDetail is null ? "选择点位后可开启预览。" : "点击开启预览。";
+        PreviewProtocolText = string.Empty;
+        PreviewStatusText = SelectedDetail is null ? "选择点位后查看画面" : "点击点位后自动预览";
         ClosePreviewCommand.NotifyCanExecuteChanged();
         if (currentSession is not null)
         {
@@ -1062,12 +1146,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         previewRequested = false;
         CancelPreviewResolve();
         previewPlaybackState = PreviewPlaybackState.Idle;
+        IsPreviewPlaybackReady = false;
         previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
         previewFallbackFailureReason = null;
         previewPreferredProtocol = SitePreviewProtocol.Unknown;
         previewSession = null;
         PreviewSessionJson = null;
-        PreviewProtocolText = "待开启";
+        PreviewProtocolText = string.Empty;
         PreviewStatusText = "预览已关闭。";
         ClosePreviewCommand.NotifyCanExecuteChanged();
         if (currentSession is not null)
@@ -1084,6 +1169,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         previewRequested = false;
         CancelPreviewResolve();
         ResetAcceptanceForcedPreviewFailure();
+        IsPreviewPlaybackReady = false;
         if (currentSession is not null)
         {
             _ = WriteDiagnosticAsync(
@@ -1111,12 +1197,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public void CompleteShutdownAfterPreviewRelease()
     {
         previewPlaybackState = PreviewPlaybackState.Idle;
+        IsPreviewPlaybackReady = false;
         previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
         previewFallbackFailureReason = null;
         previewPreferredProtocol = SitePreviewProtocol.Unknown;
         previewSession = null;
         PreviewSessionJson = null;
-        PreviewProtocolText = "待开启";
+        PreviewProtocolText = string.Empty;
         PreviewStatusText = "预览已关闭。";
         ClosePreviewCommand.NotifyCanExecuteChanged();
     }
@@ -1134,7 +1221,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         previewResolveCts = cancellationTokenSource;
         previewSession = null;
         PreviewSessionJson = null;
-        PreviewProtocolText = "准备中";
+        PreviewProtocolText = "连接中";
         PreviewStatusText = failedProtocol switch
         {
             SitePreviewProtocol.WebRtc => "WebRTC 不可用，正在切换备用预览。",
@@ -1159,7 +1246,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             _ = WriteDiagnosticAsync(
                 "preview-resolve-exception",
                 $"deviceCode={deviceCode}, failedProtocol={failedProtocol?.ToString() ?? "none"}, type={ex.GetType().FullName}, message={ex.Message}");
-            PreviewProtocolText = "待开启";
+            PreviewProtocolText = "未开启";
             PreviewStatusText = "预览暂不可用，请稍后重试。";
             ClosePreviewCommand.NotifyCanExecuteChanged();
             return;
@@ -1174,7 +1261,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         {
             previewSession = null;
             PreviewSessionJson = null;
-            PreviewProtocolText = "待开启";
+            PreviewProtocolText = "未开启";
             PreviewStatusText = failedProtocol.HasValue
                 ? "备用预览也不可用，请稍后重试。"
                 : "预览暂不可用，请稍后重试。";
@@ -1184,10 +1271,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         previewSession = result.Session;
         PreviewSessionJson = JsonSerializer.Serialize(ToPreviewPlaybackSession(result.Session), MapHostJsonOptions);
-        PreviewProtocolText = $"当前协议：{GetProtocolLabel(result.Session.SelectedProtocol)}";
+        PreviewProtocolText = GetProtocolBadgeText(result.Session.SelectedProtocol);
         PreviewStatusText = result.Session.SelectedProtocol == SitePreviewProtocol.WebRtc
-            ? "正在建立 WebRTC 实时预览。"
-            : "WebRTC 不可用，已切换备用预览。";
+            ? "正在连接 WebRTC 预览。"
+            : $"已切换 {GetProtocolLabel(result.Session.SelectedProtocol)} 预览。";
         ClosePreviewCommand.NotifyCanExecuteChanged();
     }
 
@@ -1208,6 +1295,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         previewResolveCts = cancellationTokenSource;
         previewSession = null;
         PreviewSessionJson = null;
+        IsPreviewPlaybackReady = false;
         if (!failedProtocol.HasValue)
         {
             previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
@@ -1221,12 +1309,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             SitePreviewProtocol.Flv => PreviewPlaybackState.FallbackToHls,
             _ => PreviewPlaybackState.Idle
         };
-        PreviewProtocolText = "准备中";
+        PreviewProtocolText = string.Empty;
         PreviewStatusText = failedProtocol switch
         {
-            SitePreviewProtocol.WebRtc => "WebRTC 不可用，正在切换备用预览。",
-            SitePreviewProtocol.Flv => "FLV 不可用，正在切换 HLS 预览。",
-            _ => "正在建立预览。"
+            SitePreviewProtocol.WebRtc => "切换到 FLV",
+            SitePreviewProtocol.Flv => "切换到 HLS",
+            _ => "正在连接"
         };
         ClosePreviewCommand.NotifyCanExecuteChanged();
 
@@ -1247,8 +1335,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 "preview-resolve-exception",
                 $"deviceCode={deviceCode}, failedProtocol={failedProtocol?.ToString() ?? "none"}, type={ex.GetType().FullName}, message={ex.Message}");
             previewPlaybackState = PreviewPlaybackState.Unavailable;
-            PreviewProtocolText = "待开启";
-            PreviewStatusText = "预览暂不可用，请稍后重试。";
+            PreviewProtocolText = string.Empty;
+            PreviewStatusText = "暂无实时画面";
             ClosePreviewCommand.NotifyCanExecuteChanged();
             return;
         }
@@ -1263,10 +1351,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             previewPlaybackState = PreviewPlaybackState.Unavailable;
             previewSession = null;
             PreviewSessionJson = null;
-            PreviewProtocolText = "待开启";
-            PreviewStatusText = failedProtocol.HasValue
-                ? "备用预览也不可用，请稍后重试。"
-                : "预览暂不可用，请稍后重试。";
+            PreviewProtocolText = string.Empty;
+            PreviewStatusText = "暂无实时画面";
             ClosePreviewCommand.NotifyCanExecuteChanged();
             _ = WriteDiagnosticAsync(
                 "preview-session-unavailable",
@@ -1294,7 +1380,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
 
         PreviewSessionJson = JsonSerializer.Serialize(playbackSession, MapHostJsonOptions);
-        PreviewProtocolText = $"当前协议：{GetProtocolLabel(result.Session.SelectedProtocol)}";
+        PreviewProtocolText = GetProtocolBadgeText(result.Session.SelectedProtocol);
         _ = WriteDiagnosticAsync(
             "preview-session-resolved",
             $"deviceCode={result.Session.DeviceCode}, sessionId={result.Session.PlaybackSessionId}, preferredProtocol={ToProtocolKey(preferredProtocol)}, finalProtocol={ToProtocolKey(result.Session.SelectedProtocol)}, fallbackTriggered={result.Session.UsedFallback || result.Session.SelectedProtocol != preferredProtocol}, attempted={string.Join(">", result.Session.AttemptedProtocols.Select(ToProtocolKey))}, sourceUrl={result.Session.SourceUrl}");
@@ -1302,7 +1388,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         if (result.Session.SelectedProtocol == SitePreviewProtocol.WebRtc)
         {
             previewPlaybackState = PreviewPlaybackState.WebRtcUrlAcquired;
-            PreviewStatusText = "WebRTC 预览连接中。";
+            PreviewStatusText = "正在连接";
             if (result.Session.WebRtcUrlAcquired)
             {
                 _ = WriteDiagnosticAsync(
@@ -1315,7 +1401,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             previewPlaybackState = result.Session.SelectedProtocol == SitePreviewProtocol.Flv
                 ? PreviewPlaybackState.FallbackToFlv
                 : PreviewPlaybackState.FallbackToHls;
-            PreviewStatusText = "WebRTC 不可用，已切换备用预览。";
+            PreviewStatusText = "正在连接";
         }
 
         ClosePreviewCommand.NotifyCanExecuteChanged();
@@ -1334,21 +1420,22 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         }
 
         CancelPreviewResolve();
+        IsPreviewPlaybackReady = false;
         previewSession = null;
         PreviewSessionJson = null;
-        PreviewProtocolText = "待开启";
+        PreviewProtocolText = string.Empty;
         previewPreferredProtocol = SitePreviewProtocol.Unknown;
 
         if (!previewRequested || string.IsNullOrWhiteSpace(deviceCode))
         {
             PreviewStatusText = string.IsNullOrWhiteSpace(deviceCode)
-                ? "选择点位后可开启预览。"
-                : "点击开启预览。";
+                ? "选择点位后查看画面"
+                : "点击点位后自动预览";
             ClosePreviewCommand.NotifyCanExecuteChanged();
             return;
         }
 
-        PreviewStatusText = "正在切换预览。";
+        PreviewStatusText = "正在连接";
         await StartPreviewAsync(deviceCode);
     }
 
@@ -1413,6 +1500,27 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 "exception-caught",
                 $"source=toggle-monitoring, deviceCode={SelectedDetail.DeviceCode}, type={ex.GetType().FullName}, message={ex.Message}");
             Notify("操作失败", "巡检状态更新失败，请稍后重试。");
+        }
+    }
+
+    private async Task ManualDispatchAsync()
+    {
+        if (SelectedDetail is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await dispatchService.ManualDispatchAsync(SelectedDetail.DeviceCode);
+            await LoadDashboardAsync(SelectedDetail.DeviceCode, true);
+        }
+        catch (Exception ex)
+        {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=manual-dispatch, deviceCode={SelectedDetail.DeviceCode}, type={ex.GetType().FullName}, message={ex.Message}");
+            Notify("派单失败", ex.Message);
         }
     }
 
@@ -1531,6 +1639,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
+        OpenUnmappedSecondaryEntry();
         await SelectDeviceAsync(point.DeviceCode);
     }
 
@@ -1541,6 +1650,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
+        OpenIgnoredSecondaryEntry();
         await SelectDeviceAsync(point.DeviceCode);
     }
 
@@ -1553,6 +1663,28 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         await SelectDeviceAsync(point.DeviceCode, true);
         await OpenEditEditorAsync();
+    }
+
+    private void OpenUnmappedSecondaryEntry()
+    {
+        secondaryEntryMode = SecondaryEntryMode.Unmapped;
+        IsSecondaryPanelOpen = true;
+        OnPropertyChanged(nameof(IsIgnoredSecondaryMode));
+        OnPropertyChanged(nameof(SecondarySectionTitle));
+        OnPropertyChanged(nameof(SecondarySectionDetail));
+        OnPropertyChanged(nameof(SecondarySectionEmptyText));
+        OnPropertyChanged(nameof(HasSecondaryItems));
+    }
+
+    private void OpenIgnoredSecondaryEntry()
+    {
+        secondaryEntryMode = SecondaryEntryMode.Ignored;
+        IsSecondaryPanelOpen = true;
+        OnPropertyChanged(nameof(IsIgnoredSecondaryMode));
+        OnPropertyChanged(nameof(SecondarySectionTitle));
+        OnPropertyChanged(nameof(SecondarySectionDetail));
+        OnPropertyChanged(nameof(SecondarySectionEmptyText));
+        OnPropertyChanged(nameof(HasSecondaryItems));
     }
 
     private async Task SelectDeviceAsync(string deviceCode, bool notifyOnError = false)
@@ -1574,6 +1706,24 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         selectedPointDeviceCode = deviceCode.Trim();
         RefreshMapHostState();
         await LoadSelectedSiteDetailAsync(selectedPointDeviceCode, notifyOnError);
+    }
+
+    private async Task HandleMapPointSelectedAsync(string deviceCode)
+    {
+        var isSameSelection = string.Equals(selectedPointDeviceCode, deviceCode, StringComparison.OrdinalIgnoreCase);
+        previewRequested = true;
+
+        if (isSameSelection)
+        {
+            if (!HasActiveOrPendingPreview())
+            {
+                await StartPreviewAsync(deviceCode);
+            }
+
+            return;
+        }
+
+        await SelectDeviceAsync(deviceCode);
     }
 
     private async void HandleEditorSaveRequested(object? sender, EventArgs e)
@@ -1707,6 +1857,16 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         MapHostStateJson = JsonSerializer.Serialize(state, MapHostJsonOptions);
     }
 
+    private void RaiseMediaStatePropertiesChanged()
+    {
+        OnPropertyChanged(nameof(HasPreviewSession));
+        OnPropertyChanged(nameof(HasPreviewProtocolBadge));
+        OnPropertyChanged(nameof(HasSnapshotFallback));
+        OnPropertyChanged(nameof(ShowMediaSurface));
+        OnPropertyChanged(nameof(ShowMediaEmptyState));
+        OnPropertyChanged(nameof(MediaEmptyStateText));
+    }
+
     private void RefreshSelectedDetail()
     {
         if (selectedDetailSource is null)
@@ -1731,15 +1891,15 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             InspectionStatusText = "巡检待机";
             InspectionStatusDetail = "当前无纳入静默巡检的点位。";
         }
-        else if (snapshot.CoverageSummary.UnmappedPointCount > 0)
+        else if (snapshot.FaultCount > 0)
         {
-            InspectionStatusText = "坐标治理中";
-            InspectionStatusDetail = $"共 {snapshot.CoverageSummary.UnmappedPointCount} 个点位未落图，可通过本地补充信息继续治理。";
+            InspectionStatusText = "异常值守";
+            InspectionStatusDetail = $"已纳管 {snapshot.MonitoredCount} 个点位，其中 {snapshot.FaultCount} 个需要关注。";
         }
         else
         {
-            InspectionStatusText = "巡检运行";
-            InspectionStatusDetail = $"已纳管 {snapshot.MonitoredCount} 个点位。";
+            InspectionStatusText = "值守运行";
+            InspectionStatusDetail = $"已纳管 {snapshot.MonitoredCount} 个点位，当前画面正常。";
         }
 
         if (snapshot.DispatchedCount > 0)
@@ -1770,10 +1930,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         if (coverageSummary.FilteredPointCount <= 0)
         {
-            return "地图主视图只保留当前关注点位，并联动状态、异常和详情抽屉。";
+            return "当前筛选下暂无落图点位。";
         }
 
-        return "地图主视图聚焦点位状态、异常联动和右侧详情，不在主视图强调落图治理统计。";
+        return "地图主视图聚焦纳管点位状态，绿色正常，红色异常。";
     }
 
     private static string ResolveMapEmptyStateText(
@@ -1806,18 +1966,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return "当前筛选条件下暂无点位。";
         }
 
-        if (coverageSummary.FilteredUnmappedPointCount > 0)
-        {
-            return "当前筛选下暂无可展示点位，可在下方未落图治理区继续补录坐标。";
-        }
-
         return "当前筛选条件下暂无可展示点位。";
     }
 
     private string ResolveDefaultMapInteractionHint()
     {
         return isMapHostConfigured
-            ? "点位默认只显示小图标和单行名称，单击联动右侧详情。"
+            ? "单击地图点位可联动右侧详情。"
             : "地图未配置，暂不支持坐标补录。";
     }
 
@@ -1846,13 +2001,14 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            return "default";
+            return "amap://styles/grey";
         }
 
         var normalized = value.Trim();
         return string.Equals(normalized, "normal", StringComparison.OrdinalIgnoreCase)
             || string.Equals(normalized, "native", StringComparison.OrdinalIgnoreCase)
-            ? "default"
+            || string.Equals(normalized, "default", StringComparison.OrdinalIgnoreCase)
+            ? "amap://styles/grey"
             : normalized;
     }
 
@@ -1891,6 +2047,18 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             SitePreviewProtocol.Hls => "HLS",
             SitePreviewProtocol.H5 => "H5",
             _ => "未知"
+        };
+    }
+
+    private static string GetProtocolBadgeText(SitePreviewProtocol protocol)
+    {
+        return protocol switch
+        {
+            SitePreviewProtocol.WebRtc => "WebRTC",
+            SitePreviewProtocol.Flv => "FLV 备用",
+            SitePreviewProtocol.Hls => "HLS 备用",
+            SitePreviewProtocol.H5 => "H5 兜底",
+            _ => "未开启"
         };
     }
 
@@ -1933,6 +2101,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         NotificationRequested?.Invoke(this, new NotificationRequestedEventArgs(title, message));
     }
 
+    private bool HasActiveOrPendingPreview()
+    {
+        return previewResolveCts is not null
+            || previewSession is not null
+            || PreviewSessionJson is not null;
+    }
+
     private Task WriteDiagnosticAsync(string eventName, string message)
     {
         return diagnosticService.WriteAsync(eventName, message);
@@ -1958,4 +2133,10 @@ internal enum PreviewPlaybackState
     FallbackToHls = 7,
     HlsPlaybackReady = 8,
     Unavailable = 9
+}
+
+internal enum SecondaryEntryMode
+{
+    Unmapped = 0,
+    Ignored = 1
 }

@@ -37,43 +37,31 @@ video {
   background: #000;
 }
 
-#status {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  top: 12px;
-  z-index: 2;
-  padding: 9px 12px;
-  border: 1px solid rgba(103, 153, 238, 0.22);
-  border-radius: 999px;
-  background: rgba(5, 10, 19, 0.7);
-  color: #cfe0ff;
-  font-size: 12px;
-  line-height: 1.4;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.min.js"></script>
 </head>
 <body>
 <div id="root">
-  <div id="status">等待预览指令。</div>
   <video id="player" autoplay muted playsinline></video>
 </div>
 <script>
-const statusEl = document.getElementById("status");
-const video = document.getElementById("player");
+const pageParams = new URLSearchParams(window.location.search);
+const root = document.getElementById("root");
+let video = document.getElementById("player");
 
 const state = {
   session: null,
   adapter: null,
   ready: false,
   readyTimer: null,
-  requestId: null
+  requestId: null,
+  readyCategory: null,
+  playbackAttemptId: 0,
+  lastStopReason: "none",
+  pageMode: pageParams.get("pageMode") || "default",
+  fallbackProtocolHint: pageParams.get("fallbackProtocol") || "",
+  activeVideo: video
 };
 
 function createReleaseStats(reason) {
@@ -92,8 +80,135 @@ function post(type, payload = {}) {
   }
 }
 
-function setStatus(text) {
-  statusEl.textContent = text;
+function getCurrentAttemptId() {
+  return state.playbackAttemptId;
+}
+
+function isCurrentAttempt(attemptId) {
+  return !attemptId || attemptId === state.playbackAttemptId;
+}
+
+function isHlsSupported() {
+  return !!(window.Hls && window.Hls.isSupported());
+}
+
+function isFlvJsSupported() {
+  return !!(window.mpegts && window.mpegts.isSupported());
+}
+
+function hasMediaSource() {
+  return typeof window.MediaSource !== "undefined";
+}
+
+function describeError(error) {
+  if (!error) {
+    return "unknown error";
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  if (error.message && typeof error.message === "string") {
+    return error.message;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch (_) {
+    return String(error);
+  }
+}
+
+function setActiveVideo(nextVideo) {
+  state.activeVideo = nextVideo || null;
+  return state.activeVideo;
+}
+
+function executePlaybackStep(stepName, attemptId, failureCategory, action) {
+  try {
+    return action();
+  } catch (error) {
+    const detail = describeError(error);
+    postDiagnostic(`${stepName}_sync_exception`, { detail });
+    if (failureCategory) {
+      fail(failureCategory, detail, attemptId);
+    }
+
+    return null;
+  }
+}
+
+function trackPromiseRejection(promise, eventName, failureCategory, attemptId) {
+  if (!promise || typeof promise.then !== "function") {
+    return;
+  }
+
+  promise.catch(error => {
+    if (!isCurrentAttempt(attemptId)) {
+      return;
+    }
+
+    const detail = describeError(error);
+    postDiagnostic(eventName, { detail });
+    if (failureCategory) {
+      fail(failureCategory, detail, attemptId);
+    }
+  });
+}
+
+function getVideoSnapshot() {
+  const currentVideo = video;
+  const error = currentVideo && currentVideo.error ? currentVideo.error : null;
+  const currentSrc = currentVideo && currentVideo.currentSrc ? currentVideo.currentSrc : "";
+  const srcAttribute = currentVideo && currentVideo.getAttribute("src") ? currentVideo.getAttribute("src") : "";
+  return {
+    readyState: currentVideo ? currentVideo.readyState : -1,
+    networkState: currentVideo ? currentVideo.networkState : -1,
+    currentTime: currentVideo && Number.isFinite(currentVideo.currentTime) ? Number(currentVideo.currentTime.toFixed(3)) : 0,
+    paused: !!(currentVideo && currentVideo.paused),
+    muted: !!(currentVideo && currentVideo.muted),
+    ended: !!(currentVideo && currentVideo.ended),
+    seeking: !!(currentVideo && currentVideo.seeking),
+    videoWidth: currentVideo ? currentVideo.videoWidth || 0 : 0,
+    videoHeight: currentVideo ? currentVideo.videoHeight || 0 : 0,
+    duration: currentVideo && Number.isFinite(currentVideo.duration) ? Number(currentVideo.duration.toFixed(3)) : String(currentVideo ? currentVideo.duration : 0),
+    hasSrc: !!srcAttribute,
+    hasSrcObject: !!(currentVideo && currentVideo.srcObject),
+    videoIsConnected: !!(currentVideo && currentVideo.isConnected),
+    videoInDocument: !!(currentVideo && document.contains(currentVideo)),
+    isActiveVideo: currentVideo === state.activeVideo,
+    pageMode: state.pageMode,
+    fallbackProtocolHint: state.fallbackProtocolHint,
+    currentSrc,
+    src: srcAttribute || (currentVideo && currentVideo.src ? currentVideo.src : ""),
+    srcObjectKind: currentVideo && currentVideo.srcObject ? Object.prototype.toString.call(currentVideo.srcObject) : "",
+    crossOrigin: currentVideo && currentVideo.crossOrigin ? currentVideo.crossOrigin : "",
+    autoplay: !!(currentVideo && currentVideo.autoplay),
+    hlsSupported: isHlsSupported(),
+    flvjsSupported: isFlvJsSupported(),
+    mediaSourceAvailable: hasMediaSource(),
+    errorCode: error ? error.code : 0,
+    errorMessage: error && error.message ? error.message : ""
+  };
+}
+
+function postDiagnostic(event, extra = {}) {
+  if (!state.session) {
+    return;
+  }
+
+  post("playback_diagnostic", {
+    deviceCode: state.session.deviceCode || "",
+    playbackSessionId: state.session.playbackSessionId || "",
+    protocol: state.session.protocol || "",
+    event,
+    ...extra,
+    snapshot: getVideoSnapshot()
+  });
+}
+
+function setStatus(_text) {
 }
 
 function clearReadyTimer() {
@@ -101,17 +216,61 @@ function clearReadyTimer() {
     window.clearTimeout(state.readyTimer);
     state.readyTimer = null;
   }
+  state.readyCategory = null;
+}
+
+function createVideoElement() {
+  const element = document.createElement("video");
+  element.id = "player";
+  element.autoplay = true;
+  element.muted = true;
+  element.playsInline = true;
+  return element;
+}
+
+function replaceVideoElement() {
+  const nextVideo = createVideoElement();
+  if (video && video.parentNode === root) {
+    root.replaceChild(nextVideo, video);
+  } else {
+    root.appendChild(nextVideo);
+  }
+
+  video = nextVideo;
+  setActiveVideo(nextVideo);
+  bindVideoEvents(video);
+  return video;
 }
 
 function resetVideo() {
+  if (!video) {
+    return;
+  }
+
   try {
     video.pause();
   } catch (_) {
   }
 
-  video.removeAttribute("src");
-  video.srcObject = null;
-  video.load();
+  try {
+    video.removeAttribute("src");
+  } catch (_) {
+  }
+
+  try {
+    video.src = "";
+  } catch (_) {
+  }
+
+  try {
+    video.srcObject = null;
+  } catch (_) {
+  }
+
+  try {
+    video.load();
+  } catch (_) {
+  }
 }
 
 function teardownAdapter(reason) {
@@ -126,10 +285,13 @@ function teardownAdapter(reason) {
     }
   }
 
+  state.lastStopReason = reason || "adapter_stop";
   state.adapter = null;
   state.ready = false;
   state.requestId = null;
+  state.readyCategory = null;
   resetVideo();
+  replaceVideoElement();
   if (session) {
     post("playback_stopped", {
       playbackSessionId: session.playbackSessionId || "",
@@ -153,22 +315,31 @@ function stop(reason) {
   post("playback_idle");
 }
 
-function startReadyTimer(seconds, category) {
+function startReadyTimer(seconds, category, attemptId) {
   clearReadyTimer();
+  state.readyCategory = category || "ready_timeout";
+  postDiagnostic("ready_timer_started", {
+    category: state.readyCategory,
+    configuredSeconds: seconds || 0
+  });
   state.readyTimer = window.setTimeout(() => {
-    if (!state.ready) {
-      fail(category || "ready_timeout", "ready timeout");
+    if (!state.ready && isCurrentAttempt(attemptId)) {
+      postDiagnostic("ready_timer_fired", {
+        category: state.readyCategory || category || "ready_timeout"
+      });
+      fail(state.readyCategory || category || "ready_timeout", "ready timeout", attemptId);
     }
   }, Math.max(4, seconds || 10) * 1000);
 }
 
-function markReady() {
-  if (state.ready || !state.session) {
+function markReady(attemptId) {
+  if (!isCurrentAttempt(attemptId) || state.ready || !state.session) {
     return;
   }
 
   state.ready = true;
   clearReadyTimer();
+  postDiagnostic("mark_ready");
   setStatus(state.session.protocol === "webrtc" ? "WebRTC 实时预览已连接。" : "备用预览已连接。");
   post("playback_ready", {
     deviceCode: state.session.deviceCode || "",
@@ -177,8 +348,18 @@ function markReady() {
   });
 }
 
-function fail(category, reason) {
+function fail(category, reason, attemptId) {
+  if (!isCurrentAttempt(attemptId)) {
+    return;
+  }
+
   const session = state.session;
+  if (session) {
+    postDiagnostic("playback_failed", {
+      category,
+      reason
+    });
+  }
   teardownAdapter("failure");
   state.session = null;
 
@@ -235,20 +416,114 @@ function waitForIceGatheringComplete(peer, timeoutMs) {
   });
 }
 
-function createWebRtcPlaybackHost(session) {
+function isFallbackReady(attemptId) {
+  if (!isCurrentAttempt(attemptId) || !video) {
+    return false;
+  }
+
+  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    return true;
+  }
+
+  return video.readyState >= HTMLMediaElement.HAVE_METADATA
+    && (
+      video.videoWidth > 0
+      || video.videoHeight > 0
+      || video.currentTime > 0
+      || video.duration === Infinity
+    );
+}
+
+function maybeMarkFallbackReady(attemptId) {
+  if (!isCurrentAttempt(attemptId) || !state.session || state.session.protocol === "webrtc") {
+    return;
+  }
+
+  if (isFallbackReady(attemptId)) {
+    markReady(attemptId);
+  }
+}
+
+function bindVideoEvents(targetVideo) {
+  if (!targetVideo) {
+    return;
+  }
+
+  const attach = (eventName, handler) => {
+    targetVideo.addEventListener(eventName, () => {
+      if (targetVideo !== video) {
+        return;
+      }
+
+      handler(getCurrentAttemptId());
+    });
+  };
+
+  attach("loadedmetadata", attemptId => {
+    postDiagnostic("video_loadedmetadata");
+    maybeMarkFallbackReady(attemptId);
+  });
+
+  attach("loadeddata", attemptId => {
+    postDiagnostic("video_loadeddata");
+    maybeMarkFallbackReady(attemptId);
+  });
+
+  attach("canplay", attemptId => {
+    postDiagnostic("video_canplay");
+    maybeMarkFallbackReady(attemptId);
+  });
+
+  attach("canplaythrough", attemptId => {
+    postDiagnostic("video_canplaythrough");
+    maybeMarkFallbackReady(attemptId);
+  });
+
+  attach("playing", attemptId => {
+    postDiagnostic("video_playing");
+    markReady(attemptId);
+  });
+
+  attach("waiting", () => {
+    postDiagnostic("video_waiting");
+  });
+
+  attach("stalled", () => {
+    postDiagnostic("video_stalled");
+  });
+
+  attach("suspend", () => {
+    postDiagnostic("video_suspend");
+  });
+
+  attach("emptied", () => {
+    postDiagnostic("video_emptied");
+  });
+
+  attach("error", attemptId => {
+    postDiagnostic("video_error");
+    if (state.session && !state.ready) {
+      fail("media_error", "video error", attemptId);
+    }
+  });
+}
+
+function createWebRtcPlaybackHost(session, attemptId) {
   let peer = null;
   let mediaStream = null;
   let localRequestId = null;
+  const isSessionActive = () => peer && state.session === session && isCurrentAttempt(attemptId);
 
   return {
     protocol: "webrtc",
 
     async start() {
       if (!session.webRtcApiUrl) {
-        fail("webrtc_api_missing", "missing webrtc api url");
+        fail("webrtc_api_missing", "missing webrtc api url", attemptId);
         return;
       }
 
+      postDiagnostic("webrtc_start");
       setStatus("WebRTC 预览连接中。");
 
       peer = new RTCPeerConnection({
@@ -260,25 +535,46 @@ function createWebRtcPlaybackHost(session) {
       state.ready = false;
 
       peer.ontrack = event => {
+        if (!isSessionActive()) {
+          return;
+        }
+
         mediaStream.addTrack(event.track);
+        postDiagnostic("webrtc_track", {
+          kind: event.track ? event.track.kind : "unknown"
+        });
         video.play().catch(() => {});
       };
 
       peer.onconnectionstatechange = () => {
+        if (!isSessionActive()) {
+          return;
+        }
+
+        postDiagnostic("webrtc_connection_state", {
+          connectionState: peer.connectionState
+        });
         if (peer.connectionState === "connected") {
           video.play().catch(() => {});
-          markReady();
+          markReady(attemptId);
           return;
         }
 
         if (!state.ready && ["failed", "disconnected", "closed"].includes(peer.connectionState)) {
-          fail("webrtc_connection_failed", peer.connectionState);
+          fail("webrtc_connection_failed", peer.connectionState, attemptId);
         }
       };
 
       peer.oniceconnectionstatechange = () => {
+        if (!isSessionActive()) {
+          return;
+        }
+
+        postDiagnostic("webrtc_ice_state", {
+          iceConnectionState: peer.iceConnectionState
+        });
         if (!state.ready && ["failed", "disconnected", "closed"].includes(peer.iceConnectionState)) {
-          fail("webrtc_ice_failed", peer.iceConnectionState);
+          fail("webrtc_ice_failed", peer.iceConnectionState, attemptId);
         }
       };
 
@@ -290,23 +586,34 @@ function createWebRtcPlaybackHost(session) {
       if (session.forceInitialWebRtcFailure) {
         fail(
           session.forceFailureCategory || "acceptance_forced_webrtc_failure",
-          session.forceFailureReason || "forced by preview acceptance"
+          session.forceFailureReason || "forced by preview acceptance",
+          attemptId
         );
         return;
       }
 
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
+      if (!isSessionActive()) {
+        return;
+      }
+
       await waitForIceGatheringComplete(peer, 1500);
+      if (!isSessionActive()) {
+        return;
+      }
 
       if (!peer.localDescription || !peer.localDescription.sdp) {
-        fail("webrtc_offer_missing", "missing local description");
+        fail("webrtc_offer_missing", "missing local description", attemptId);
         return;
       }
 
       localRequestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       state.requestId = localRequestId;
-      startReadyTimer(session.readyTimeoutSeconds || 12, "webrtc_ready_timeout");
+      postDiagnostic("webrtc_offer_posted", {
+        requestId: localRequestId
+      });
+      startReadyTimer(session.readyTimeoutSeconds || 12, "webrtc_ready_timeout", attemptId);
 
       post("webrtc_offer", {
         requestId: localRequestId,
@@ -320,7 +627,7 @@ function createWebRtcPlaybackHost(session) {
     },
 
     async handleMessage(message) {
-      if (!peer || !message || !message.type) {
+      if (!peer || !message || !message.type || !isSessionActive()) {
         return;
       }
 
@@ -329,13 +636,16 @@ function createWebRtcPlaybackHost(session) {
           return;
         }
 
+        postDiagnostic("webrtc_answer_received", {
+          requestId: localRequestId
+        });
         try {
           await peer.setRemoteDescription({
             type: "answer",
             sdp: message.payload.answerSdp
           });
         } catch (_) {
-          fail("webrtc_answer_invalid", "invalid answer");
+          fail("webrtc_answer_invalid", "invalid answer", attemptId);
         }
 
         return;
@@ -343,7 +653,11 @@ function createWebRtcPlaybackHost(session) {
 
       if (message.type === "webrtc_answer_failed") {
         if (message.payload && message.payload.requestId === localRequestId) {
-          fail("webrtc_answer_failed", message.payload.reason || "webrtc negotiation failed");
+          postDiagnostic("webrtc_answer_failed", {
+            requestId: localRequestId,
+            reason: message.payload.reason || "webrtc negotiation failed"
+          });
+          fail("webrtc_answer_failed", message.payload.reason || "webrtc negotiation failed", attemptId);
         }
       }
     },
@@ -380,72 +694,239 @@ function createWebRtcPlaybackHost(session) {
   };
 }
 
-function createMediaPlaybackHost(protocol, session) {
+function createMediaPlaybackHost(protocol, session, attemptId) {
   let cleanup = null;
+  const isAttemptActive = () => state.session === session && isCurrentAttempt(attemptId);
 
   return {
     protocol,
 
     async start() {
       notifyHostInitialized(protocol);
+      postDiagnostic("fallback_start", {
+        sourceKind: protocol === "flv" ? "mpegts" : "hls",
+        readyTimeoutSeconds: protocol === "flv"
+          ? Math.max(18, session.readyTimeoutSeconds || 10)
+          : Math.max(18, session.readyTimeoutSeconds || 10)
+      });
       setStatus("正在建立备用预览。");
 
       if (protocol === "flv") {
-        if (!(window.mpegts && window.mpegts.isSupported())) {
-          fail("flv_not_supported", "mpegts.js unavailable");
+        if (!isFlvJsSupported()) {
+          fail("flv_not_supported", "mpegts.js unavailable", attemptId);
           return;
         }
 
-        const player = window.mpegts.createPlayer({
+        const player = executePlaybackStep("flv_create_player", attemptId, "flv_player_create_failed", () => window.mpegts.createPlayer({
           type: "flv",
           isLive: true,
           url: session.sourceUrl
+        }));
+        if (!isAttemptActive() || !player) {
+          return;
+        }
+
+        postDiagnostic("flv_player_created");
+        player.on(window.mpegts.Events.MEDIA_INFO, () => {
+          if (!isAttemptActive()) {
+            return;
+          }
+
+          postDiagnostic("flv_media_info");
+          trackPromiseRejection(
+            executePlaybackStep("flv_media_info_play", attemptId, "flv_play_failed", () => video.play()),
+            "flv_media_info_play_rejected",
+            "flv_play_failed",
+            attemptId
+          );
+          maybeMarkFallbackReady(attemptId);
         });
-        player.attachMediaElement(video);
-        player.load();
-        player.play().catch(() => fail("flv_play_failed", "play failed"));
-        player.on(window.mpegts.Events.ERROR, () => fail("flv_stream_failed", "stream failed"));
+        player.on(window.mpegts.Events.METADATA_ARRIVED, () => {
+          if (!isAttemptActive()) {
+            return;
+          }
+
+          postDiagnostic("flv_metadata_arrived");
+          maybeMarkFallbackReady(attemptId);
+        });
+        player.on(window.mpegts.Events.STATISTICS_INFO, data => {
+          if (!isAttemptActive()) {
+            return;
+          }
+
+          postDiagnostic("flv_statistics_info", {
+            decodedFrames: data && typeof data.decodedFrames === "number" ? data.decodedFrames : 0,
+            droppedFrames: data && typeof data.droppedFrames === "number" ? data.droppedFrames : 0
+          });
+          maybeMarkFallbackReady(attemptId);
+        });
+        executePlaybackStep("flv_attach_media", attemptId, "flv_attach_failed", () => player.attachMediaElement(video));
+        if (!isAttemptActive()) {
+          return;
+        }
+
+        postDiagnostic("flv_media_attached");
+        executePlaybackStep("flv_load", attemptId, "flv_load_failed", () => player.load());
+        if (!isAttemptActive()) {
+          return;
+        }
+
+        postDiagnostic("flv_load_called");
+        trackPromiseRejection(
+          executePlaybackStep("flv_play", attemptId, "flv_play_failed", () => player.play()),
+          "flv_play_rejected",
+          "flv_play_failed",
+          attemptId
+        );
+        player.on(window.mpegts.Events.ERROR, (_, detail) => {
+          if (!isAttemptActive()) {
+            return;
+          }
+
+          postDiagnostic("flv_error", {
+            detail: detail || "stream failed"
+          });
+          fail("flv_stream_failed", detail || "stream failed", attemptId);
+        });
         cleanup = () => {
           try { player.pause(); } catch (_) {}
           try { player.unload(); } catch (_) {}
           try { player.detachMediaElement(); } catch (_) {}
           try { player.destroy(); } catch (_) {}
         };
-        startReadyTimer(session.readyTimeoutSeconds || 10, "flv_ready_timeout");
+        startReadyTimer(Math.max(18, session.readyTimeoutSeconds || 10), "flv_ready_timeout", attemptId);
         return;
       }
 
       if (protocol === "hls") {
-        if (video.canPlayType("application/vnd.apple.mpegurl")) {
-          video.src = session.sourceUrl;
-          video.play().catch(() => fail("hls_play_failed", "play failed"));
-          cleanup = () => resetVideo();
-          startReadyTimer(session.readyTimeoutSeconds || 10, "hls_ready_timeout");
-          return;
-        }
-
-        if (!(window.Hls && window.Hls.isSupported())) {
-          fail("hls_not_supported", "hls.js unavailable");
-          return;
-        }
-
-        const hls = new Hls({ liveDurationInfinity: true, enableWorker: true });
-        hls.on(Hls.Events.ERROR, (_, data) => {
-          if (data && data.fatal) {
-            fail("hls_stream_failed", data.details || "stream failed");
+        if (isHlsSupported()) {
+          postDiagnostic("hls_js_selected");
+          const hls = executePlaybackStep(
+            "hls_create_instance",
+            attemptId,
+            "hls_instance_create_failed",
+            () => new Hls({ liveDurationInfinity: true, enableWorker: true, autoStartLoad: false })
+          );
+          if (!isAttemptActive() || !hls) {
+            return;
           }
-        });
-        hls.loadSource(session.sourceUrl);
-        hls.attachMedia(video);
-        video.play().catch(() => fail("hls_play_failed", "play failed"));
-        cleanup = () => {
-          try { hls.destroy(); } catch (_) {}
-        };
-        startReadyTimer(session.readyTimeoutSeconds || 10, "hls_ready_timeout");
+
+          postDiagnostic("hls_instance_created");
+          hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_media_attached");
+            executePlaybackStep("hls_load_source", attemptId, "hls_load_source_failed", () => hls.loadSource(session.sourceUrl));
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_load_source_called");
+            executePlaybackStep("hls_start_load", attemptId, "hls_start_load_failed", () => hls.startLoad(-1));
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_start_load_called");
+          });
+          hls.on(Hls.Events.MANIFEST_LOADING, () => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_manifest_loading");
+          });
+          hls.on(Hls.Events.ERROR, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_error", {
+              fatal: !!(data && data.fatal),
+              detail: data && data.details ? data.details : "stream failed"
+            });
+            if (data && data.fatal) {
+              fail("hls_stream_failed", data.details || "stream failed", attemptId);
+            }
+          });
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_manifest_parsed");
+            trackPromiseRejection(
+              executePlaybackStep("hls_manifest_play", attemptId, "hls_play_failed", () => video.play()),
+              "hls_play_rejected",
+              "hls_play_failed",
+              attemptId
+            );
+            maybeMarkFallbackReady(attemptId);
+          });
+          hls.on(Hls.Events.LEVEL_LOADED, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_level_loaded", {
+              fragments: data && data.details && Array.isArray(data.details.fragments) ? data.details.fragments.length : 0
+            });
+            maybeMarkFallbackReady(attemptId);
+          });
+          hls.on(Hls.Events.FRAG_BUFFERED, () => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_frag_buffered");
+            maybeMarkFallbackReady(attemptId);
+          });
+          executePlaybackStep("hls_attach_media", attemptId, "hls_attach_failed", () => hls.attachMedia(video));
+          if (!isAttemptActive()) {
+            return;
+          }
+
+          cleanup = () => {
+            try { hls.destroy(); } catch (_) {}
+          };
+          startReadyTimer(Math.max(18, session.readyTimeoutSeconds || 10), "hls_ready_timeout", attemptId);
+          return;
+        }
+
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          postDiagnostic("hls_native_fallback_selected");
+          executePlaybackStep("hls_native_set_src", attemptId, "hls_native_src_failed", () => {
+            video.src = session.sourceUrl;
+          });
+          if (!isAttemptActive()) {
+            return;
+          }
+
+          postDiagnostic("hls_native_src_set");
+          executePlaybackStep("hls_native_load", attemptId, "hls_native_load_failed", () => video.load());
+          if (!isAttemptActive()) {
+            return;
+          }
+
+          postDiagnostic("hls_native_load_called");
+          trackPromiseRejection(
+            executePlaybackStep("hls_native_play", attemptId, "hls_play_failed", () => video.play()),
+            "hls_native_play_rejected",
+            "hls_play_failed",
+            attemptId
+          );
+          cleanup = () => resetVideo();
+          startReadyTimer(Math.max(18, session.readyTimeoutSeconds || 10), "hls_ready_timeout", attemptId);
+          return;
+        }
+
+        fail("hls_not_supported", "hls.js unavailable", attemptId);
         return;
       }
 
-      fail("unsupported_protocol", protocol);
+      fail("unsupported_protocol", protocol, attemptId);
     },
 
     async handleMessage() {
@@ -472,13 +953,13 @@ function createMediaPlaybackHost(protocol, session) {
   };
 }
 
-function createPlaybackHost(session) {
+function createPlaybackHost(session, attemptId) {
   if (session.protocol === "webrtc") {
-    return createWebRtcPlaybackHost(session);
+    return createWebRtcPlaybackHost(session, attemptId);
   }
 
   if (session.protocol === "flv" || session.protocol === "hls") {
-    return createMediaPlaybackHost(session.protocol, session);
+    return createMediaPlaybackHost(session.protocol, session, attemptId);
   }
 
   return null;
@@ -491,18 +972,29 @@ async function play(session) {
     return;
   }
 
+  state.playbackAttemptId += 1;
+  const attemptId = state.playbackAttemptId;
   state.session = session;
   state.ready = false;
   video.muted = true;
+  postDiagnostic("play_invoked", {
+    readyTimeoutSeconds: session.readyTimeoutSeconds || 0
+  });
+
+  if (state.pageMode === "fallback-only" && session.protocol === "webrtc") {
+    postDiagnostic("fallback_only_webrtc_rejected");
+    fail("fallback_only_mode_rejects_webrtc", "fallback-only page rejected webrtc startup", attemptId);
+    return;
+  }
 
   if (session.protocol === "h5") {
     window.location.href = session.sourceUrl;
     return;
   }
 
-  const adapter = createPlaybackHost(session);
+  const adapter = createPlaybackHost(session, attemptId);
   if (!adapter) {
-    fail("unsupported_protocol", session.protocol);
+    fail("unsupported_protocol", session.protocol, attemptId);
     return;
   }
 
@@ -511,19 +1003,11 @@ async function play(session) {
   try {
     await adapter.start();
   } catch (error) {
-    fail("host_start_failed", error && error.message ? error.message : String(error));
+    fail("host_start_failed", error && error.message ? error.message : String(error), attemptId);
   }
 }
 
-video.addEventListener("playing", () => {
-  markReady();
-});
-
-video.addEventListener("error", () => {
-  if (state.session && !state.ready) {
-    fail("media_error", "video error");
-  }
-});
+bindVideoEvents(video);
 
 if (window.chrome && window.chrome.webview) {
   window.chrome.webview.addEventListener("message", async event => {
@@ -534,7 +1018,7 @@ if (window.chrome && window.chrome.webview) {
     try {
       await state.adapter.handleMessage(event.data || {});
     } catch (error) {
-      fail("host_message_failed", error && error.message ? error.message : String(error));
+      fail("host_message_failed", error && error.message ? error.message : String(error), getCurrentAttemptId());
     }
   });
 }
@@ -546,7 +1030,13 @@ window.TyslPreviewHost = {
   stop
 };
 
-post("host_ready");
+post("host_ready", {
+  pageMode: state.pageMode,
+  fallbackProtocolHint: state.fallbackProtocolHint,
+  hlsSupported: isHlsSupported(),
+  flvjsSupported: isFlvJsSupported(),
+  mediaSourceAvailable: hasMediaSource()
+});
 </script>
 </body>
 </html>

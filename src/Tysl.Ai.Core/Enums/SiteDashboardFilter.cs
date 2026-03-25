@@ -7,5 +7,6 @@ public enum SiteDashboardFilter
     Monitored = 2,
     Disposed = 3,
     Unmapped = 4,
-    Ignored = 5
+    Ignored = 5,
+    Normal = 6
 }

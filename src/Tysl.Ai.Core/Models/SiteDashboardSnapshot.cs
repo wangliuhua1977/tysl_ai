@@ -16,6 +16,8 @@ public sealed record SiteDashboardSnapshot
 
     public required int DispatchedCount { get; init; }
 
+    public required int PendingDispatchCount { get; init; }
+
     public required MapCoverageSummary CoverageSummary { get; init; }
 
     public required DateTimeOffset LastRefreshedAt { get; init; }

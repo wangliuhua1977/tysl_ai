@@ -12,18 +12,21 @@ public sealed class DispatchService : IDispatchService
     private readonly IDispatchRecordRepository dispatchRecordRepository;
     private readonly ISiteLocalProfileRepository localProfileRepository;
     private readonly IPlatformSiteProvider platformSiteProvider;
+    private readonly ISiteRuntimeStateRepository runtimeStateRepository;
     private readonly IWebhookSender webhookSender;
 
     public DispatchService(
         IDispatchPolicyProvider dispatchPolicyProvider,
         IDispatchRecordRepository dispatchRecordRepository,
         ISiteLocalProfileRepository localProfileRepository,
+        ISiteRuntimeStateRepository runtimeStateRepository,
         IPlatformSiteProvider platformSiteProvider,
         IWebhookSender webhookSender)
     {
         this.dispatchPolicyProvider = dispatchPolicyProvider;
         this.dispatchRecordRepository = dispatchRecordRepository;
         this.localProfileRepository = localProfileRepository;
+        this.runtimeStateRepository = runtimeStateRepository;
         this.platformSiteProvider = platformSiteProvider;
         this.webhookSender = webhookSender;
     }
@@ -108,6 +111,87 @@ public sealed class DispatchService : IDispatchService
             cancellationToken);
     }
 
+    public async Task ManualDispatchAsync(string deviceCode, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(deviceCode))
+        {
+            throw new InvalidOperationException("deviceCode is required.");
+        }
+
+        var normalizedDeviceCode = deviceCode.Trim();
+        var policy = await dispatchPolicyProvider.GetAsync(cancellationToken);
+        var context = await LoadSiteContextAsync(normalizedDeviceCode, cancellationToken);
+        if (context.PlatformSite is null)
+        {
+            throw new InvalidOperationException("当前点位不存在或平台未返回设备信息。");
+        }
+
+        if (context.LocalProfile?.IsIgnored == true)
+        {
+            throw new InvalidOperationException("已忽略点位不能发起派单。");
+        }
+
+        var activeRecord = await dispatchRecordRepository.GetLatestUnrecoveredByDeviceAsync(
+            normalizedDeviceCode,
+            cancellationToken);
+
+        if (activeRecord is not null)
+        {
+            if (activeRecord.DispatchStatus == DispatchStatus.Dispatched && !activeRecord.IsRecovered)
+            {
+                return;
+            }
+
+            if (context.RuntimeState is null)
+            {
+                throw new InvalidOperationException("当前点位尚无运行态记录，无法发起派单。");
+            }
+
+            var faultCode = NormalizeFaultCode(activeRecord.FaultCode, context.RuntimeState.LastFaultCode);
+            var message = BuildFaultMessage(
+                policy,
+                context.PlatformSite,
+                context.LocalProfile,
+                context.RuntimeState,
+                faultCode,
+                ResolveDispatchStatusText(DispatchStatus.Dispatched, isCooling: false));
+
+            var recordToSend = activeRecord with
+            {
+                FaultCode = faultCode,
+                FaultSummary = context.RuntimeState.LastFaultSummary ?? ResolveFaultLabel(faultCode),
+                DispatchMode = DispatchMode.Manual,
+                MessageDigest = ComputeDigest(message.Content),
+                SnapshotPath = context.RuntimeState.LastSnapshotPath,
+                LastInspectionAt = context.RuntimeState.LastInspectionAt,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+
+            recordToSend = await SendDispatchAsync(policy, recordToSend, message, cancellationToken);
+            await dispatchRecordRepository.UpdateAsync(recordToSend, cancellationToken);
+            return;
+        }
+
+        if (context.RuntimeState is null)
+        {
+            throw new InvalidOperationException("当前点位尚无运行态记录，无法发起派单。");
+        }
+
+        var currentFaultCode = MapFaultCode(context.RuntimeState.LastFaultCode);
+        if (currentFaultCode is null)
+        {
+            throw new InvalidOperationException("当前点位未处于异常状态，无法发起派单。");
+        }
+
+        await CreateManualDispatchRecordAsync(
+            policy,
+            currentFaultCode,
+            context.PlatformSite,
+            context.LocalProfile,
+            context.RuntimeState,
+            cancellationToken);
+    }
+
     private async Task CreateFaultRecordAsync(
         DispatchPolicy policy,
         string faultCode,
@@ -152,6 +236,45 @@ public sealed class DispatchService : IDispatchService
             record = await SendDispatchAsync(policy, record, message, cancellationToken);
         }
 
+        await dispatchRecordRepository.UpdateAsync(record, cancellationToken);
+    }
+
+    private async Task CreateManualDispatchRecordAsync(
+        DispatchPolicy policy,
+        string faultCode,
+        PlatformSiteSnapshot platformSite,
+        SiteLocalProfile? localProfile,
+        SiteRuntimeState currentState,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var message = BuildFaultMessage(
+            policy,
+            platformSite,
+            localProfile,
+            currentState,
+            faultCode,
+            ResolveDispatchStatusText(DispatchStatus.Dispatched, isCooling: false));
+
+        var record = new DispatchRecord
+        {
+            DeviceCode = platformSite.DeviceCode,
+            FaultCode = faultCode,
+            FaultSummary = currentState.LastFaultSummary ?? ResolveFaultLabel(faultCode),
+            DispatchStatus = DispatchStatus.PendingDispatch,
+            DispatchMode = DispatchMode.Manual,
+            TriggeredAt = now,
+            RecoveryMode = policy.RecoveryMode,
+            RecoveryStatus = RecoveryStatus.None,
+            MessageDigest = ComputeDigest(message.Content),
+            SnapshotPath = currentState.LastSnapshotPath,
+            LastInspectionAt = currentState.LastInspectionAt,
+            UpdatedAt = now
+        };
+
+        var persistedId = await dispatchRecordRepository.AddAsync(record, cancellationToken);
+        record = record with { Id = persistedId };
+        record = await SendDispatchAsync(policy, record, message, cancellationToken);
         await dispatchRecordRepository.UpdateAsync(record, cancellationToken);
     }
 
@@ -346,7 +469,18 @@ public sealed class DispatchService : IDispatchService
         var platformSites = await platformSiteProvider.ListAsync(cancellationToken);
         var platformSite = platformSites.FirstOrDefault(site => site.DeviceCode.Equals(deviceCode, StringComparison.OrdinalIgnoreCase));
         var localProfile = await localProfileRepository.GetByDeviceCodeAsync(deviceCode, cancellationToken);
-        return new SiteContext(platformSite, localProfile);
+        var runtimeState = await runtimeStateRepository.GetByDeviceCodeAsync(deviceCode, cancellationToken);
+        return new SiteContext(platformSite, localProfile, runtimeState);
+    }
+
+    private static string NormalizeFaultCode(string? persistedFaultCode, RuntimeFaultCode runtimeFaultCode)
+    {
+        if (!string.IsNullOrWhiteSpace(persistedFaultCode))
+        {
+            return persistedFaultCode.Trim();
+        }
+
+        return MapFaultCode(runtimeFaultCode) ?? nameof(RuntimeFaultCode.InspectionExecutionFailed);
     }
 
     private static DispatchStatus ResolveAutomaticDispatchStatus(DispatchPolicy policy)
@@ -506,5 +640,6 @@ public sealed class DispatchService : IDispatchService
 
     private sealed record SiteContext(
         PlatformSiteSnapshot? PlatformSite,
-        SiteLocalProfile? LocalProfile);
+        SiteLocalProfile? LocalProfile,
+        SiteRuntimeState? RuntimeState);
 }

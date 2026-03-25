@@ -30,6 +30,7 @@ public sealed class SiteMapPointViewModel : ObservableObject
         DispatchStateKey = point.DispatchStateKey;
         DispatchStateText = ResolveDispatchStateText(point);
         StatusText = ResolveStatusText(point);
+        IsAbnormal = ResolveIsAbnormal(point);
         RuntimeSummaryText = string.IsNullOrWhiteSpace(point.RuntimeSummaryText)
             ? BuildFallbackSummary(point)
             : point.RuntimeSummaryText!;
@@ -90,6 +91,8 @@ public sealed class SiteMapPointViewModel : ObservableObject
 
     public string DispatchStateKey { get; }
 
+    public bool IsAbnormal { get; }
+
     public string LastInspectionAtText { get; }
 
     public string? LastSnapshotPath { get; }
@@ -120,6 +123,7 @@ public sealed class SiteMapPointViewModel : ObservableObject
             SummaryText = SummaryText,
             DispatchStateKey = DispatchStateKey,
             DispatchStateText = DispatchStateText,
+            IsAbnormal = IsAbnormal,
             DisplayLongitude = DisplayLongitude,
             DisplayLatitude = DisplayLatitude,
             PlatformRawLongitude = PlatformRawLongitude,
@@ -227,6 +231,41 @@ public sealed class SiteMapPointViewModel : ObservableObject
             DispatchStatus.None when point.RuntimeFaultCode == RuntimeFaultCode.InspectionExecutionFailed => "巡检失败。",
             _ => "等待首次巡检。"
         };
+    }
+
+    private static bool ResolveIsAbnormal(SiteMapPoint point)
+    {
+        if (!point.IsMonitored)
+        {
+            return false;
+        }
+
+        if (point.RecoveryStatus == RecoveryStatus.PendingConfirmation)
+        {
+            return true;
+        }
+
+        if (point.RecoveryStatus is RecoveryStatus.Recovered or RecoveryStatus.NotificationFailed)
+        {
+            return false;
+        }
+
+        if (point.IsDispatchCooling)
+        {
+            return true;
+        }
+
+        if (point.DispatchStatus != DispatchStatus.None)
+        {
+            return true;
+        }
+
+        if (point.RuntimeFaultCode != RuntimeFaultCode.None)
+        {
+            return true;
+        }
+
+        return point.DemoOnlineState == DemoOnlineState.Offline;
     }
 
     private static IReadOnlyList<string> BuildStatusBadges(string statusText, string dispatchStateText)

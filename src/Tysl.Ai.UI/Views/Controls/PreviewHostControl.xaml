@@ -5,28 +5,23 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
              mc:Ignorable="d">
-    <Grid>
-        <Border Background="{StaticResource PanelAltBrush}"
-                BorderBrush="{StaticResource SubtleBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="16" />
-
+    <Grid Background="Transparent">
         <wv2:WebView2 x:Name="Browser"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch"
                       Visibility="Collapsed" />
 
         <Border x:Name="HostStateOverlay"
-                Background="{StaticResource PanelAltBrush}"
-                BorderBrush="{StaticResource SubtleBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="16">
+                Padding="8"
+                Background="#6604090F"
+                CornerRadius="10">
             <TextBlock x:Name="HostStateTextBlock"
                        MaxWidth="240"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center"
+                       FontSize="11"
                        Foreground="{StaticResource TextMutedBrush}"
-                       Text="点击开启预览。"
+                       Text="点击点位后自动预览。"
                        TextAlignment="Center"
                        TextWrapping="Wrap" />
         </Border>

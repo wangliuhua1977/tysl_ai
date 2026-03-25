@@ -26,6 +26,8 @@ public sealed record MapHostPointDto
 
     public required string DispatchStateText { get; init; }
 
+    public required bool IsAbnormal { get; init; }
+
     public double? DisplayLongitude { get; init; }
 
     public double? DisplayLatitude { get; init; }

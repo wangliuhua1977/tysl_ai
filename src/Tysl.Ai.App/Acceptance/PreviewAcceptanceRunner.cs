@@ -20,18 +20,25 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
     private readonly AcisKernelPlatformSiteProvider platformSiteProvider;
     private readonly ShellViewModel shellViewModel;
     private readonly ShellWindow shellWindow;
+    private readonly HashSet<string> targetDeviceCodes;
     private bool disposed;
 
     public PreviewAcceptanceRunner(
         ShellWindow shellWindow,
         ShellViewModel shellViewModel,
         AcisKernelPlatformSiteProvider platformSiteProvider,
-        LocalDiagnosticService diagnosticService)
+        LocalDiagnosticService diagnosticService,
+        IEnumerable<string>? targetDeviceCodes = null)
     {
         this.shellWindow = shellWindow;
         this.shellViewModel = shellViewModel;
         this.platformSiteProvider = platformSiteProvider;
         this.diagnosticService = diagnosticService;
+        this.targetDeviceCodes = targetDeviceCodes?
+            .Where(deviceCode => !string.IsNullOrWhiteSpace(deviceCode))
+            .Select(deviceCode => deviceCode.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         diagnosticService.Written += HandleDiagnosticWritten;
     }
 
@@ -55,7 +62,9 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
     {
         try
         {
-            await WriteRunnerEventAsync("preview-acceptance-start", "mode=v2");
+            await WriteRunnerEventAsync(
+                "preview-acceptance-start",
+                $"mode=v2, targetDevices={(targetDeviceCodes.Count == 0 ? "all" : string.Join("|", targetDeviceCodes.OrderBy(code => code, StringComparer.OrdinalIgnoreCase)))}");
             await WaitForConditionAsync(
                 () => shellWindow.IsLoaded && shellWindow.IsVisible,
                 StartupTimeout);
@@ -63,6 +72,7 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
             var devices = (await platformSiteProvider.ListAsync().ConfigureAwait(false))
                 .Select(site => site.DeviceCode)
                 .Where(deviceCode => !string.IsNullOrWhiteSpace(deviceCode))
+                .Where(deviceCode => targetDeviceCodes.Count == 0 || targetDeviceCodes.Contains(deviceCode))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
@@ -86,13 +96,24 @@ internal sealed class PreviewAcceptanceRunner : IDisposable
 
             await WriteWebRtcSuccessMetricsAsync(results).ConfigureAwait(false);
             await WriteFallbackSampleAsync(results, fallbackSuccess).ConfigureAwait(false);
-            var alternate = results.FirstOrDefault(result =>
-                !string.Equals(result.DeviceCode, directSuccess?.DeviceCode, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(result.DeviceCode, fallbackSuccess?.DeviceCode, StringComparison.OrdinalIgnoreCase));
+            var alternate = results
+                .Where(result =>
+                    result.IsSuccess
+                    && !string.Equals(result.DeviceCode, directSuccess?.DeviceCode, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(result.DeviceCode, fallbackSuccess?.DeviceCode, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(result => result.FinalProtocol == SitePreviewProtocol.WebRtc)
+                .ThenBy(result => result.DeviceCode, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
 
             await WriteRunnerEventAsync(
                 "preview-acceptance-summary",
                 $"tested={results.Count}, directWebRtc={results.Count(result => result.IsSuccess && result.FinalProtocol == SitePreviewProtocol.WebRtc)}, fallbackSuccess={results.Count(result => result.IsSuccess && result.FinalProtocol is SitePreviewProtocol.Flv or SitePreviewProtocol.Hls) + (fallbackSuccess is not null && results.All(result => !string.Equals(result.LastSessionId, fallbackSuccess.LastSessionId, StringComparison.OrdinalIgnoreCase)) ? 1 : 0)}, totalFailed={results.Count(result => !result.IsSuccess)}");
+
+            if (targetDeviceCodes.Count > 0)
+            {
+                await CloseMainWindowAsync(reason: "targeted_preview_acceptance_complete").ConfigureAwait(false);
+                return;
+            }
 
             var repeatDevice = directSuccess?.DeviceCode ?? fallbackSuccess?.DeviceCode ?? alternate?.DeviceCode;
             if (!string.IsNullOrWhiteSpace(repeatDevice))

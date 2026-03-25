@@ -59,6 +59,8 @@ public sealed class SiteDetailViewModel
         RecoveredAtText = detail.RecoveredAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未恢复";
         RecoverySummaryText = string.IsNullOrWhiteSpace(detail.RecoverySummary) ? "暂无恢复摘要" : detail.RecoverySummary!;
         CanConfirmRecovery = !detail.IsIgnored && detail.CanConfirmRecovery && detail.DispatchRecordId.HasValue;
+        AbnormalReasonText = ResolveAbnormalReasonText(detail);
+        CanManualDispatch = ResolveCanManualDispatch(detail);
 
         var displayCoordinate = ResolveCurrentDisplayCoordinate(detail, displayCoordinateOverride);
         LongitudeText = displayCoordinate?.Longitude.ToString("F6") ?? ResolveDisplayCoordinateFallback(detail);
@@ -160,6 +162,10 @@ public sealed class SiteDetailViewModel
     public string RecoverySummaryText { get; }
 
     public bool CanConfirmRecovery { get; }
+
+    public string AbnormalReasonText { get; }
+
+    public bool CanManualDispatch { get; }
 
     public string LongitudeText { get; }
 
@@ -291,6 +297,72 @@ public sealed class SiteDetailViewModel
             RecoveryStatus.NotificationFailed => "已恢复（通知未发送）",
             _ => detail.RecoveredAt.HasValue ? "已恢复" : "未恢复"
         };
+    }
+
+    private static string ResolveAbnormalReasonText(SiteMergedView detail)
+    {
+        if (detail.IsIgnored)
+        {
+            return "当前点位已忽略，不参与主值守派单。";
+        }
+
+        if (detail.RecoveryStatus == RecoveryStatus.PendingConfirmation)
+        {
+            return "现场已处置，等待恢复确认。";
+        }
+
+        if (detail.HasDispatchRecord && detail.DispatchStatus != DispatchStatus.None && !detail.RecoveredAt.HasValue)
+        {
+            return string.IsNullOrWhiteSpace(detail.DispatchFaultSummary)
+                ? "异常已进入派单链路。"
+                : detail.DispatchFaultSummary!;
+        }
+
+        if (detail.RuntimeFaultCode != RuntimeFaultCode.None)
+        {
+            return string.IsNullOrWhiteSpace(detail.RuntimeSummary)
+                ? ResolveStatusText(detail)
+                : detail.RuntimeSummary!;
+        }
+
+        if (detail.LastInspectionRunState is InspectionRunState.Failed or InspectionRunState.SucceededWithFault)
+        {
+            return string.IsNullOrWhiteSpace(detail.RuntimeSummary)
+                ? ResolveInspectionRunStateText(detail.LastInspectionRunState)
+                : detail.RuntimeSummary!;
+        }
+
+        return "当前未发现需要派单的异常。";
+    }
+
+    private static bool ResolveCanManualDispatch(SiteMergedView detail)
+    {
+        if (detail.IsIgnored)
+        {
+            return false;
+        }
+
+        if (detail.HasDispatchRecord && detail.DispatchStatus == DispatchStatus.Dispatched && !detail.RecoveredAt.HasValue)
+        {
+            return false;
+        }
+
+        if (detail.RecoveryStatus == RecoveryStatus.PendingConfirmation)
+        {
+            return false;
+        }
+
+        if (detail.DispatchStatus is DispatchStatus.PendingDispatch or DispatchStatus.SendFailed or DispatchStatus.WebhookNotConfigured)
+        {
+            return true;
+        }
+
+        if (detail.RuntimeFaultCode != RuntimeFaultCode.None)
+        {
+            return true;
+        }
+
+        return detail.LastInspectionRunState is InspectionRunState.Failed or InspectionRunState.SucceededWithFault;
     }
 
     private static string BuildCoordinateStatusText(SiteMergedView detail, DemoCoordinate? displayCoordinateOverride)
