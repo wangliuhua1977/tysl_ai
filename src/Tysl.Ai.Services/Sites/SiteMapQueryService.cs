@@ -65,7 +65,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             IsPlatformConnected = mergeBundle.ConnectionState.IsConnected,
             PointCount = managedSites.Count,
             MonitoredCount = managedSites.Count,
-            FaultCount = managedSites.Count(IsAttentionSite),
+            FaultCount = managedSites.Count(IsAbnormalSite),
             DispatchedCount = managedSites.Count(IsDispatchedSite),
             PendingDispatchCount = managedSites.Count(IsPendingDispatchSite),
             CoverageSummary = new MapCoverageSummary
@@ -82,7 +82,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
                 .Select(ToMapPoint)
                 .ToList(),
             VisibleAlerts = filteredSites
-                .Where(IsAttentionSite)
+                .Where(IsAbnormalSite)
                 .OrderByDescending(GetAlertPriority)
                 .ThenByDescending(GetAlertTimestamp)
                 .Select(ToAlertDigest)
@@ -271,6 +271,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             DemoStatus = site.DemoStatus,
             DemoDispatchStatus = site.DemoDispatchStatus,
             VisualState = site.VisualState,
+            IsAbnormal = IsAbnormalSite(site),
             StatusText = site.StatusText,
             RuntimeSummaryText = ResolveRuntimeSummary(site),
             LastInspectionAt = site.LastInspectionAt,
@@ -336,8 +337,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         return filter switch
         {
             SiteDashboardFilter.All => site.IsMonitored,
-            SiteDashboardFilter.Fault => site.IsMonitored && IsAttentionSite(site),
-            SiteDashboardFilter.Normal => site.IsMonitored && !IsAttentionSite(site),
+            SiteDashboardFilter.Fault => site.IsMonitored && IsAbnormalSite(site),
+            SiteDashboardFilter.Normal => site.IsMonitored && !IsAbnormalSite(site),
             SiteDashboardFilter.Monitored => site.IsMonitored,
             SiteDashboardFilter.Disposed => site.HasDispatchRecord,
             SiteDashboardFilter.Unmapped => !site.HasMapPoint,
@@ -371,21 +372,11 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             || (site.IgnoredReason?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
-    private static bool IsAttentionSite(SiteMergedView site)
+    private static bool IsAbnormalSite(SiteMergedView site)
     {
         if (site.IsIgnored || !site.IsMonitored)
         {
             return false;
-        }
-
-        if (site.CanConfirmRecovery || HasActiveDispatch(site))
-        {
-            return true;
-        }
-
-        if (IsRecentlyRecovered(site))
-        {
-            return true;
         }
 
         if (site.RuntimeFaultCode != RuntimeFaultCode.None)
@@ -399,7 +390,6 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         }
 
         return site.DemoOnlineState == DemoOnlineState.Offline
-            || site.DemoDispatchStatus != DispatchDemoStatus.None
             || site.DemoStatus != PointDemoStatus.Normal;
     }
 

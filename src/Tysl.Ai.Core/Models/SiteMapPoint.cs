@@ -40,6 +40,8 @@ public sealed record SiteMapPoint
 
     public required SiteVisualState VisualState { get; init; }
 
+    public required bool IsAbnormal { get; init; }
+
     public required string StatusText { get; init; }
 
     public string? RuntimeSummaryText { get; init; }

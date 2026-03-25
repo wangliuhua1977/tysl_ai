@@ -30,7 +30,7 @@ public sealed class SiteMapPointViewModel : ObservableObject
         DispatchStateKey = point.DispatchStateKey;
         DispatchStateText = ResolveDispatchStateText(point);
         StatusText = ResolveStatusText(point);
-        IsAbnormal = ResolveIsAbnormal(point);
+        IsAbnormal = point.IsAbnormal;
         RuntimeSummaryText = string.IsNullOrWhiteSpace(point.RuntimeSummaryText)
             ? BuildFallbackSummary(point)
             : point.RuntimeSummaryText!;
@@ -232,42 +232,6 @@ public sealed class SiteMapPointViewModel : ObservableObject
             _ => "等待首次巡检。"
         };
     }
-
-    private static bool ResolveIsAbnormal(SiteMapPoint point)
-    {
-        if (!point.IsMonitored)
-        {
-            return false;
-        }
-
-        if (point.RecoveryStatus == RecoveryStatus.PendingConfirmation)
-        {
-            return true;
-        }
-
-        if (point.RecoveryStatus is RecoveryStatus.Recovered or RecoveryStatus.NotificationFailed)
-        {
-            return false;
-        }
-
-        if (point.IsDispatchCooling)
-        {
-            return true;
-        }
-
-        if (point.DispatchStatus != DispatchStatus.None)
-        {
-            return true;
-        }
-
-        if (point.RuntimeFaultCode != RuntimeFaultCode.None)
-        {
-            return true;
-        }
-
-        return point.DemoOnlineState == DemoOnlineState.Offline;
-    }
-
     private static IReadOnlyList<string> BuildStatusBadges(string statusText, string dispatchStateText)
     {
         var badges = new List<string>(2);
