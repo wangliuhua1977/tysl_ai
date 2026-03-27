@@ -903,6 +903,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             "webrtc_answer_invalid" => "WebRTC Answer 无效",
             "webrtc_answer_failed" => "WebRTC 应答协商失败",
             "webrtc_ready_timeout" => "WebRTC 预览就绪超时",
+            "webrtc_no_first_frame" => "WebRTC 已连接但首帧未到达",
+            "webrtc_black_screen" => "WebRTC 已连接但画面仍为黑屏",
             "flv_not_supported" => "当前环境不支持 FLV 预览",
             "flv_play_failed" => "FLV 播放启动失败",
             "flv_stream_failed" => "FLV 流播放失败",

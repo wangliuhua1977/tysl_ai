@@ -61,8 +61,30 @@ const state = {
   lastStopReason: "none",
   pageMode: pageParams.get("pageMode") || "default",
   fallbackProtocolHint: pageParams.get("fallbackProtocol") || "",
-  activeVideo: video
+  activeVideo: video,
+  webrtc: createWebRtcState()
 };
+
+const webRtcReadyEvents = new Set([
+  "loadedmetadata",
+  "loadeddata",
+  "canplay",
+  "playing"
+]);
+
+function createWebRtcState() {
+  return {
+    connectionState: "new",
+    iceConnectionState: "new",
+    hasAudioTrack: false,
+    hasVideoTrack: false,
+    firstFrameArrived: false
+  };
+}
+
+function resetWebRtcState() {
+  state.webrtc = createWebRtcState();
+}
 
 function createReleaseStats(reason) {
   return {
@@ -290,6 +312,7 @@ function teardownAdapter(reason) {
   state.ready = false;
   state.requestId = null;
   state.readyCategory = null;
+  resetWebRtcState();
   resetVideo();
   replaceVideoElement();
   if (session) {
@@ -327,19 +350,97 @@ function startReadyTimer(seconds, category, attemptId) {
       postDiagnostic("ready_timer_fired", {
         category: state.readyCategory || category || "ready_timeout"
       });
-      fail(state.readyCategory || category || "ready_timeout", "ready timeout", attemptId);
+      handleReadyTimeout(state.readyCategory || category || "ready_timeout", attemptId);
     }
   }, Math.max(4, seconds || 10) * 1000);
 }
 
-function markReady(attemptId) {
+function getWebRtcReadySignal(trigger, snapshot) {
+  if (snapshot.currentTime > 0) {
+    return "current_time";
+  }
+
+  if (snapshot.videoWidth > 0 || snapshot.videoHeight > 0) {
+    return "video_dimensions";
+  }
+
+  return trigger && webRtcReadyEvents.has(trigger)
+    ? trigger
+    : "";
+}
+
+function maybeMarkWebRtcReady(trigger, attemptId) {
+  if (!isCurrentAttempt(attemptId) || state.ready || !state.session || state.session.protocol !== "webrtc") {
+    return false;
+  }
+
+  const snapshot = getVideoSnapshot();
+  const readySignal = getWebRtcReadySignal(trigger, snapshot);
+  if (!readySignal) {
+    postDiagnostic("webrtc_mark_ready_rejected", {
+      trigger: trigger || "unknown",
+      connectionState: state.webrtc.connectionState,
+      iceConnectionState: state.webrtc.iceConnectionState,
+      hasVideoTrack: state.webrtc.hasVideoTrack
+    });
+    return false;
+  }
+
+  if (!state.webrtc.firstFrameArrived) {
+    state.webrtc.firstFrameArrived = true;
+    postDiagnostic("webrtc_first_frame_arrived", {
+      trigger: readySignal,
+      connectionState: state.webrtc.connectionState,
+      iceConnectionState: state.webrtc.iceConnectionState,
+      hasVideoTrack: state.webrtc.hasVideoTrack
+    });
+  }
+
+  markReady(attemptId, readySignal);
+  return true;
+}
+
+function handleReadyTimeout(category, attemptId) {
+  if (!isCurrentAttempt(attemptId) || state.ready) {
+    return;
+  }
+
+  const effectiveCategory = category || "ready_timeout";
+  if (state.session && state.session.protocol === "webrtc") {
+    const snapshot = getVideoSnapshot();
+    const connected = state.webrtc.connectionState === "connected"
+      || state.webrtc.iceConnectionState === "connected"
+      || state.webrtc.iceConnectionState === "completed";
+    const noFirstFrame = !state.webrtc.firstFrameArrived
+      && snapshot.videoWidth <= 0
+      && snapshot.videoHeight <= 0
+      && snapshot.currentTime <= 0;
+
+    if (connected && state.webrtc.hasVideoTrack && noFirstFrame) {
+      postDiagnostic("webrtc_black_screen_timeout", {
+        category: effectiveCategory,
+        connectionState: state.webrtc.connectionState,
+        iceConnectionState: state.webrtc.iceConnectionState,
+        hasVideoTrack: state.webrtc.hasVideoTrack
+      });
+      fail("webrtc_no_first_frame", "connected without first frame", attemptId);
+      return;
+    }
+  }
+
+  fail(effectiveCategory, "ready timeout", attemptId);
+}
+
+function markReady(attemptId, trigger) {
   if (!isCurrentAttempt(attemptId) || state.ready || !state.session) {
     return;
   }
 
   state.ready = true;
   clearReadyTimer();
-  postDiagnostic("mark_ready");
+  postDiagnostic("mark_ready", {
+    trigger: trigger || ""
+  });
   setStatus(state.session.protocol === "webrtc" ? "WebRTC 实时预览已连接。" : "备用预览已连接。");
   post("playback_ready", {
     deviceCode: state.session.deviceCode || "",
@@ -461,16 +562,31 @@ function bindVideoEvents(targetVideo) {
 
   attach("loadedmetadata", attemptId => {
     postDiagnostic("video_loadedmetadata");
+    if (state.session && state.session.protocol === "webrtc") {
+      maybeMarkWebRtcReady("loadedmetadata", attemptId);
+      return;
+    }
+
     maybeMarkFallbackReady(attemptId);
   });
 
   attach("loadeddata", attemptId => {
     postDiagnostic("video_loadeddata");
+    if (state.session && state.session.protocol === "webrtc") {
+      maybeMarkWebRtcReady("loadeddata", attemptId);
+      return;
+    }
+
     maybeMarkFallbackReady(attemptId);
   });
 
   attach("canplay", attemptId => {
     postDiagnostic("video_canplay");
+    if (state.session && state.session.protocol === "webrtc") {
+      maybeMarkWebRtcReady("canplay", attemptId);
+      return;
+    }
+
     maybeMarkFallbackReady(attemptId);
   });
 
@@ -481,7 +597,12 @@ function bindVideoEvents(targetVideo) {
 
   attach("playing", attemptId => {
     postDiagnostic("video_playing");
-    markReady(attemptId);
+    if (state.session && state.session.protocol === "webrtc") {
+      maybeMarkWebRtcReady("playing", attemptId);
+      return;
+    }
+
+    markReady(attemptId, "playing");
   });
 
   attach("waiting", () => {
@@ -533,6 +654,7 @@ function createWebRtcPlaybackHost(session, attemptId) {
       mediaStream = new MediaStream();
       video.srcObject = mediaStream;
       state.ready = false;
+      resetWebRtcState();
 
       peer.ontrack = event => {
         if (!isSessionActive()) {
@@ -540,8 +662,17 @@ function createWebRtcPlaybackHost(session, attemptId) {
         }
 
         mediaStream.addTrack(event.track);
+        if (event.track && event.track.kind === "audio") {
+          state.webrtc.hasAudioTrack = true;
+        }
+
+        if (event.track && event.track.kind === "video") {
+          state.webrtc.hasVideoTrack = true;
+        }
+
         postDiagnostic("webrtc_track", {
-          kind: event.track ? event.track.kind : "unknown"
+          kind: event.track ? event.track.kind : "unknown",
+          hasVideoTrack: state.webrtc.hasVideoTrack
         });
         video.play().catch(() => {});
       };
@@ -551,12 +682,19 @@ function createWebRtcPlaybackHost(session, attemptId) {
           return;
         }
 
+        state.webrtc.connectionState = peer.connectionState || "unknown";
         postDiagnostic("webrtc_connection_state", {
           connectionState: peer.connectionState
         });
         if (peer.connectionState === "connected") {
           video.play().catch(() => {});
-          markReady(attemptId);
+          if (!maybeMarkWebRtcReady("connection_connected", attemptId)) {
+            postDiagnostic("webrtc_connected_without_first_frame", {
+              connectionState: state.webrtc.connectionState,
+              iceConnectionState: state.webrtc.iceConnectionState,
+              hasVideoTrack: state.webrtc.hasVideoTrack
+            });
+          }
           return;
         }
 
@@ -570,6 +708,7 @@ function createWebRtcPlaybackHost(session, attemptId) {
           return;
         }
 
+        state.webrtc.iceConnectionState = peer.iceConnectionState || "unknown";
         postDiagnostic("webrtc_ice_state", {
           iceConnectionState: peer.iceConnectionState
         });
