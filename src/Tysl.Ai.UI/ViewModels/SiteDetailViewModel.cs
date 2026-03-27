@@ -57,8 +57,13 @@ public sealed class SiteDetailViewModel
         LastDispatchAtText = detail.DispatchSentAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未发送";
         CoolingUntilText = detail.CoolingUntil?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "未进入冷却";
         RecoveredAtText = detail.RecoveredAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未恢复";
+        ClosedArchivedAtText = detail.ClosedArchivedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "尚未归档";
+        RecoverySourceText = ResolveRecoverySourceText(detail.RecoverySource);
         RecoverySummaryText = string.IsNullOrWhiteSpace(detail.RecoverySummary) ? "暂无恢复摘要" : detail.RecoverySummary!;
+        ClosingRemarkText = string.IsNullOrWhiteSpace(detail.ClosingRemark) ? "未填写" : detail.ClosingRemark;
+        LastNotificationSummaryText = string.IsNullOrWhiteSpace(detail.DispatchMessageDigest) ? "暂无通知摘要" : detail.DispatchMessageDigest;
         CanConfirmRecovery = !detail.IsIgnored && detail.CanConfirmRecovery && detail.DispatchRecordId.HasValue;
+        CloseActionText = "确认已处理";
         AbnormalReasonText = ResolveAbnormalReasonText(detail);
         CanManualDispatch = ResolveCanManualDispatch(detail);
 
@@ -78,9 +83,16 @@ public sealed class SiteDetailViewModel
             : "尚未补录";
         AddressText = string.IsNullOrWhiteSpace(detail.AddressText) ? "地址待补充" : detail.AddressText;
         ProductAccessNumber = string.IsNullOrWhiteSpace(detail.ProductAccessNumber) ? "未补充" : detail.ProductAccessNumber;
+        ProductStatusText = string.IsNullOrWhiteSpace(detail.ProductStatus) ? "待接入" : detail.ProductStatus;
+        ArrearsAmountText = detail.ArrearsAmount.HasValue ? $"{detail.ArrearsAmount.Value:F2} 元" : "待接入";
         MaintenanceUnit = string.IsNullOrWhiteSpace(detail.MaintenanceUnit) ? "维护单位待补充" : detail.MaintenanceUnit;
         MaintainerName = string.IsNullOrWhiteSpace(detail.MaintainerName) ? "维护人待补充" : detail.MaintainerName;
         MaintainerPhone = string.IsNullOrWhiteSpace(detail.MaintainerPhone) ? "联系电话待补充" : detail.MaintainerPhone;
+        AreaName = string.IsNullOrWhiteSpace(detail.AreaName) ? "片区待补充" : detail.AreaName;
+        DefaultDispatchRemark = string.IsNullOrWhiteSpace(detail.DefaultDispatchRemark) ? "未设置默认派单说明" : detail.DefaultDispatchRemark;
+        IsAutoDispatchEnabled = detail.IsAutoDispatchEnabled;
+        AllowRecoveryAutoArchive = detail.AllowRecoveryAutoArchive;
+        RecoveryConfirmationModeText = ResolveRecoveryConfirmationModeText(detail.RecoveryConfirmationMode);
         LocalProfileStatusText = detail.HasLocalProfile ? "已保存本地补充信息" : "尚未保存本地补充信息";
         VisualState = detail.VisualState;
         StatusText = ResolveStatusText(detail);
@@ -159,9 +171,19 @@ public sealed class SiteDetailViewModel
 
     public string RecoveredAtText { get; }
 
+    public string ClosedArchivedAtText { get; }
+
+    public string RecoverySourceText { get; }
+
     public string RecoverySummaryText { get; }
 
+    public string ClosingRemarkText { get; }
+
+    public string LastNotificationSummaryText { get; }
+
     public bool CanConfirmRecovery { get; }
+
+    public string CloseActionText { get; }
 
     public string AbnormalReasonText { get; }
 
@@ -183,11 +205,25 @@ public sealed class SiteDetailViewModel
 
     public string ProductAccessNumber { get; }
 
+    public string ProductStatusText { get; }
+
+    public string ArrearsAmountText { get; }
+
     public string MaintenanceUnit { get; }
 
     public string MaintainerName { get; }
 
     public string MaintainerPhone { get; }
+
+    public string AreaName { get; }
+
+    public string DefaultDispatchRemark { get; }
+
+    public bool IsAutoDispatchEnabled { get; }
+
+    public bool AllowRecoveryAutoArchive { get; }
+
+    public string RecoveryConfirmationModeText { get; }
 
     public string LocalProfileStatusText { get; }
 
@@ -216,7 +252,12 @@ public sealed class SiteDetailViewModel
             ProductAccessNumber = detail.ProductAccessNumber,
             MaintenanceUnit = detail.MaintenanceUnit,
             MaintainerName = detail.MaintainerName,
-            MaintainerPhone = detail.MaintainerPhone
+            MaintainerPhone = detail.MaintainerPhone,
+            AreaName = detail.AreaName,
+            DefaultDispatchRemark = detail.DefaultDispatchRemark,
+            IsAutoDispatchEnabled = detail.IsAutoDispatchEnabled,
+            AllowRecoveryAutoArchive = detail.AllowRecoveryAutoArchive,
+            RecoveryConfirmationMode = detail.RecoveryConfirmationMode
         };
     }
 
@@ -240,6 +281,11 @@ public sealed class SiteDetailViewModel
         if (detail.CanConfirmRecovery)
         {
             return "待恢复确认";
+        }
+
+        if (detail.WorkOrderStatus == DispatchWorkOrderStatus.ClosedArchived)
+        {
+            return "已归档";
         }
 
         if (detail.RecoveryStatus is RecoveryStatus.Recovered or RecoveryStatus.NotificationFailed)
@@ -273,6 +319,11 @@ public sealed class SiteDetailViewModel
             return "未触发派单";
         }
 
+        if (detail.WorkOrderStatus == DispatchWorkOrderStatus.ClosedArchived)
+        {
+            return "已归档";
+        }
+
         if (detail.IsDispatchCooling)
         {
             return "冷却中";
@@ -290,6 +341,11 @@ public sealed class SiteDetailViewModel
 
     private static string ResolveRecoveryStatusText(SiteMergedView detail)
     {
+        if (detail.WorkOrderStatus == DispatchWorkOrderStatus.ClosedArchived)
+        {
+            return "已归档";
+        }
+
         return detail.RecoveryStatus switch
         {
             RecoveryStatus.PendingConfirmation => "待恢复确认",
@@ -444,6 +500,26 @@ public sealed class SiteDetailViewModel
             PreviewResolveState.Failed => "解析失败",
             PreviewResolveState.Skipped => "已跳过",
             _ => "未知"
+        };
+    }
+
+    private static string ResolveRecoveryConfirmationModeText(RecoveryConfirmationMode mode)
+    {
+        return mode switch
+        {
+            RecoveryConfirmationMode.Automatic => "自动",
+            RecoveryConfirmationMode.ManualPreferred => "手工优先",
+            _ => "仅手工"
+        };
+    }
+
+    private static string ResolveRecoverySourceText(RecoverySource? source)
+    {
+        return source switch
+        {
+            RecoverySource.SystemDetected => "系统检测",
+            RecoverySource.ManualConfirmed => "管理员确认",
+            _ => "未记录"
         };
     }
 }

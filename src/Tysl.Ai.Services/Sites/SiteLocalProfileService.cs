@@ -99,7 +99,12 @@ public sealed class SiteLocalProfileService : ISiteLocalProfileService
         profile.ProductAccessNumber = NormalizeText(input.ProductAccessNumber);
         profile.MaintenanceUnit = NormalizeText(input.MaintenanceUnit);
         profile.MaintainerName = NormalizeText(input.MaintainerName);
-        profile.MaintainerPhone = NormalizeText(input.MaintainerPhone);
+        profile.MaintainerPhone = NormalizePhone(input.MaintainerPhone);
+        profile.AreaName = NormalizeText(input.AreaName);
+        profile.DefaultDispatchRemark = NormalizeText(input.DefaultDispatchRemark);
+        profile.IsAutoDispatchEnabled = input.IsAutoDispatchEnabled;
+        profile.AllowRecoveryAutoArchive = input.AllowRecoveryAutoArchive;
+        profile.RecoveryConfirmationMode = input.RecoveryConfirmationMode;
         profile.UpdatedAt = now;
 
         await repository.UpsertAsync(profile, cancellationToken);
@@ -129,10 +134,32 @@ public sealed class SiteLocalProfileService : ISiteLocalProfileService
         {
             throw new InvalidOperationException("手工纬度超出有效范围。");
         }
+
+        _ = NormalizePhone(input.MaintainerPhone);
     }
 
     private static string? NormalizeText(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string? NormalizePhone(string? value)
+    {
+        var normalized = NormalizeText(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        var isValid = normalized.All(character =>
+            char.IsDigit(character)
+            || character is '+' or '-' or ' ' or '(' or ')');
+
+        if (!isValid)
+        {
+            throw new InvalidOperationException("维护人联系电话格式不正确。");
+        }
+
+        return normalized;
     }
 }

@@ -5,11 +5,12 @@ using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.Infrastructure.Background;
 using Tysl.Ai.Infrastructure.Configuration;
 using Tysl.Ai.Infrastructure.Diagnostics;
-using Tysl.Ai.Infrastructure.Dispatch;
 using Tysl.Ai.Infrastructure.Integrations.Acis;
 using Tysl.Ai.Infrastructure.Messaging;
 using Tysl.Ai.Infrastructure.Persistence.Sqlite;
 using Tysl.Ai.Infrastructure.Storage;
+using Tysl.Ai.Services.Dispatch;
+using Tysl.Ai.Services.Notifications;
 using Tysl.Ai.Services.Sites;
 using Tysl.Ai.UI.Models;
 using Tysl.Ai.UI.ViewModels;
@@ -34,6 +35,7 @@ public partial class App : Application
         var databasePath = GetDatabasePath();
         var connectionFactory = new SqliteConnectionFactory(databasePath);
         diagnosticService = new LocalDiagnosticService(ProjectPathResolver.EnsureRuntimeDirectory("diagnostics"));
+        var startupDiagnosticService = diagnosticService;
         DispatcherUnhandledException += HandleDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += HandleCurrentDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += HandleUnobservedTaskException;
@@ -53,24 +55,34 @@ public partial class App : Application
         ISiteRuntimeStateRepository runtimeStateRepository = new SiteRuntimeStateRepository(connectionFactory);
         IInspectionSettingsProvider inspectionSettingsProvider = new InspectionSettingsProvider(connectionFactory);
         IDispatchPolicyProvider dispatchPolicyProvider = new DispatchPolicyProvider(connectionFactory);
-        IDispatchRecordRepository dispatchRecordRepository = new DispatchRecordRepository(connectionFactory);
+        IActiveWorkOrderStore activeWorkOrderStore = new SqliteActiveWorkOrderStore(connectionFactory);
+        IWebhookEndpointStore webhookEndpointStore = new SqliteWebhookEndpointStore(connectionFactory);
+        INotificationTemplateStore notificationTemplateStore = new SqliteNotificationTemplateStore(connectionFactory);
+        INotificationTemplateRenderService notificationTemplateRenderService = new NotificationTemplateRenderService();
+        webhookSender = new WeComWebhookSender();
+        IWebhookNotificationService webhookNotificationService = new WebhookNotificationService(
+            webhookEndpointStore,
+            notificationTemplateStore,
+            notificationTemplateRenderService,
+            webhookSender,
+            startupDiagnosticService);
         ISnapshotStorage snapshotStorage = new SnapshotStorage(ProjectPathResolver.EnsureRuntimeDirectory("snapshots"));
         var snapshotRecordRepository = new SnapshotRecordRepository(connectionFactory);
-        webhookSender = new WeComWebhookSender();
-        IDispatchService dispatchService = new DispatchService(
+        IDispatchService dispatchService = new DispatchWorkflowService(
             dispatchPolicyProvider,
-            dispatchRecordRepository,
+            activeWorkOrderStore,
             repository,
             runtimeStateRepository,
             platformSiteProvider,
-            webhookSender);
+            webhookNotificationService,
+            startupDiagnosticService);
         ISiteLocalProfileService siteLocalProfileService = new SiteLocalProfileService(repository);
         ISiteMapQueryService siteMapQueryService = new SiteMapQueryService(
             platformSiteProvider,
             platformSiteProvider,
             repository,
             runtimeStateRepository,
-            dispatchRecordRepository);
+            activeWorkOrderStore);
         ISitePreviewService sitePreviewService = new SitePreviewService(
             platformSiteProvider,
             runtimeStateRepository);
@@ -93,14 +105,17 @@ public partial class App : Application
             sitePreviewService,
             siteLocalProfileService,
             dispatchService,
-            diagnosticService,
+            startupDiagnosticService,
+            webhookEndpointStore,
+            notificationTemplateStore,
+            notificationTemplateRenderService,
             amapOptionsProvider,
             amapLoadResult.IsReady,
             amapLoadResult.Options?.MapStyle);
         var shellWindow = new ShellWindow(
             BuildMapHostConfiguration(amapLoadResult),
             sitePreviewService,
-            diagnosticService)
+            startupDiagnosticService)
         {
             DataContext = shellViewModel
         };
@@ -170,6 +185,7 @@ public partial class App : Application
         _ = diagnosticService?.WriteAsync(
             "exception-caught",
             $"source=dispatcher, type={e.Exception.GetType().FullName}, message={e.Exception.Message}");
+        e.Handled = true;
     }
 
     private void HandleCurrentDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -193,6 +209,7 @@ public partial class App : Application
         _ = diagnosticService?.WriteAsync(
             "exception-caught",
             $"source=taskscheduler, type={exception.GetType().FullName}, message={exception.Message}");
+        e.SetObserved();
     }
 
     private static string GetDatabasePath()

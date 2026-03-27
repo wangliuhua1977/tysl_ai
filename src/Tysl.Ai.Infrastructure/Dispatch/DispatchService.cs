@@ -6,7 +6,7 @@ using Tysl.Ai.Core.Models;
 
 namespace Tysl.Ai.Infrastructure.Dispatch;
 
-public sealed class DispatchService : IDispatchService
+public sealed class DispatchService
 {
     private readonly IDispatchPolicyProvider dispatchPolicyProvider;
     private readonly IDispatchRecordRepository dispatchRecordRepository;
@@ -86,6 +86,13 @@ public sealed class DispatchService : IDispatchService
         await CreateFaultRecordAsync(policy, currentFaultCode, platformSite, localProfile, currentState, cancellationToken);
     }
 
+    public Task<ManualDispatchPreparation> PrepareManualDispatchAsync(
+        string deviceCode,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Infrastructure.Dispatch.DispatchService 已退役，请改用 Services.Dispatch.DispatchWorkflowService。");
+    }
+
     public async Task ConfirmRecoveryAsync(long dispatchRecordId, CancellationToken cancellationToken = default)
     {
         var record = await dispatchRecordRepository.GetByIdAsync(dispatchRecordId, cancellationToken);
@@ -111,7 +118,15 @@ public sealed class DispatchService : IDispatchService
             cancellationToken);
     }
 
-    public async Task ManualDispatchAsync(string deviceCode, CancellationToken cancellationToken = default)
+    public Task ManualDispatchAsync(
+        ManualDispatchRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return ManualDispatchInternalAsync(request.DeviceCode, cancellationToken);
+    }
+
+    public async Task ManualDispatchInternalAsync(string deviceCode, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(deviceCode))
         {

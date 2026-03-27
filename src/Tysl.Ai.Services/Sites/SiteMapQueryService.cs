@@ -9,7 +9,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 {
     private static readonly TimeSpan RecoveredHighlightWindow = TimeSpan.FromMinutes(45);
 
-    private readonly IDispatchRecordRepository dispatchRecordRepository;
+    private readonly IActiveWorkOrderStore activeWorkOrderStore;
     private readonly ISiteLocalProfileRepository localProfileRepository;
     private readonly IPlatformConnectionStateProvider platformConnectionStateProvider;
     private readonly IPlatformSiteProvider platformSiteProvider;
@@ -20,13 +20,13 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         IPlatformConnectionStateProvider platformConnectionStateProvider,
         ISiteLocalProfileRepository localProfileRepository,
         ISiteRuntimeStateRepository runtimeStateRepository,
-        IDispatchRecordRepository dispatchRecordRepository)
+        IActiveWorkOrderStore activeWorkOrderStore)
     {
         this.platformSiteProvider = platformSiteProvider;
         this.platformConnectionStateProvider = platformConnectionStateProvider;
         this.localProfileRepository = localProfileRepository;
         this.runtimeStateRepository = runtimeStateRepository;
-        this.dispatchRecordRepository = dispatchRecordRepository;
+        this.activeWorkOrderStore = activeWorkOrderStore;
     }
 
     public async Task<SiteDashboardSnapshot> GetDashboardAsync(
@@ -124,7 +124,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         var platformConnectionState = platformConnectionStateProvider.GetCurrentState();
         var localProfiles = await localProfileRepository.ListAsync(cancellationToken);
         var runtimeStates = await runtimeStateRepository.ListAsync(cancellationToken);
-        var dispatchRecords = await dispatchRecordRepository.ListLatestAsync(cancellationToken);
+        var activeWorkOrders = await activeWorkOrderStore.ListLatestAsync(cancellationToken);
 
         var localProfileMap = localProfiles.ToDictionary(
             profile => profile.DeviceCode,
@@ -134,7 +134,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             state => state.DeviceCode,
             state => state,
             StringComparer.OrdinalIgnoreCase);
-        var dispatchRecordMap = dispatchRecords.ToDictionary(
+        var activeWorkOrderMap = activeWorkOrders.ToDictionary(
             record => record.DeviceCode,
             record => record,
             StringComparer.OrdinalIgnoreCase);
@@ -144,8 +144,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             {
                 localProfileMap.TryGetValue(platformSite.DeviceCode, out var localProfile);
                 runtimeStateMap.TryGetValue(platformSite.DeviceCode, out var runtimeState);
-                dispatchRecordMap.TryGetValue(platformSite.DeviceCode, out var dispatchRecord);
-                return Merge(platformSite, localProfile, runtimeState, dispatchRecord, platformConnectionState);
+                activeWorkOrderMap.TryGetValue(platformSite.DeviceCode, out var activeWorkOrder);
+                return Merge(platformSite, localProfile, runtimeState, activeWorkOrder, platformConnectionState);
             })
             .ToList();
 
@@ -156,13 +156,13 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         PlatformSiteSnapshot platformSite,
         SiteLocalProfile? localProfile,
         SiteRuntimeState? runtimeState,
-        DispatchRecord? dispatchRecord,
+        ActiveWorkOrder? activeWorkOrder,
         PlatformConnectionState platformConnectionState)
     {
         var coordinateGovernance = ResolveCoordinateGovernance(platformSite, localProfile);
         var isMonitored = localProfile?.IsMonitored ?? true;
         var isIgnored = localProfile?.IsIgnored ?? false;
-        var dispatchPresentation = ResolveDispatchPresentation(dispatchRecord, runtimeState);
+        var dispatchPresentation = ResolveDispatchPresentation(activeWorkOrder);
 
         return new SiteMergedView
         {
@@ -204,29 +204,43 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
             ConsecutiveFailureCount = runtimeState?.ConsecutiveFailureCount ?? 0,
             LastInspectionRunState = runtimeState?.LastInspectionRunState ?? InspectionRunState.None,
             RuntimeUpdatedAt = runtimeState?.UpdatedAt,
-            DispatchRecordId = dispatchRecord?.Id,
-            HasDispatchRecord = dispatchRecord is not null,
-            DispatchFaultCode = dispatchRecord?.FaultCode,
-            DispatchFaultSummary = dispatchRecord?.FaultSummary,
-            DispatchStatus = dispatchRecord?.DispatchStatus ?? DispatchStatus.None,
-            DispatchMode = dispatchRecord?.DispatchMode ?? DispatchMode.Automatic,
-            DispatchTriggeredAt = dispatchRecord?.TriggeredAt,
-            DispatchSentAt = dispatchRecord?.SentAt,
-            CoolingUntil = dispatchRecord?.CoolingUntil,
-            RecoveryMode = dispatchRecord?.RecoveryMode ?? RecoveryMode.Automatic,
-            RecoveryStatus = dispatchRecord?.RecoveryStatus ?? RecoveryStatus.None,
-            RecoveredAt = dispatchRecord?.RecoveredAt,
-            RecoverySummary = dispatchRecord?.RecoverySummary,
-            DispatchMessageDigest = dispatchRecord?.MessageDigest,
+            DispatchRecordId = activeWorkOrder?.WorkOrderId,
+            HasDispatchRecord = activeWorkOrder is not null,
+            DispatchFaultCode = activeWorkOrder?.CurrentFaultCode,
+            DispatchFaultSummary = activeWorkOrder?.CurrentFaultReason,
+            DispatchStatus = dispatchPresentation.DispatchStatus,
+            DispatchMode = activeWorkOrder?.DispatchSource == DispatchSource.Manual
+                ? DispatchMode.Manual
+                : DispatchMode.Automatic,
+            DispatchTriggeredAt = activeWorkOrder?.FirstDispatchedAt,
+            DispatchSentAt = activeWorkOrder?.LatestNotificationAt,
+            CoolingUntil = null,
+            RecoveryMode = RecoveryMode.Manual,
+            RecoveryStatus = dispatchPresentation.RecoveryStatus,
+            RecoveredAt = activeWorkOrder?.RecoveredAt,
+            RecoverySource = activeWorkOrder?.RecoverySource,
+            ClosedArchivedAt = activeWorkOrder?.ClosedArchivedAt,
+            RecoverySummary = ResolveRecoverySummary(activeWorkOrder),
+            ClosingRemark = activeWorkOrder?.ClosingRemark,
+            DispatchMessageDigest = activeWorkOrder?.LastNotificationSummary,
             IsDispatchCooling = !isIgnored && dispatchPresentation.IsCooling,
             CanConfirmRecovery = !isIgnored && dispatchPresentation.CanConfirmRecovery,
             DispatchStatusText = dispatchPresentation.DispatchStatusText,
             RecoveryStatusText = dispatchPresentation.RecoveryStatusText,
             AddressText = localProfile?.AddressText,
-            ProductAccessNumber = localProfile?.ProductAccessNumber,
-            MaintenanceUnit = localProfile?.MaintenanceUnit,
-            MaintainerName = localProfile?.MaintainerName,
-            MaintainerPhone = localProfile?.MaintainerPhone,
+            ProductAccessNumber = localProfile?.ProductAccessNumber ?? activeWorkOrder?.ProductAccessNumberSnapshot,
+            ProductStatus = activeWorkOrder?.ProductStatusSnapshot,
+            ArrearsAmount = activeWorkOrder?.ArrearsAmountSnapshot,
+            MaintenanceUnit = localProfile?.MaintenanceUnit ?? activeWorkOrder?.MaintenanceUnitSnapshot,
+            MaintainerName = localProfile?.MaintainerName ?? activeWorkOrder?.MaintainerNameSnapshot,
+            MaintainerPhone = localProfile?.MaintainerPhone ?? activeWorkOrder?.MaintainerPhoneSnapshot,
+            AreaName = localProfile?.AreaName,
+            DefaultDispatchRemark = localProfile?.DefaultDispatchRemark ?? activeWorkOrder?.DispatchRemarkSnapshot,
+            IsAutoDispatchEnabled = localProfile?.IsAutoDispatchEnabled ?? false,
+            AllowRecoveryAutoArchive = localProfile?.AllowRecoveryAutoArchive ?? activeWorkOrder?.AllowRecoveryAutoArchiveSnapshot ?? false,
+            RecoveryConfirmationMode = localProfile?.RecoveryConfirmationMode ?? activeWorkOrder?.RecoveryConfirmationModeSnapshot ?? RecoveryConfirmationMode.ManualOnly,
+            WorkOrderDispatchSource = activeWorkOrder?.DispatchSource,
+            WorkOrderStatus = activeWorkOrder?.Status,
             DemoOnlineState = runtimeState?.LastOnlineState ?? platformSite.DemoOnlineState,
             DemoStatus = platformSite.DemoStatus,
             DemoDispatchStatus = platformSite.DemoDispatchStatus,
@@ -359,6 +373,8 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         return site.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)
             || site.DeviceName.Contains(term, StringComparison.OrdinalIgnoreCase)
             || site.DeviceCode.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || (site.ProductAccessNumber?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (site.ProductStatus?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
             || site.UnmappedReasonText.Contains(term, StringComparison.OrdinalIgnoreCase)
             || site.CoordinateGovernanceHintText.Contains(term, StringComparison.OrdinalIgnoreCase)
             || (site.AddressText?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
@@ -407,17 +423,18 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
 
     private static bool IsDispatchedSite(SiteMergedView site)
     {
-        if (site.IsIgnored || site.RecoveredAt.HasValue)
+        if (site.IsIgnored)
         {
             return false;
         }
 
-        return site.DispatchStatus == DispatchStatus.Dispatched;
+        return site.DispatchStatus == DispatchStatus.Dispatched
+            || site.RecoveryStatus == RecoveryStatus.PendingConfirmation;
     }
 
     private static bool IsPendingDispatchSite(SiteMergedView site)
     {
-        if (site.IsIgnored || site.RecoveredAt.HasValue)
+        if (site.IsIgnored || site.RecoveryStatus == RecoveryStatus.PendingConfirmation)
         {
             return false;
         }
@@ -934,62 +951,99 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         };
     }
 
-    private static DispatchPresentation ResolveDispatchPresentation(
-        DispatchRecord? dispatchRecord,
-        SiteRuntimeState? runtimeState)
+    private static DispatchPresentation ResolveDispatchPresentation(ActiveWorkOrder? activeWorkOrder)
     {
-        if (dispatchRecord is null)
+        if (activeWorkOrder is null)
         {
             return new DispatchPresentation(
                 false,
                 false,
                 false,
                 DispatchStatus.None,
+                RecoveryStatus.None,
                 "未触发派单",
                 "未恢复");
         }
 
-        var isCooling =
-            !dispatchRecord.IsRecovered
-            && dispatchRecord.DispatchStatus == DispatchStatus.Dispatched
-            && dispatchRecord.CoolingUntil is DateTimeOffset coolingUntil
-            && coolingUntil > DateTimeOffset.UtcNow;
-        var canConfirmRecovery = dispatchRecord.RecoveryStatus == RecoveryStatus.PendingConfirmation;
+        var canConfirmRecovery =
+            activeWorkOrder.Status == DispatchWorkOrderStatus.RecoveredPendingClose
+            && !activeWorkOrder.RecoveryConfirmedAt.HasValue;
+        var hasActiveDispatch = activeWorkOrder.Status is DispatchWorkOrderStatus.Ready or DispatchWorkOrderStatus.Active;
 
         return new DispatchPresentation(
-            dispatchRecord.DispatchStatus != DispatchStatus.None && !dispatchRecord.IsRecovered,
-            isCooling,
+            hasActiveDispatch,
+            false,
             canConfirmRecovery,
-            dispatchRecord.DispatchStatus,
-            ResolveDispatchStatusText(dispatchRecord, isCooling),
-            ResolveRecoveryStatusText(dispatchRecord));
+            ResolveDispatchStatus(activeWorkOrder),
+            ResolveRecoveryStatus(activeWorkOrder),
+            ResolveDispatchStatusText(activeWorkOrder),
+            ResolveRecoveryStatusText(activeWorkOrder));
     }
 
-    private static string ResolveDispatchStatusText(DispatchRecord record, bool isCooling)
+    private static DispatchStatus ResolveDispatchStatus(ActiveWorkOrder activeWorkOrder)
     {
-        if (isCooling)
+        return activeWorkOrder.Status switch
         {
-            return "冷却中";
-        }
+            DispatchWorkOrderStatus.Ready => DispatchStatus.PendingDispatch,
+            DispatchWorkOrderStatus.Active => DispatchStatus.Dispatched,
+            DispatchWorkOrderStatus.RecoveredPendingClose => DispatchStatus.Dispatched,
+            _ => DispatchStatus.None
+        };
+    }
 
-        return record.DispatchStatus switch
+    private static RecoveryStatus ResolveRecoveryStatus(ActiveWorkOrder activeWorkOrder)
+    {
+        return activeWorkOrder.Status switch
         {
-            DispatchStatus.PendingDispatch => "待派单",
-            DispatchStatus.Dispatched => "已派单",
-            DispatchStatus.SendFailed => "发送失败",
-            DispatchStatus.WebhookNotConfigured => "待发送",
+            DispatchWorkOrderStatus.RecoveredPendingClose when !activeWorkOrder.RecoveryConfirmedAt.HasValue => RecoveryStatus.PendingConfirmation,
+            DispatchWorkOrderStatus.RecoveredPendingClose => RecoveryStatus.Recovered,
+            DispatchWorkOrderStatus.ClosedArchived => RecoveryStatus.Recovered,
+            _ => RecoveryStatus.None
+        };
+    }
+
+    private static string ResolveDispatchStatusText(ActiveWorkOrder activeWorkOrder)
+    {
+        return activeWorkOrder.Status switch
+        {
+            DispatchWorkOrderStatus.Ready => "待派单",
+            DispatchWorkOrderStatus.Active => "已派单",
+            DispatchWorkOrderStatus.RecoveredPendingClose when !activeWorkOrder.RecoveryConfirmedAt.HasValue => "待恢复确认",
+            DispatchWorkOrderStatus.RecoveredPendingClose => "已恢复",
+            DispatchWorkOrderStatus.ClosedArchived => "已归档",
             _ => "未触发派单"
         };
     }
 
-    private static string ResolveRecoveryStatusText(DispatchRecord record)
+    private static string ResolveRecoveryStatusText(ActiveWorkOrder activeWorkOrder)
     {
-        return record.RecoveryStatus switch
+        return activeWorkOrder.Status switch
         {
-            RecoveryStatus.PendingConfirmation => "待恢复确认",
-            RecoveryStatus.Recovered => "已恢复",
-            RecoveryStatus.NotificationFailed => "已恢复（通知未发送）",
-            _ => record.RecoveredAt.HasValue ? "已恢复" : "未恢复"
+            DispatchWorkOrderStatus.RecoveredPendingClose when !activeWorkOrder.RecoveryConfirmedAt.HasValue => "待恢复确认",
+            DispatchWorkOrderStatus.RecoveredPendingClose => "已恢复",
+            DispatchWorkOrderStatus.ClosedArchived => "已归档",
+            _ => "未恢复"
+        };
+    }
+
+    private static string? ResolveRecoverySummary(ActiveWorkOrder? activeWorkOrder)
+    {
+        if (activeWorkOrder is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(activeWorkOrder.RecoverySummary))
+        {
+            return activeWorkOrder.RecoverySummary;
+        }
+
+        return activeWorkOrder.Status switch
+        {
+            DispatchWorkOrderStatus.RecoveredPendingClose when !activeWorkOrder.RecoveryConfirmedAt.HasValue => "运行态已恢复，待人工确认。",
+            DispatchWorkOrderStatus.RecoveredPendingClose => "已人工确认恢复，待后续归档。",
+            DispatchWorkOrderStatus.ClosedArchived => "已完成恢复并归档。",
+            _ => null
         };
     }
 
@@ -1041,6 +1095,7 @@ public sealed class SiteMapQueryService : ISiteMapQueryService
         bool IsCooling,
         bool CanConfirmRecovery,
         DispatchStatus DispatchStatus,
+        RecoveryStatus RecoveryStatus,
         string DispatchStatusText,
         string RecoveryStatusText)
     {

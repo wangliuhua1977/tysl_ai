@@ -19,7 +19,7 @@
             <TextBlock FontSize="24" FontWeight="SemiBold" Text="{Binding Title}" />
             <TextBlock Margin="0,6,0,0"
                        Style="{StaticResource CaptionTextStyle}"
-                       Text="本地补充信息用于坐标治理。设备编码和设备名称只读，手工坐标仅在点击“保存补充信息”后写入本地。" />
+                       Text="本地点位维护信息用于坐标治理与后续派单闭环。设备编码和设备名称只读，保存后写入本地。" />
         </StackPanel>
 
         <Border Grid.Row="1" Margin="0,18,0,18" Style="{StaticResource PanelCardStyle}">
@@ -62,17 +62,41 @@
                             <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="联系电话" />
                             <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding MaintainerPhone, UpdateSourceTrigger=PropertyChanged}" />
 
+                            <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="所属片区" />
+                            <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding AreaName, UpdateSourceTrigger=PropertyChanged}" />
+
                             <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="地址文本" />
                             <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding AddressText, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="默认派单说明 / 现场备注" />
+                            <TextBox Style="{StaticResource DialogMultilineTextBoxStyle}"
+                                     MinHeight="92"
+                                     TextWrapping="Wrap"
+                                     Text="{Binding DefaultDispatchRemark, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="2">
-                            <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="接入号" />
+                            <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="产品接入号" />
                             <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding ProductAccessNumber, UpdateSourceTrigger=PropertyChanged}" />
 
                             <CheckBox Style="{StaticResource DialogCheckBoxStyle}"
                                       IsChecked="{Binding IsMonitored}"
                                       Content="纳入静默巡检" />
+
+                            <CheckBox Style="{StaticResource DialogCheckBoxStyle}"
+                                      IsChecked="{Binding IsAutoDispatchEnabled}"
+                                      Content="启用自动派单" />
+
+                            <CheckBox Style="{StaticResource DialogCheckBoxStyle}"
+                                      IsChecked="{Binding AllowRecoveryAutoArchive}"
+                                      Content="允许恢复自动归档" />
+
+                            <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="恢复确认方式" />
+                            <ComboBox Style="{StaticResource DialogComboBoxStyle}"
+                                      DisplayMemberPath="Label"
+                                      ItemsSource="{Binding RecoveryConfirmationModeOptions}"
+                                      SelectedValue="{Binding SelectedRecoveryConfirmationMode}"
+                                      SelectedValuePath="Value" />
 
                             <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="手工经度" />
                             <TextBox Style="{StaticResource DialogTextBoxStyle}" Text="{Binding LongitudeText, UpdateSourceTrigger=PropertyChanged}" />
@@ -100,7 +124,7 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="备注" />
+                        <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="业务备注" />
                         <TextBox Grid.Row="1"
                                  Style="{StaticResource DialogMultilineTextBoxStyle}"
                                  MinHeight="160"
@@ -122,7 +146,7 @@
                     MinWidth="140"
                     Command="{Binding SaveCommand}"
                     Style="{StaticResource AccentActionButtonStyle}"
-                    Content="保存补充信息" />
+                    Content="保存维护信息" />
             <Button Grid.Column="2"
                     MinWidth="110"
                     Margin="10,0,0,0"

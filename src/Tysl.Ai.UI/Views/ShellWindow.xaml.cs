@@ -13,6 +13,10 @@ public partial class ShellWindow : Window
     private readonly ILocalDiagnosticService diagnosticService;
     private TaskCompletionSource<bool>? closePreparationCompletionSource;
     private bool isClosingAsync;
+    private CloseWorkOrderDialog? closeWorkOrderDialog;
+    private ManualDispatchDialog? manualDispatchDialog;
+    private NotificationSettingsDialog? notificationSettingsDialog;
+    private NotificationTemplateSettingsDialog? notificationTemplateSettingsDialog;
     private readonly ISitePreviewService sitePreviewService;
     private SiteEditorDialog? editorDialog;
     private ShellViewModel? shellViewModel;
@@ -46,6 +50,10 @@ public partial class ShellWindow : Window
         if (e.OldValue is ShellViewModel oldViewModel)
         {
             oldViewModel.EditorDialogRequested -= HandleEditorDialogRequested;
+            oldViewModel.ManualDispatchDialogRequested -= HandleManualDispatchDialogRequested;
+            oldViewModel.CloseWorkOrderDialogRequested -= HandleCloseWorkOrderDialogRequested;
+            oldViewModel.NotificationSettingsDialogRequested -= HandleNotificationSettingsDialogRequested;
+            oldViewModel.NotificationTemplateSettingsDialogRequested -= HandleNotificationTemplateSettingsDialogRequested;
             oldViewModel.NotificationRequested -= HandleNotificationRequested;
         }
 
@@ -56,6 +64,10 @@ public partial class ShellWindow : Window
         }
 
         shellViewModel.EditorDialogRequested += HandleEditorDialogRequested;
+        shellViewModel.ManualDispatchDialogRequested += HandleManualDispatchDialogRequested;
+        shellViewModel.CloseWorkOrderDialogRequested += HandleCloseWorkOrderDialogRequested;
+        shellViewModel.NotificationSettingsDialogRequested += HandleNotificationSettingsDialogRequested;
+        shellViewModel.NotificationTemplateSettingsDialogRequested += HandleNotificationTemplateSettingsDialogRequested;
         shellViewModel.NotificationRequested += HandleNotificationRequested;
     }
 
@@ -160,6 +172,187 @@ public partial class ShellWindow : Window
             $"deviceCode={deviceCode}");
     }
 
+    private void HandleManualDispatchDialogRequested(object? sender, ManualDispatchDialogRequestedEventArgs e)
+    {
+        try
+        {
+            if (manualDispatchDialog is not null)
+            {
+                manualDispatchDialog.Close();
+            }
+
+            manualDispatchDialog = new ManualDispatchDialog
+            {
+                Owner = this,
+                DiagnosticService = diagnosticService,
+                DataContext = e.ViewModel
+            };
+            manualDispatchDialog.Closed += HandleManualDispatchDialogClosed;
+            manualDispatchDialog.Show();
+            manualDispatchDialog.Activate();
+            _ = diagnosticService.WriteAsync(
+                "manual-dispatch-open-end",
+                $"deviceCode={e.ViewModel.DeviceCode}");
+        }
+        catch (Exception ex)
+        {
+            _ = diagnosticService.WriteAsync(
+                "manual-dispatch-exception-caught",
+                $"deviceCode={e.ViewModel.DeviceCode}, stage=dialog-open, type={ex.GetType().FullName}, message={ex.Message}");
+            _ = diagnosticService.WriteAsync(
+                "manual-dispatch-failed",
+                $"deviceCode={e.ViewModel.DeviceCode}, stage=dialog-open, message={ex.Message}");
+            MessageBox.Show(this, "手工派单确认窗口打开失败，请稍后重试。", "打开失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void HandleCloseWorkOrderDialogRequested(object? sender, CloseWorkOrderDialogRequestedEventArgs e)
+    {
+        try
+        {
+            if (closeWorkOrderDialog is not null)
+            {
+                closeWorkOrderDialog.Close();
+            }
+
+            closeWorkOrderDialog = new CloseWorkOrderDialog
+            {
+                Owner = this,
+                DataContext = e.ViewModel
+            };
+            closeWorkOrderDialog.Closed += HandleCloseWorkOrderDialogClosed;
+            closeWorkOrderDialog.Show();
+            closeWorkOrderDialog.Activate();
+        }
+        catch (Exception ex)
+        {
+            _ = diagnosticService.WriteAsync(
+                "exception-caught",
+                $"source=shell-window-open-close-work-order, type={ex.GetType().FullName}, message={ex.Message}");
+            MessageBox.Show(this, "恢复归档确认窗口打开失败，请稍后重试。", "打开失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void HandleNotificationSettingsDialogRequested(object? sender, NotificationSettingsDialogRequestedEventArgs e)
+    {
+        try
+        {
+            if (notificationSettingsDialog is not null)
+            {
+                notificationSettingsDialog.Close();
+            }
+
+            notificationSettingsDialog = new NotificationSettingsDialog
+            {
+                Owner = this,
+                DataContext = e.ViewModel
+            };
+            notificationSettingsDialog.Closed += HandleNotificationSettingsDialogClosed;
+            notificationSettingsDialog.Show();
+            notificationSettingsDialog.Activate();
+        }
+        catch (Exception ex)
+        {
+            _ = diagnosticService.WriteAsync(
+                "exception-caught",
+                $"source=shell-window-open-notification-settings, type={ex.GetType().FullName}, message={ex.Message}");
+            MessageBox.Show(this, "通知设置窗口打开失败，请稍后重试。", "打开失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void HandleNotificationTemplateSettingsDialogRequested(object? sender, NotificationTemplateSettingsDialogRequestedEventArgs e)
+    {
+        try
+        {
+            if (notificationTemplateSettingsDialog is not null)
+            {
+                notificationTemplateSettingsDialog.Close();
+            }
+
+            notificationTemplateSettingsDialog = new NotificationTemplateSettingsDialog
+            {
+                Owner = this,
+                DataContext = e.ViewModel
+            };
+            notificationTemplateSettingsDialog.Closed += HandleNotificationTemplateSettingsDialogClosed;
+            notificationTemplateSettingsDialog.Show();
+            notificationTemplateSettingsDialog.Activate();
+        }
+        catch (Exception ex)
+        {
+            _ = diagnosticService.WriteAsync(
+                "exception-caught",
+                $"source=shell-window-open-template-settings, type={ex.GetType().FullName}, message={ex.Message}");
+            MessageBox.Show(this, "模板设置窗口打开失败，请稍后重试。", "打开失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void HandleNotificationSettingsDialogClosed(object? sender, EventArgs e)
+    {
+        if (sender is not NotificationSettingsDialog dialog)
+        {
+            return;
+        }
+
+        dialog.Closed -= HandleNotificationSettingsDialogClosed;
+        if (ReferenceEquals(notificationSettingsDialog, dialog))
+        {
+            notificationSettingsDialog = null;
+        }
+    }
+
+    private void HandleNotificationTemplateSettingsDialogClosed(object? sender, EventArgs e)
+    {
+        if (sender is not NotificationTemplateSettingsDialog dialog)
+        {
+            return;
+        }
+
+        dialog.Closed -= HandleNotificationTemplateSettingsDialogClosed;
+        if (ReferenceEquals(notificationTemplateSettingsDialog, dialog))
+        {
+            notificationTemplateSettingsDialog = null;
+        }
+    }
+
+    private void HandleManualDispatchDialogClosed(object? sender, EventArgs e)
+    {
+        if (sender is not ManualDispatchDialog dialog)
+        {
+            return;
+        }
+
+        dialog.Closed -= HandleManualDispatchDialogClosed;
+        if (dialog.DataContext is ManualDispatchDialogViewModel viewModel)
+        {
+            shellViewModel?.HandleManualDispatchDialogClosed(viewModel);
+        }
+
+        if (ReferenceEquals(manualDispatchDialog, dialog))
+        {
+            manualDispatchDialog = null;
+        }
+    }
+
+    private void HandleCloseWorkOrderDialogClosed(object? sender, EventArgs e)
+    {
+        if (sender is not CloseWorkOrderDialog dialog)
+        {
+            return;
+        }
+
+        dialog.Closed -= HandleCloseWorkOrderDialogClosed;
+        if (dialog.DataContext is CloseWorkOrderDialogViewModel viewModel)
+        {
+            shellViewModel?.HandleCloseWorkOrderDialogClosed(viewModel);
+        }
+
+        if (ReferenceEquals(closeWorkOrderDialog, dialog))
+        {
+            closeWorkOrderDialog = null;
+        }
+    }
+
     private void HandleNotificationRequested(object? sender, NotificationRequestedEventArgs e)
     {
         MessageBox.Show(this, e.Message, e.Title, MessageBoxButton.OK, MessageBoxImage.Information);
@@ -219,6 +412,34 @@ public partial class ShellWindow : Window
                 editorDialog.Close();
                 editorDialog = null;
             }
+
+            if (notificationSettingsDialog is not null)
+            {
+                notificationSettingsDialog.Closed -= HandleNotificationSettingsDialogClosed;
+                notificationSettingsDialog.Close();
+                notificationSettingsDialog = null;
+            }
+
+            if (notificationTemplateSettingsDialog is not null)
+            {
+                notificationTemplateSettingsDialog.Closed -= HandleNotificationTemplateSettingsDialogClosed;
+                notificationTemplateSettingsDialog.Close();
+                notificationTemplateSettingsDialog = null;
+            }
+
+            if (manualDispatchDialog is not null)
+            {
+                manualDispatchDialog.Closed -= HandleManualDispatchDialogClosed;
+                manualDispatchDialog.Close();
+                manualDispatchDialog = null;
+            }
+
+            if (closeWorkOrderDialog is not null)
+            {
+                closeWorkOrderDialog.Closed -= HandleCloseWorkOrderDialogClosed;
+                closeWorkOrderDialog.Close();
+                closeWorkOrderDialog = null;
+            }
         }
         catch (Exception ex)
         {
@@ -256,9 +477,37 @@ public partial class ShellWindow : Window
             editorDialog = null;
         }
 
+        if (notificationSettingsDialog is not null)
+        {
+            notificationSettingsDialog.Closed -= HandleNotificationSettingsDialogClosed;
+            notificationSettingsDialog = null;
+        }
+
+        if (notificationTemplateSettingsDialog is not null)
+        {
+            notificationTemplateSettingsDialog.Closed -= HandleNotificationTemplateSettingsDialogClosed;
+            notificationTemplateSettingsDialog = null;
+        }
+
+        if (manualDispatchDialog is not null)
+        {
+            manualDispatchDialog.Closed -= HandleManualDispatchDialogClosed;
+            manualDispatchDialog = null;
+        }
+
+        if (closeWorkOrderDialog is not null)
+        {
+            closeWorkOrderDialog.Closed -= HandleCloseWorkOrderDialogClosed;
+            closeWorkOrderDialog = null;
+        }
+
         if (shellViewModel is not null)
         {
             shellViewModel.EditorDialogRequested -= HandleEditorDialogRequested;
+            shellViewModel.ManualDispatchDialogRequested -= HandleManualDispatchDialogRequested;
+            shellViewModel.CloseWorkOrderDialogRequested -= HandleCloseWorkOrderDialogRequested;
+            shellViewModel.NotificationSettingsDialogRequested -= HandleNotificationSettingsDialogRequested;
+            shellViewModel.NotificationTemplateSettingsDialogRequested -= HandleNotificationTemplateSettingsDialogRequested;
             shellViewModel.NotificationRequested -= HandleNotificationRequested;
             shellViewModel.Dispose();
             shellViewModel = null;

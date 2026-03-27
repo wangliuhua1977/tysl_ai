@@ -1,3 +1,5 @@
+using Tysl.Ai.Core.Enums;
+
 namespace Tysl.Ai.Core.Models;
 
 public sealed class SiteLocalProfile
@@ -29,6 +31,16 @@ public sealed class SiteLocalProfile
     public string? MaintainerName { get; set; }
 
     public string? MaintainerPhone { get; set; }
+
+    public string? AreaName { get; set; }
+
+    public string? DefaultDispatchRemark { get; set; }
+
+    public bool IsAutoDispatchEnabled { get; set; }
+
+    public bool AllowRecoveryAutoArchive { get; set; }
+
+    public RecoveryConfirmationMode RecoveryConfirmationMode { get; set; } = RecoveryConfirmationMode.ManualOnly;
 
     public DateTimeOffset CreatedAt { get; set; }
 

@@ -1,0 +1,114 @@
+<Window x:Class="Tysl.Ai.UI.Views.ManualDispatchDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Style="{StaticResource ShellWindowStyle}"
+        Title="{Binding Title}"
+        Width="620"
+        Height="640"
+        MinWidth="560"
+        MinHeight="560"
+        ResizeMode="CanResize">
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock FontSize="24" FontWeight="SemiBold" Text="{Binding Title}" />
+            <TextBlock Margin="0,6,0,0"
+                       Style="{StaticResource CaptionTextStyle}"
+                       Text="请先核对本次派单摘要；点击确认后会再次询问，确认无误才会真正发起派单。" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Margin="0,18,0,18" Style="{StaticResource PanelCardStyle}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="点位名称" />
+                    <TextBox Style="{StaticResource DialogTextBoxStyle}"
+                             IsReadOnly="True"
+                             Text="{Binding SiteDisplayName}" />
+
+                    <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="产品接入号" />
+                    <TextBox Style="{StaticResource DialogTextBoxStyle}"
+                             IsReadOnly="True"
+                             Text="{Binding ProductAccessNumber}" />
+
+                    <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="当前异常原因" />
+                    <TextBox Style="{StaticResource DialogMultilineTextBoxStyle}"
+                             IsReadOnly="True"
+                             MinHeight="72"
+                             TextWrapping="Wrap"
+                             Text="{Binding FaultReason}" />
+
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="维护单位" />
+                            <TextBox Style="{StaticResource DialogTextBoxStyle}"
+                                     IsReadOnly="True"
+                                     Text="{Binding MaintenanceUnit}" />
+
+                            <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="维护人" />
+                            <TextBox Style="{StaticResource DialogTextBoxStyle}"
+                                     IsReadOnly="True"
+                                     Text="{Binding MaintainerName}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="联系电话" />
+                            <TextBox Style="{StaticResource DialogTextBoxStyle}"
+                                     IsReadOnly="True"
+                                     Text="{Binding MaintainerPhone}" />
+
+                            <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="通知池 / 地址" />
+                            <TextBox Style="{StaticResource DialogTextBoxStyle}"
+                                     IsReadOnly="True"
+                                     Text="{Binding NotificationPoolText}" />
+                            <TextBlock Margin="0,6,0,0"
+                                       Style="{StaticResource CaptionTextStyle}"
+                                       Text="{Binding EnabledEndpointCountText}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock Margin="0,12,0,0"
+                               Style="{StaticResource DialogFieldLabelStyle}"
+                               Text="模板预览摘要" />
+                    <TextBox Style="{StaticResource DialogMultilineTextBoxStyle}"
+                             IsReadOnly="True"
+                             MinHeight="180"
+                             TextWrapping="Wrap"
+                             Text="{Binding TemplatePreview}" />
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="1"
+                    MinWidth="140"
+                    Click="HandleConfirmClick"
+                    IsEnabled="{Binding CanConfirm}"
+                    Style="{StaticResource AccentActionButtonStyle}"
+                    Content="确认派单" />
+            <Button Grid.Column="2"
+                    MinWidth="110"
+                    Margin="10,0,0,0"
+                    Command="{Binding CancelCommand}"
+                    Style="{StaticResource FlatActionButtonStyle}"
+                    Content="取消" />
+        </Grid>
+    </Grid>
+</Window>

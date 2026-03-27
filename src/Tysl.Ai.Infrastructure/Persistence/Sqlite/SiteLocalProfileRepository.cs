@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Tysl.Ai.Core.Enums;
 using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.Core.Models;
 
@@ -34,6 +35,11 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
                 maintenance_unit,
                 maintainer_name,
                 maintainer_phone,
+                area_name,
+                default_dispatch_remark,
+                is_auto_dispatch_enabled,
+                allow_recovery_auto_archive,
+                recovery_confirmation_mode,
                 created_at,
                 updated_at
             FROM site_local_profile
@@ -73,6 +79,11 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
                 maintenance_unit,
                 maintainer_name,
                 maintainer_phone,
+                area_name,
+                default_dispatch_remark,
+                is_auto_dispatch_enabled,
+                allow_recovery_auto_archive,
+                recovery_confirmation_mode,
                 created_at,
                 updated_at
             FROM site_local_profile
@@ -112,6 +123,11 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
                 maintenance_unit,
                 maintainer_name,
                 maintainer_phone,
+                area_name,
+                default_dispatch_remark,
+                is_auto_dispatch_enabled,
+                allow_recovery_auto_archive,
+                recovery_confirmation_mode,
                 created_at,
                 updated_at
             )
@@ -130,6 +146,11 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
                 $maintenanceUnit,
                 $maintainerName,
                 $maintainerPhone,
+                $areaName,
+                $defaultDispatchRemark,
+                $isAutoDispatchEnabled,
+                $allowRecoveryAutoArchive,
+                $recoveryConfirmationMode,
                 $createdAt,
                 $updatedAt
             )
@@ -147,6 +168,11 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
                 maintenance_unit = excluded.maintenance_unit,
                 maintainer_name = excluded.maintainer_name,
                 maintainer_phone = excluded.maintainer_phone,
+                area_name = excluded.area_name,
+                default_dispatch_remark = excluded.default_dispatch_remark,
+                is_auto_dispatch_enabled = excluded.is_auto_dispatch_enabled,
+                allow_recovery_auto_archive = excluded.allow_recovery_auto_archive,
+                recovery_confirmation_mode = excluded.recovery_confirmation_mode,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at;
             """;
@@ -165,6 +191,11 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
         command.Parameters.AddWithValue("$maintenanceUnit", (object?)profile.MaintenanceUnit ?? DBNull.Value);
         command.Parameters.AddWithValue("$maintainerName", (object?)profile.MaintainerName ?? DBNull.Value);
         command.Parameters.AddWithValue("$maintainerPhone", (object?)profile.MaintainerPhone ?? DBNull.Value);
+        command.Parameters.AddWithValue("$areaName", (object?)profile.AreaName ?? DBNull.Value);
+        command.Parameters.AddWithValue("$defaultDispatchRemark", (object?)profile.DefaultDispatchRemark ?? DBNull.Value);
+        command.Parameters.AddWithValue("$isAutoDispatchEnabled", profile.IsAutoDispatchEnabled ? 1 : 0);
+        command.Parameters.AddWithValue("$allowRecoveryAutoArchive", profile.AllowRecoveryAutoArchive ? 1 : 0);
+        command.Parameters.AddWithValue("$recoveryConfirmationMode", (int)profile.RecoveryConfirmationMode);
         command.Parameters.AddWithValue("$createdAt", profile.CreatedAt.UtcDateTime.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", profile.UpdatedAt.UtcDateTime.ToString("O"));
 
@@ -189,8 +220,13 @@ public sealed class SiteLocalProfileRepository : ISiteLocalProfileRepository
             MaintenanceUnit = reader.IsDBNull(11) ? null : reader.GetString(11),
             MaintainerName = reader.IsDBNull(12) ? null : reader.GetString(12),
             MaintainerPhone = reader.IsDBNull(13) ? null : reader.GetString(13),
-            CreatedAt = DateTimeOffset.Parse(reader.GetString(14)),
-            UpdatedAt = DateTimeOffset.Parse(reader.GetString(15))
+            AreaName = reader.IsDBNull(14) ? null : reader.GetString(14),
+            DefaultDispatchRemark = reader.IsDBNull(15) ? null : reader.GetString(15),
+            IsAutoDispatchEnabled = reader.GetInt64(16) == 1,
+            AllowRecoveryAutoArchive = reader.GetInt64(17) == 1,
+            RecoveryConfirmationMode = (RecoveryConfirmationMode)reader.GetInt64(18),
+            CreatedAt = DateTimeOffset.Parse(reader.GetString(19)),
+            UpdatedAt = DateTimeOffset.Parse(reader.GetString(20))
         };
     }
 }

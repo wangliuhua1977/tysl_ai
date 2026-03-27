@@ -10,7 +10,19 @@ public interface IDispatchService
         SiteRuntimeState currentState,
         CancellationToken cancellationToken = default);
 
-    Task ManualDispatchAsync(string deviceCode, CancellationToken cancellationToken = default);
+    Task<ManualDispatchPreparation> PrepareManualDispatchAsync(
+        string deviceCode,
+        CancellationToken cancellationToken = default);
 
-    Task ConfirmRecoveryAsync(long dispatchRecordId, CancellationToken cancellationToken = default);
+    Task ManualDispatchAsync(
+        ManualDispatchRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<CloseWorkOrderPreparation> PrepareCloseWorkOrderAsync(
+        long workOrderId,
+        CancellationToken cancellationToken = default);
+
+    Task CloseWorkOrderAsync(
+        CloseWorkOrderRequest request,
+        CancellationToken cancellationToken = default);
 }

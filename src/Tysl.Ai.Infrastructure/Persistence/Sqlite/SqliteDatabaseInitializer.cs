@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Tysl.Ai.Core.Models;
+using Tysl.Ai.Core.Enums;
 
 namespace Tysl.Ai.Infrastructure.Persistence.Sqlite;
 
@@ -29,6 +30,9 @@ public sealed class SqliteDatabaseInitializer
         await CreateInspectionSettingsTableAsync(connection, cancellationToken);
         await CreateDispatchPolicyTableAsync(connection, cancellationToken);
         await CreateDispatchRecordTableAsync(connection, cancellationToken);
+        await CreateActiveWorkOrderTableAsync(connection, cancellationToken);
+        await CreateWebhookEndpointTableAsync(connection, cancellationToken);
+        await CreateNotificationTemplateTableAsync(connection, cancellationToken);
 
         if (await TableExistsAsync(connection, "site_profile", cancellationToken))
         {
@@ -41,6 +45,7 @@ public sealed class SqliteDatabaseInitializer
 
         await SeedInspectionSettingsAsync(connection, cancellationToken);
         await SeedDispatchPolicyAsync(connection, initialDispatchPolicy ?? DispatchPolicy.Default, cancellationToken);
+        await SeedNotificationTemplatesAsync(connection, cancellationToken);
 
         await using var countCommand = connection.CreateCommand();
         countCommand.CommandText = "SELECT COUNT(1) FROM site_local_profile;";
@@ -78,6 +83,11 @@ public sealed class SqliteDatabaseInitializer
                 maintenance_unit TEXT NULL,
                 maintainer_name TEXT NULL,
                 maintainer_phone TEXT NULL,
+                area_name TEXT NULL,
+                default_dispatch_remark TEXT NULL,
+                is_auto_dispatch_enabled INTEGER NOT NULL DEFAULT 0,
+                allow_recovery_auto_archive INTEGER NOT NULL DEFAULT 0,
+                recovery_confirmation_mode INTEGER NOT NULL DEFAULT 2,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -232,6 +242,99 @@ public sealed class SqliteDatabaseInitializer
         await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async Task CreateWebhookEndpointTableAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var createTableCommand = connection.CreateCommand();
+        createTableCommand.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS webhook_endpoint (
+                id TEXT PRIMARY KEY NOT NULL,
+                pool INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                webhook_url TEXT NOT NULL,
+                usage_remark TEXT NULL,
+                is_enabled INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_webhook_endpoint_pool_sort
+            ON webhook_endpoint (pool, sort_order ASC, updated_at DESC);
+            """;
+
+        await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task CreateActiveWorkOrderTableAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var createTableCommand = connection.CreateCommand();
+        createTableCommand.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS active_work_order (
+                work_order_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_code TEXT NOT NULL,
+                site_name_snapshot TEXT NOT NULL,
+                site_alias_snapshot TEXT NULL,
+                product_access_number_snapshot TEXT NULL,
+                current_fault_code TEXT NOT NULL,
+                current_fault_reason TEXT NOT NULL,
+                dispatch_source INTEGER NOT NULL,
+                status INTEGER NOT NULL,
+                first_dispatched_at TEXT NULL,
+                latest_exception_at TEXT NOT NULL,
+                latest_notification_at TEXT NULL,
+                maintenance_unit_snapshot TEXT NULL,
+                maintainer_name_snapshot TEXT NULL,
+                maintainer_phone_snapshot TEXT NULL,
+                dispatch_remark_snapshot TEXT NULL,
+                recovery_confirmation_mode_snapshot INTEGER NOT NULL DEFAULT 2,
+                allow_recovery_auto_archive_snapshot INTEGER NOT NULL DEFAULT 0,
+                last_notification_summary TEXT NULL,
+                recovery_source INTEGER NULL,
+                recovery_summary TEXT NULL,
+                closing_remark TEXT NULL,
+                product_status_snapshot TEXT NULL,
+                arrears_amount_snapshot REAL NULL,
+                recovered_at TEXT NULL,
+                recovery_confirmed_at TEXT NULL,
+                closed_archived_at TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_active_work_order_device_updated
+            ON active_work_order (device_code, updated_at DESC, work_order_id DESC);
+
+            CREATE INDEX IF NOT EXISTS ix_active_work_order_device_status
+            ON active_work_order (device_code, status, updated_at DESC);
+            """;
+
+        await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureActiveWorkOrderSchemaAsync(connection, cancellationToken);
+    }
+
+    private static async Task CreateNotificationTemplateTableAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var createTableCommand = connection.CreateCommand();
+        createTableCommand.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS notification_template (
+                kind INTEGER PRIMARY KEY NOT NULL,
+                content TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """;
+
+        await createTableCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async Task<bool> TableExistsAsync(
         SqliteConnection connection,
         string tableName,
@@ -273,6 +376,11 @@ public sealed class SqliteDatabaseInitializer
                 maintenance_unit,
                 maintainer_name,
                 maintainer_phone,
+                area_name,
+                default_dispatch_remark,
+                is_auto_dispatch_enabled,
+                allow_recovery_auto_archive,
+                recovery_confirmation_mode,
                 created_at,
                 updated_at
             )
@@ -291,6 +399,11 @@ public sealed class SqliteDatabaseInitializer
                 maintenance_unit,
                 maintainer_name,
                 maintainer_phone,
+                NULL,
+                NULL,
+                0,
+                0,
+                2,
                 created_at,
                 updated_at
             FROM site_profile
@@ -299,6 +412,44 @@ public sealed class SqliteDatabaseInitializer
             """;
 
         await migrateCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task SeedNotificationTemplatesAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        foreach (var kind in Enum.GetValues<NotificationTemplateKind>())
+        {
+            await using var countCommand = connection.CreateCommand();
+            countCommand.CommandText = "SELECT COUNT(1) FROM notification_template WHERE kind = $kind;";
+            countCommand.Parameters.AddWithValue("$kind", (int)kind);
+            var existingCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken));
+            if (existingCount > 0)
+            {
+                continue;
+            }
+
+            var template = NotificationTemplate.CreateDefault(kind);
+            await using var insertCommand = connection.CreateCommand();
+            insertCommand.CommandText =
+                """
+                INSERT INTO notification_template (
+                    kind,
+                    content,
+                    updated_at
+                )
+                VALUES (
+                    $kind,
+                    $content,
+                    $updatedAt
+                );
+                """;
+
+            insertCommand.Parameters.AddWithValue("$kind", (int)template.Kind);
+            insertCommand.Parameters.AddWithValue("$content", template.Content);
+            insertCommand.Parameters.AddWithValue("$updatedAt", template.UpdatedAt.UtcDateTime.ToString("O"));
+            await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 
     private static async Task SeedInspectionSettingsAsync(
@@ -446,6 +597,11 @@ public sealed class SqliteDatabaseInitializer
                 maintenance_unit,
                 maintainer_name,
                 maintainer_phone,
+                area_name,
+                default_dispatch_remark,
+                is_auto_dispatch_enabled,
+                allow_recovery_auto_archive,
+                recovery_confirmation_mode,
                 created_at,
                 updated_at
             )
@@ -464,6 +620,11 @@ public sealed class SqliteDatabaseInitializer
                 $maintenanceUnit,
                 $maintainerName,
                 $maintainerPhone,
+                $areaName,
+                $defaultDispatchRemark,
+                $isAutoDispatchEnabled,
+                $allowRecoveryAutoArchive,
+                $recoveryConfirmationMode,
                 $createdAt,
                 $updatedAt
             );
@@ -483,6 +644,11 @@ public sealed class SqliteDatabaseInitializer
         insertCommand.Parameters.AddWithValue("$maintenanceUnit", (object?)profile.MaintenanceUnit ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$maintainerName", (object?)profile.MaintainerName ?? DBNull.Value);
         insertCommand.Parameters.AddWithValue("$maintainerPhone", (object?)profile.MaintainerPhone ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$areaName", (object?)profile.AreaName ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$defaultDispatchRemark", (object?)profile.DefaultDispatchRemark ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("$isAutoDispatchEnabled", profile.IsAutoDispatchEnabled ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$allowRecoveryAutoArchive", profile.AllowRecoveryAutoArchive ? 1 : 0);
+        insertCommand.Parameters.AddWithValue("$recoveryConfirmationMode", (int)profile.RecoveryConfirmationMode);
         insertCommand.Parameters.AddWithValue("$createdAt", profile.CreatedAt.UtcDateTime.ToString("O"));
         insertCommand.Parameters.AddWithValue("$updatedAt", profile.UpdatedAt.UtcDateTime.ToString("O"));
 
@@ -506,6 +672,11 @@ public sealed class SqliteDatabaseInitializer
                 MaintenanceUnit = "客运枢纽联保组",
                 MaintainerName = "沈工",
                 MaintainerPhone = "13800000002",
+                AreaName = "北站片区",
+                DefaultDispatchRemark = "优先联系站前维护班组。",
+                IsAutoDispatchEnabled = false,
+                AllowRecoveryAutoArchive = false,
+                RecoveryConfirmationMode = RecoveryConfirmationMode.ManualOnly,
                 CreatedAt = createdAt,
                 UpdatedAt = createdAt.AddHours(2)
             },
@@ -519,6 +690,11 @@ public sealed class SqliteDatabaseInitializer
                 MaintenanceUnit = "政务中心值守组",
                 MaintainerName = "李工",
                 MaintainerPhone = "13800000004",
+                AreaName = "政务中心片区",
+                DefaultDispatchRemark = "白天由政务中心值守组先到场确认。",
+                IsAutoDispatchEnabled = false,
+                AllowRecoveryAutoArchive = false,
+                RecoveryConfirmationMode = RecoveryConfirmationMode.ManualOnly,
                 CreatedAt = createdAt.AddHours(1),
                 UpdatedAt = createdAt.AddHours(1)
             },
@@ -534,6 +710,11 @@ public sealed class SqliteDatabaseInitializer
                 MaintenanceUnit = "园区联保组",
                 MaintainerName = "顾工",
                 MaintainerPhone = "13800000006",
+                AreaName = "科创园片区",
+                DefaultDispatchRemark = "夜间故障先通知园区联保组。",
+                IsAutoDispatchEnabled = false,
+                AllowRecoveryAutoArchive = false,
+                RecoveryConfirmationMode = RecoveryConfirmationMode.ManualOnly,
                 CreatedAt = createdAt.AddHours(2),
                 UpdatedAt = createdAt.AddHours(2)
             }
@@ -561,6 +742,36 @@ public sealed class SqliteDatabaseInitializer
             "site_local_profile",
             "ignored_reason",
             "ALTER TABLE site_local_profile ADD COLUMN ignored_reason TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "area_name",
+            "ALTER TABLE site_local_profile ADD COLUMN area_name TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "default_dispatch_remark",
+            "ALTER TABLE site_local_profile ADD COLUMN default_dispatch_remark TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "is_auto_dispatch_enabled",
+            "ALTER TABLE site_local_profile ADD COLUMN is_auto_dispatch_enabled INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "allow_recovery_auto_archive",
+            "ALTER TABLE site_local_profile ADD COLUMN allow_recovery_auto_archive INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "site_local_profile",
+            "recovery_confirmation_mode",
+            "ALTER TABLE site_local_profile ADD COLUMN recovery_confirmation_mode INTEGER NOT NULL DEFAULT 2;",
             cancellationToken);
     }
 
@@ -616,6 +827,91 @@ public sealed class SqliteDatabaseInitializer
             "last_preview_failure_reason",
             "ALTER TABLE site_runtime_state ADD COLUMN last_preview_failure_reason TEXT NULL;",
             cancellationToken);
+    }
+
+    private static async Task EnsureActiveWorkOrderSchemaAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await EnsureColumnAsync(
+            connection,
+            "active_work_order",
+            "recovery_confirmed_at",
+            "ALTER TABLE active_work_order ADD COLUMN recovery_confirmed_at TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "active_work_order",
+            "last_notification_summary",
+            "ALTER TABLE active_work_order ADD COLUMN last_notification_summary TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "active_work_order",
+            "recovery_source",
+            "ALTER TABLE active_work_order ADD COLUMN recovery_source INTEGER NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "active_work_order",
+            "recovery_summary",
+            "ALTER TABLE active_work_order ADD COLUMN recovery_summary TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "active_work_order",
+            "closing_remark",
+            "ALTER TABLE active_work_order ADD COLUMN closing_remark TEXT NULL;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "active_work_order",
+            "closed_archived_at",
+            "ALTER TABLE active_work_order ADD COLUMN closed_archived_at TEXT NULL;",
+            cancellationToken);
+
+        await CopyColumnValuesAsync(
+            connection,
+            "active_work_order",
+            "notification_result_summary",
+            "last_notification_summary",
+            cancellationToken);
+        await CopyColumnValuesAsync(
+            connection,
+            "active_work_order",
+            "admin_remark",
+            "closing_remark",
+            cancellationToken);
+        await CopyColumnValuesAsync(
+            connection,
+            "active_work_order",
+            "closed_at",
+            "closed_archived_at",
+            cancellationToken);
+    }
+
+    private static async Task CopyColumnValuesAsync(
+        SqliteConnection connection,
+        string tableName,
+        string sourceColumnName,
+        string targetColumnName,
+        CancellationToken cancellationToken)
+    {
+        if (!await ColumnExistsAsync(connection, tableName, sourceColumnName, cancellationToken)
+            || !await ColumnExistsAsync(connection, tableName, targetColumnName, cancellationToken))
+        {
+            return;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"""
+            UPDATE {tableName}
+            SET {targetColumnName} = {sourceColumnName}
+            WHERE {targetColumnName} IS NULL
+              AND {sourceColumnName} IS NOT NULL;
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task EnsureColumnAsync(

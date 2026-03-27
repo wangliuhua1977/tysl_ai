@@ -1,4 +1,5 @@
 using System.Globalization;
+using Tysl.Ai.Core.Enums;
 using Tysl.Ai.Core.Models;
 
 namespace Tysl.Ai.UI.ViewModels;
@@ -7,14 +8,19 @@ public sealed class SiteEditorViewModel : ObservableObject
 {
     private string addressText;
     private string alias;
+    private string areaName;
     private string coordinatePickSummary;
+    private string defaultDispatchRemark;
+    private bool allowRecoveryAutoArchive;
     private bool isMonitored;
+    private bool isAutoDispatchEnabled;
     private string latitudeText;
     private string maintainerName;
     private string maintainerPhone;
     private string maintenanceUnit;
     private string longitudeText;
     private string productAccessNumber;
+    private RecoveryConfirmationMode selectedRecoveryConfirmationMode;
     private string remark;
 
     private SiteEditorViewModel(
@@ -30,7 +36,12 @@ public sealed class SiteEditorViewModel : ObservableObject
         string productAccessNumber,
         string maintenanceUnit,
         string maintainerName,
-        string maintainerPhone)
+        string maintainerPhone,
+        string areaName,
+        string defaultDispatchRemark,
+        bool isAutoDispatchEnabled,
+        bool allowRecoveryAutoArchive,
+        RecoveryConfirmationMode recoveryConfirmationMode)
     {
         DeviceCode = deviceCode;
         DeviceName = deviceName;
@@ -45,7 +56,18 @@ public sealed class SiteEditorViewModel : ObservableObject
         this.maintenanceUnit = maintenanceUnit;
         this.maintainerName = maintainerName;
         this.maintainerPhone = maintainerPhone;
+        this.areaName = areaName;
+        this.defaultDispatchRemark = defaultDispatchRemark;
+        this.isAutoDispatchEnabled = isAutoDispatchEnabled;
+        this.allowRecoveryAutoArchive = allowRecoveryAutoArchive;
+        selectedRecoveryConfirmationMode = recoveryConfirmationMode;
         coordinatePickSummary = BuildDefaultCoordinatePickSummary();
+        RecoveryConfirmationModeOptions =
+        [
+            new RecoveryConfirmationModeOption(RecoveryConfirmationMode.Automatic, "自动"),
+            new RecoveryConfirmationModeOption(RecoveryConfirmationMode.ManualPreferred, "手工优先"),
+            new RecoveryConfirmationModeOption(RecoveryConfirmationMode.ManualOnly, "仅手工")
+        ];
 
         SaveCommand = new RelayCommand(() => SaveRequested?.Invoke(this, EventArgs.Empty));
         CancelCommand = new RelayCommand(() => CancelRequested?.Invoke(this, EventArgs.Empty));
@@ -66,13 +88,15 @@ public sealed class SiteEditorViewModel : ObservableObject
 
     public bool HasLocalProfile { get; }
 
-    public string Title => HasLocalProfile ? "编辑补充信息 / 补坐标" : "补录补充信息 / 补坐标";
+    public string Title => HasLocalProfile ? "编辑点位维护信息 / 补坐标" : "补录点位维护信息 / 补坐标";
 
     public RelayCommand SaveCommand { get; }
 
     public RelayCommand CancelCommand { get; }
 
     public RelayCommand BeginCoordinatePickCommand { get; }
+
+    public IReadOnlyList<RecoveryConfirmationModeOption> RecoveryConfirmationModeOptions { get; }
 
     public string Alias
     {
@@ -134,6 +158,36 @@ public sealed class SiteEditorViewModel : ObservableObject
         set => SetProperty(ref maintainerPhone, value);
     }
 
+    public string AreaName
+    {
+        get => areaName;
+        set => SetProperty(ref areaName, value);
+    }
+
+    public string DefaultDispatchRemark
+    {
+        get => defaultDispatchRemark;
+        set => SetProperty(ref defaultDispatchRemark, value);
+    }
+
+    public bool IsAutoDispatchEnabled
+    {
+        get => isAutoDispatchEnabled;
+        set => SetProperty(ref isAutoDispatchEnabled, value);
+    }
+
+    public bool AllowRecoveryAutoArchive
+    {
+        get => allowRecoveryAutoArchive;
+        set => SetProperty(ref allowRecoveryAutoArchive, value);
+    }
+
+    public RecoveryConfirmationMode SelectedRecoveryConfirmationMode
+    {
+        get => selectedRecoveryConfirmationMode;
+        set => SetProperty(ref selectedRecoveryConfirmationMode, value);
+    }
+
     public string CoordinatePickSummary
     {
         get => coordinatePickSummary;
@@ -155,7 +209,12 @@ public sealed class SiteEditorViewModel : ObservableObject
             site.ProductAccessNumber ?? string.Empty,
             site.MaintenanceUnit ?? string.Empty,
             site.MaintainerName ?? string.Empty,
-            site.MaintainerPhone ?? string.Empty);
+            site.MaintainerPhone ?? string.Empty,
+            site.AreaName ?? string.Empty,
+            site.DefaultDispatchRemark ?? string.Empty,
+            site.IsAutoDispatchEnabled,
+            site.AllowRecoveryAutoArchive,
+            site.RecoveryConfirmationMode);
     }
 
     public void MarkCoordinatePickPending(DemoCoordinate? coordinate = null)
@@ -207,7 +266,12 @@ public sealed class SiteEditorViewModel : ObservableObject
             ProductAccessNumber = ProductAccessNumber,
             MaintenanceUnit = MaintenanceUnit,
             MaintainerName = MaintainerName,
-            MaintainerPhone = MaintainerPhone
+            MaintainerPhone = MaintainerPhone,
+            AreaName = AreaName,
+            DefaultDispatchRemark = DefaultDispatchRemark,
+            IsAutoDispatchEnabled = IsAutoDispatchEnabled,
+            AllowRecoveryAutoArchive = AllowRecoveryAutoArchive,
+            RecoveryConfirmationMode = SelectedRecoveryConfirmationMode
         };
 
         return true;

@@ -27,14 +27,19 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private readonly IDispatchService dispatchService;
     private readonly ILocalDiagnosticService diagnosticService;
     private readonly IMapStylePreferenceStore mapStylePreferenceStore;
+    private readonly INotificationTemplateRenderService notificationTemplateRenderService;
+    private readonly INotificationTemplateStore notificationTemplateStore;
     private readonly ISitePreviewService sitePreviewService;
     private readonly DispatcherTimer refreshTimer;
+    private readonly IWebhookEndpointStore webhookEndpointStore;
     private readonly bool isMapHostConfigured;
     private DemoCoordinate? coordinatePickCandidate;
     private readonly Dictionary<string, DemoCoordinate> renderedPointCoordinates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ISiteLocalProfileService siteLocalProfileService;
     private readonly ISiteMapQueryService siteMapQueryService;
+    private CloseWorkOrderDialogViewModel? activeCloseWorkOrderDialog;
     private SiteEditorViewModel? activeEditor;
+    private ManualDispatchDialogViewModel? activeManualDispatchDialog;
     private int currentMapVisibleCount;
     private int dispatchedCount;
     private string dispatchOverviewDetail = "当前无派单中的点位。";
@@ -90,6 +95,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         ISiteLocalProfileService siteLocalProfileService,
         IDispatchService dispatchService,
         ILocalDiagnosticService diagnosticService,
+        IWebhookEndpointStore webhookEndpointStore,
+        INotificationTemplateStore notificationTemplateStore,
+        INotificationTemplateRenderService notificationTemplateRenderService,
         IMapStylePreferenceStore mapStylePreferenceStore,
         bool isMapHostConfigured,
         string? initialMapStyleKey)
@@ -99,6 +107,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         this.siteLocalProfileService = siteLocalProfileService;
         this.dispatchService = dispatchService;
         this.diagnosticService = diagnosticService;
+        this.webhookEndpointStore = webhookEndpointStore;
+        this.notificationTemplateStore = notificationTemplateStore;
+        this.notificationTemplateRenderService = notificationTemplateRenderService;
         this.mapStylePreferenceStore = mapStylePreferenceStore;
         this.isMapHostConfigured = isMapHostConfigured;
         selectedMapStyleKey = ResolveMapStyleKey(initialMapStyleKey);
@@ -129,6 +140,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         ToggleMonitoringCommand = new AsyncRelayCommand(ToggleMonitoringAsync, () => SelectedDetail is not null);
         ToggleIgnoreCommand = new AsyncRelayCommand(ToggleIgnoreAsync, () => SelectedDetail is not null);
         ConfirmRecoveryCommand = new AsyncRelayCommand(ConfirmRecoveryAsync, () => SelectedDetail?.CanConfirmRecovery == true);
+        OpenNotificationSettingsCommand = new AsyncRelayCommand(OpenNotificationSettingsAsync);
+        OpenTemplateSettingsCommand = new AsyncRelayCommand(OpenTemplateSettingsAsync);
         SelectPointCommand = new RelayCommand<SiteMapPointViewModel>(SelectPoint);
         SelectAlertCommand = new RelayCommand<SiteAlertDigestViewModel>(SelectAlert);
         SelectUnmappedPointCommand = new RelayCommand<UnmappedPointDigestViewModel>(SelectUnmappedPoint);
@@ -149,6 +162,14 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     }
 
     public event EventHandler<SiteEditorDialogRequestedEventArgs>? EditorDialogRequested;
+
+    public event EventHandler<ManualDispatchDialogRequestedEventArgs>? ManualDispatchDialogRequested;
+
+    public event EventHandler<CloseWorkOrderDialogRequestedEventArgs>? CloseWorkOrderDialogRequested;
+
+    public event EventHandler<NotificationSettingsDialogRequestedEventArgs>? NotificationSettingsDialogRequested;
+
+    public event EventHandler<NotificationTemplateSettingsDialogRequestedEventArgs>? NotificationTemplateSettingsDialogRequested;
 
     public event EventHandler<NotificationRequestedEventArgs>? NotificationRequested;
 
@@ -235,6 +256,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand ToggleIgnoreCommand { get; }
 
     public AsyncRelayCommand ConfirmRecoveryCommand { get; }
+
+    public AsyncRelayCommand OpenNotificationSettingsCommand { get; }
+
+    public AsyncRelayCommand OpenTemplateSettingsCommand { get; }
 
     public RelayCommand<SiteMapPointViewModel> SelectPointCommand { get; }
 
@@ -457,7 +482,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     public string IgnoreToggleText => SelectedDetail?.IsIgnored == true ? "恢复关注" : "忽略点位";
 
-    public string ManualDispatchText => "派单到企业微信";
+    public string ManualDispatchText => "手工派单";
 
     public string DispatchQueueText => $"{DispatchedCount} / {PendingDispatchCount}";
 
@@ -1481,6 +1506,43 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         return Task.CompletedTask;
     }
 
+    private async Task OpenNotificationSettingsAsync()
+    {
+        try
+        {
+            var viewModel = new NotificationSettingsViewModel(webhookEndpointStore, diagnosticService);
+            await viewModel.LoadAsync();
+            NotificationSettingsDialogRequested?.Invoke(this, new NotificationSettingsDialogRequestedEventArgs(viewModel));
+        }
+        catch (Exception ex)
+        {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=open-notification-settings, type={ex.GetType().FullName}, message={ex.Message}");
+            Notify("通知设置打开失败", "通知设置窗口打开失败，请稍后重试。");
+        }
+    }
+
+    private async Task OpenTemplateSettingsAsync()
+    {
+        try
+        {
+            var viewModel = new NotificationTemplateSettingsViewModel(
+                notificationTemplateStore,
+                notificationTemplateRenderService,
+                diagnosticService);
+            await viewModel.LoadAsync();
+            NotificationTemplateSettingsDialogRequested?.Invoke(this, new NotificationTemplateSettingsDialogRequestedEventArgs(viewModel));
+        }
+        catch (Exception ex)
+        {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=open-template-settings, type={ex.GetType().FullName}, message={ex.Message}");
+            Notify("模板设置打开失败", "模板设置窗口打开失败，请稍后重试。");
+        }
+    }
+
     private async Task ToggleMonitoringAsync()
     {
         if (SelectedDetail is null)
@@ -1510,17 +1572,40 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var deviceCode = SelectedDetail.DeviceCode;
+        _ = WriteDiagnosticAsync(
+            "manual-dispatch-open-start",
+            $"deviceCode={deviceCode}");
+
         try
         {
-            await dispatchService.ManualDispatchAsync(SelectedDetail.DeviceCode);
-            await LoadDashboardAsync(SelectedDetail.DeviceCode, true);
+            var dialogViewModel = new ManualDispatchDialogViewModel(
+                await Task.Run(() => dispatchService.PrepareManualDispatchAsync(deviceCode)));
+            OpenManualDispatchDialog(dialogViewModel);
         }
         catch (Exception ex)
         {
             _ = WriteDiagnosticAsync(
-                "exception-caught",
-                $"source=manual-dispatch, deviceCode={SelectedDetail.DeviceCode}, type={ex.GetType().FullName}, message={ex.Message}");
-            Notify("派单失败", ex.Message);
+                "manual-dispatch-exception-caught",
+                $"deviceCode={deviceCode}, stage=open, type={ex.GetType().FullName}, message={ex.Message}");
+            _ = WriteDiagnosticAsync(
+                "manual-dispatch-failed",
+                $"deviceCode={deviceCode}, stage=open, message={ex.Message}");
+            Notify("派单失败", "手工派单窗口打开失败，请稍后重试。");
+        }
+    }
+
+    public void HandleManualDispatchDialogClosed(ManualDispatchDialogViewModel viewModel)
+    {
+        if (ReferenceEquals(activeManualDispatchDialog, viewModel))
+        {
+            activeManualDispatchDialog.ExecuteConfirmed -= HandleManualDispatchExecuteConfirmed;
+            activeManualDispatchDialog.CancelRequested -= HandleManualDispatchCancelRequested;
+            activeManualDispatchDialog = null;
+            if (activeEditor is null && activeCloseWorkOrderDialog is null)
+            {
+                refreshTimer.Start();
+            }
         }
     }
 
@@ -1569,8 +1654,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         try
         {
-            await dispatchService.ConfirmRecoveryAsync(dispatchRecordId);
-            await LoadDashboardAsync(SelectedDetail.DeviceCode, true);
+            var dialogViewModel = new CloseWorkOrderDialogViewModel(
+                await dispatchService.PrepareCloseWorkOrderAsync(dispatchRecordId));
+            OpenCloseWorkOrderDialog(dialogViewModel);
         }
         catch (Exception ex)
         {
@@ -1609,6 +1695,72 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             editor.CancelRequested -= HandleEditorCancelRequested;
             editor.CoordinatePickRequested -= HandleEditorCoordinatePickRequested;
             activeEditor = null;
+            refreshTimer.Start();
+            throw;
+        }
+    }
+
+    private void OpenManualDispatchDialog(ManualDispatchDialogViewModel dialogViewModel)
+    {
+        if (activeManualDispatchDialog is not null)
+        {
+            activeManualDispatchDialog.RequestClose();
+        }
+
+        activeManualDispatchDialog = dialogViewModel;
+        refreshTimer.Stop();
+        dialogViewModel.ExecuteConfirmed += HandleManualDispatchExecuteConfirmed;
+        dialogViewModel.CancelRequested += HandleManualDispatchCancelRequested;
+
+        try
+        {
+            ManualDispatchDialogRequested?.Invoke(this, new ManualDispatchDialogRequestedEventArgs(dialogViewModel));
+        }
+        catch
+        {
+            dialogViewModel.ExecuteConfirmed -= HandleManualDispatchExecuteConfirmed;
+            dialogViewModel.CancelRequested -= HandleManualDispatchCancelRequested;
+            activeManualDispatchDialog = null;
+            refreshTimer.Start();
+            throw;
+        }
+    }
+
+    public void HandleCloseWorkOrderDialogClosed(CloseWorkOrderDialogViewModel viewModel)
+    {
+        if (ReferenceEquals(activeCloseWorkOrderDialog, viewModel))
+        {
+            activeCloseWorkOrderDialog.ExecuteConfirmed -= HandleCloseWorkOrderExecuteConfirmed;
+            activeCloseWorkOrderDialog.CancelRequested -= HandleCloseWorkOrderCancelRequested;
+            activeCloseWorkOrderDialog = null;
+            if (activeEditor is null && activeManualDispatchDialog is null)
+            {
+                refreshTimer.Start();
+            }
+        }
+    }
+
+    private void OpenCloseWorkOrderDialog(CloseWorkOrderDialogViewModel dialogViewModel)
+    {
+        if (activeCloseWorkOrderDialog is not null)
+        {
+            activeCloseWorkOrderDialog.RequestClose();
+        }
+
+        activeCloseWorkOrderDialog = dialogViewModel;
+        refreshTimer.Stop();
+        dialogViewModel.ExecuteConfirmed += HandleCloseWorkOrderExecuteConfirmed;
+        dialogViewModel.CancelRequested += HandleCloseWorkOrderCancelRequested;
+
+        try
+        {
+            CloseWorkOrderDialogRequested?.Invoke(this, new CloseWorkOrderDialogRequestedEventArgs(dialogViewModel));
+        }
+        catch
+        {
+            dialogViewModel.ExecuteConfirmed -= HandleCloseWorkOrderExecuteConfirmed;
+            dialogViewModel.CancelRequested -= HandleCloseWorkOrderCancelRequested;
+            activeCloseWorkOrderDialog = null;
             refreshTimer.Start();
             throw;
         }
@@ -1774,6 +1926,99 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         ClearCoordinatePick();
         editor.RequestClose();
+    }
+
+    private async void HandleManualDispatchExecuteConfirmed(object? sender, EventArgs e)
+    {
+        if (sender is not ManualDispatchDialogViewModel viewModel)
+        {
+            return;
+        }
+
+        _ = WriteDiagnosticAsync(
+            "manual-dispatch-confirm-accepted",
+            $"deviceCode={viewModel.DeviceCode}");
+        viewModel.IsSubmitting = true;
+
+        try
+        {
+            _ = WriteDiagnosticAsync(
+                "manual-dispatch-execute-start",
+                $"deviceCode={viewModel.DeviceCode}");
+            await Task.Run(() => dispatchService.ManualDispatchAsync(new ManualDispatchRequest
+            {
+                DeviceCode = viewModel.DeviceCode
+            }));
+
+            viewModel.RequestClose();
+            await LoadDashboardAsync(viewModel.DeviceCode, true);
+            _ = WriteDiagnosticAsync(
+                "manual-dispatch-success",
+                $"deviceCode={viewModel.DeviceCode}");
+        }
+        catch (Exception ex)
+        {
+            _ = WriteDiagnosticAsync(
+                "manual-dispatch-exception-caught",
+                $"deviceCode={viewModel.DeviceCode}, stage=execute, type={ex.GetType().FullName}, message={ex.Message}");
+            _ = WriteDiagnosticAsync(
+                "manual-dispatch-failed",
+                $"deviceCode={viewModel.DeviceCode}, stage=execute, message={ex.Message}");
+            Notify("派单失败", "手工派单未发送成功，请检查通知配置或稍后重试。");
+        }
+        finally
+        {
+            viewModel.IsSubmitting = false;
+        }
+    }
+
+    private void HandleManualDispatchCancelRequested(object? sender, EventArgs e)
+    {
+        if (sender is ManualDispatchDialogViewModel viewModel)
+        {
+            viewModel.RequestClose();
+        }
+    }
+
+    private async void HandleCloseWorkOrderExecuteConfirmed(object? sender, EventArgs e)
+    {
+        if (sender is not CloseWorkOrderDialogViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.IsSubmitting = true;
+
+        try
+        {
+            await dispatchService.CloseWorkOrderAsync(new CloseWorkOrderRequest
+            {
+                WorkOrderId = viewModel.WorkOrderId,
+                ClosingRemark = viewModel.ClosingRemark
+            });
+
+            viewModel.RequestClose();
+            await LoadDashboardAsync(viewModel.DeviceCode, true);
+        }
+        catch (Exception ex)
+        {
+            _ = WriteDiagnosticAsync(
+                "exception-caught",
+                $"source=close-work-order-confirmed, workOrderId={viewModel.WorkOrderId}, type={ex.GetType().FullName}, message={ex.Message}");
+            Notify("归档失败", ex.Message);
+        }
+        finally
+        {
+            viewModel.IsSubmitting = false;
+        }
+    }
+
+    private void HandleCloseWorkOrderCancelRequested(object? sender, EventArgs e)
+    {
+        if (sender is CloseWorkOrderDialogViewModel viewModel)
+        {
+            viewModel.RequestClose();
+        }
     }
 
     private void HandleEditorCoordinatePickRequested(object? sender, EventArgs e)

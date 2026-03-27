@@ -1,3 +1,5 @@
+using Tysl.Ai.Core.Enums;
+
 namespace Tysl.Ai.Core.Models;
 
 public sealed record SiteLocalProfileInput
@@ -23,4 +25,14 @@ public sealed record SiteLocalProfileInput
     public string? MaintainerName { get; init; }
 
     public string? MaintainerPhone { get; init; }
+
+    public string? AreaName { get; init; }
+
+    public string? DefaultDispatchRemark { get; init; }
+
+    public required bool IsAutoDispatchEnabled { get; init; }
+
+    public required bool AllowRecoveryAutoArchive { get; init; }
+
+    public required RecoveryConfirmationMode RecoveryConfirmationMode { get; init; }
 }

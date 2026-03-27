@@ -199,11 +199,17 @@
 
                     <DockPanel LastChildFill="False">
                         <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="点位详情" />
-                        <Button DockPanel.Dock="Right"
-                                Command="{Binding ToggleIgnoreCommand}"
-                                Style="{StaticResource SecondaryEntryButtonStyle}"
-                                ToolTip="将当前点位移出主值守视图，或恢复进入主线"
-                                Content="{Binding IgnoreToggleText}" />
+                        <WrapPanel DockPanel.Dock="Right">
+                            <Button Margin="0,0,8,0"
+                                    Command="{Binding EditSelectedSiteCommand}"
+                                    Style="{StaticResource SecondaryEntryButtonStyle}"
+                                    ToolTip="打开当前点位的维护信息编辑窗口"
+                                    Content="点位维护" />
+                            <Button Command="{Binding ToggleIgnoreCommand}"
+                                    Style="{StaticResource SecondaryEntryButtonStyle}"
+                                    ToolTip="将当前点位移出主值守视图，或恢复进入主线"
+                                    Content="{Binding IgnoreToggleText}" />
+                        </WrapPanel>
                     </DockPanel>
 
                     <ScrollViewer Grid.Row="1"
@@ -239,6 +245,47 @@
                                                Text="{Binding SelectedDetail.DispatchHeadlineText, TargetNullValue=未触发派单 / 未恢复}" />
                                 </Border>
                             </WrapPanel>
+
+                            <TextBlock Margin="0,12,0,0" Style="{StaticResource SubsectionTitleTextStyle}" Text="产品信息" />
+                            <Border Margin="0,8,0,0"
+                                    Padding="9"
+                                    Background="{StaticResource PanelAltBrush}"
+                                    BorderBrush="{StaticResource SubtleBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="68" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Style="{StaticResource DetailLabelTextStyle}" Text="接入号" />
+                                    <TextBlock Grid.Column="1"
+                                               Style="{StaticResource DetailValueTextStyle}"
+                                               Text="{Binding SelectedDetail.ProductAccessNumber, TargetNullValue=未补充}" />
+
+                                    <TextBlock Grid.Row="1"
+                                               Style="{StaticResource DetailLabelTextStyle}"
+                                               Text="产品状态" />
+                                    <TextBlock Grid.Row="1"
+                                               Grid.Column="1"
+                                               Style="{StaticResource DetailValueTextStyle}"
+                                               Text="{Binding SelectedDetail.ProductStatusText, TargetNullValue=待接入}" />
+
+                                    <TextBlock Grid.Row="2"
+                                               Style="{StaticResource DetailLabelTextStyle}"
+                                               Text="欠费金额" />
+                                    <TextBlock Grid.Row="2"
+                                               Grid.Column="1"
+                                               Style="{StaticResource DetailValueTextStyle}"
+                                               Text="{Binding SelectedDetail.ArrearsAmountText, TargetNullValue=待接入}" />
+                                </Grid>
+                            </Border>
 
                             <TextBlock Margin="0,12,0,0" Style="{StaticResource SubsectionTitleTextStyle}" Text="异常原因" />
                             <Border Margin="0,8,0,0"
@@ -322,16 +369,24 @@
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
 
                                     <DockPanel LastChildFill="False">
                                         <TextBlock Style="{StaticResource DetailValueTextStyle}"
                                                    Text="{Binding SelectedDetail.DispatchStatusText}" />
-                                        <Button DockPanel.Dock="Right"
-                                                Command="{Binding ManualDispatchCommand}"
-                                                Style="{StaticResource PrimaryCompactActionButtonStyle}"
-                                                ToolTip="直接向企业微信群发起当前点位派单"
-                                                Content="{Binding ManualDispatchText}" />
+                                        <WrapPanel DockPanel.Dock="Right">
+                                            <Button Command="{Binding ConfirmRecoveryCommand}"
+                                                    Visibility="{Binding SelectedDetail.CanConfirmRecovery, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                    Style="{StaticResource CompactActionButtonStyle}"
+                                                    ToolTip="打开恢复归档确认窗口"
+                                                    Content="{Binding SelectedDetail.CloseActionText}" />
+                                            <Button Margin="8,0,0,0"
+                                                    Command="{Binding ManualDispatchCommand}"
+                                                    Style="{StaticResource PrimaryCompactActionButtonStyle}"
+                                                    ToolTip="打开手工派单确认窗口"
+                                                    Content="{Binding ManualDispatchText}" />
+                                        </WrapPanel>
                                     </DockPanel>
 
                                     <Grid Grid.Row="1" Margin="0,7,0,0">
@@ -340,6 +395,9 @@
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
                                         <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
@@ -357,12 +415,41 @@
                                                    Text="{Binding SelectedDetail.LastDispatchAtText}" />
                                         <TextBlock Grid.Row="2"
                                                    Style="{StaticResource DetailLabelTextStyle}"
-                                                   Text="恢复" />
+                                                   Text="恢复状态" />
                                         <TextBlock Grid.Row="2"
                                                    Grid.Column="1"
                                                    Style="{StaticResource DetailValueTextStyle}"
                                                    Text="{Binding SelectedDetail.RecoveryStatusText}" />
+                                        <TextBlock Grid.Row="3"
+                                                   Style="{StaticResource DetailLabelTextStyle}"
+                                                   Text="恢复时间" />
+                                        <TextBlock Grid.Row="3"
+                                                   Grid.Column="1"
+                                                   Style="{StaticResource DetailValueTextStyle}"
+                                                   Text="{Binding SelectedDetail.RecoveredAtText}" />
+                                        <TextBlock Grid.Row="4"
+                                                   Style="{StaticResource DetailLabelTextStyle}"
+                                                   Text="归档时间" />
+                                        <TextBlock Grid.Row="4"
+                                                   Grid.Column="1"
+                                                   Style="{StaticResource DetailValueTextStyle}"
+                                                   Text="{Binding SelectedDetail.ClosedArchivedAtText}" />
+                                        <TextBlock Grid.Row="5"
+                                                   Style="{StaticResource DetailLabelTextStyle}"
+                                                   Text="恢复方式" />
+                                        <TextBlock Grid.Row="5"
+                                                   Grid.Column="1"
+                                                   Style="{StaticResource DetailValueTextStyle}"
+                                                   Text="{Binding SelectedDetail.RecoverySourceText}" />
                                     </Grid>
+
+                                    <StackPanel Grid.Row="2" Margin="0,10,0,0">
+                                        <TextBlock Style="{StaticResource CaptionTextStyle}"
+                                                   Text="{Binding SelectedDetail.RecoverySummaryText}" />
+                                        <TextBlock Margin="0,4,0,0"
+                                                   Style="{StaticResource CaptionTextStyle}"
+                                                   Text="{Binding SelectedDetail.LastNotificationSummaryText}" />
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                         </StackPanel>
@@ -431,6 +518,16 @@
 
                 <StackPanel Grid.Column="2" Width="224" HorizontalAlignment="Right">
                     <WrapPanel HorizontalAlignment="Right">
+                        <Button Margin="0,0,8,0"
+                                Command="{Binding OpenNotificationSettingsCommand}"
+                                Style="{StaticResource SecondaryEntryButtonStyle}"
+                                ToolTip="打开本地通知地址管理"
+                                Content="通知设置" />
+                        <Button Margin="0,0,8,0"
+                                Command="{Binding OpenTemplateSettingsCommand}"
+                                Style="{StaticResource SecondaryEntryButtonStyle}"
+                                ToolTip="打开本地通知模板管理"
+                                Content="模板设置" />
                         <Button Margin="0,0,8,0"
                                 Command="{Binding OpenUnmappedSecondaryEntryCommand}"
                                 Style="{StaticResource SecondaryEntryButtonStyle}"

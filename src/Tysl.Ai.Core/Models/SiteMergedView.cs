@@ -104,7 +104,13 @@ public sealed record SiteMergedView
 
     public DateTimeOffset? RecoveredAt { get; init; }
 
+    public RecoverySource? RecoverySource { get; init; }
+
+    public DateTimeOffset? ClosedArchivedAt { get; init; }
+
     public string? RecoverySummary { get; init; }
+
+    public string? ClosingRemark { get; init; }
 
     public string? DispatchMessageDigest { get; init; }
 
@@ -120,11 +126,29 @@ public sealed record SiteMergedView
 
     public string? ProductAccessNumber { get; init; }
 
+    public string? ProductStatus { get; init; }
+
+    public decimal? ArrearsAmount { get; init; }
+
     public string? MaintenanceUnit { get; init; }
 
     public string? MaintainerName { get; init; }
 
     public string? MaintainerPhone { get; init; }
+
+    public string? AreaName { get; init; }
+
+    public string? DefaultDispatchRemark { get; init; }
+
+    public required bool IsAutoDispatchEnabled { get; init; }
+
+    public required bool AllowRecoveryAutoArchive { get; init; }
+
+    public required RecoveryConfirmationMode RecoveryConfirmationMode { get; init; }
+
+    public DispatchSource? WorkOrderDispatchSource { get; init; }
+
+    public DispatchWorkOrderStatus? WorkOrderStatus { get; init; }
 
     public required DemoOnlineState DemoOnlineState { get; init; }
 
