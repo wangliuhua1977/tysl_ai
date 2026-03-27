@@ -174,34 +174,77 @@ public partial class ShellWindow : Window
 
     private void HandleManualDispatchDialogRequested(object? sender, ManualDispatchDialogRequestedEventArgs e)
     {
+        var stage = "new-dialog";
+        var deviceCode = e.ViewModel.DeviceCode;
+
         try
         {
+            _ = WriteManualDispatchDialogDiagnosticAsync(
+                "manual-dispatch-open-stage",
+                deviceCode,
+                stage);
+
             if (manualDispatchDialog is not null)
             {
                 manualDispatchDialog.Close();
             }
 
-            manualDispatchDialog = new ManualDispatchDialog
-            {
-                Owner = this,
-                DiagnosticService = diagnosticService,
-                DataContext = e.ViewModel
-            };
+            var dialog = new ManualDispatchDialog(deferInitialize: true);
+
+            stage = "initialize";
+            _ = WriteManualDispatchDialogDiagnosticAsync(
+                "manual-dispatch-open-stage",
+                deviceCode,
+                stage);
+            dialog.InitializeDialogComponents();
+
+            stage = "datacontext";
+            _ = WriteManualDispatchDialogDiagnosticAsync(
+                "manual-dispatch-open-stage",
+                deviceCode,
+                stage);
+            dialog.Owner = this;
+            dialog.DiagnosticService = diagnosticService;
+            dialog.DataContext = e.ViewModel;
+
+            manualDispatchDialog = dialog;
             manualDispatchDialog.Closed += HandleManualDispatchDialogClosed;
+
+            stage = "show";
+            _ = WriteManualDispatchDialogDiagnosticAsync(
+                "manual-dispatch-open-stage",
+                deviceCode,
+                stage);
             manualDispatchDialog.Show();
+
+            stage = "activate";
+            _ = WriteManualDispatchDialogDiagnosticAsync(
+                "manual-dispatch-open-stage",
+                deviceCode,
+                stage);
             manualDispatchDialog.Activate();
             _ = diagnosticService.WriteAsync(
                 "manual-dispatch-open-end",
-                $"deviceCode={e.ViewModel.DeviceCode}");
+                $"deviceCode={deviceCode}");
         }
         catch (Exception ex)
         {
-            _ = diagnosticService.WriteAsync(
+            if (manualDispatchDialog is not null && ReferenceEquals(manualDispatchDialog.DataContext, e.ViewModel))
+            {
+                manualDispatchDialog.Closed -= HandleManualDispatchDialogClosed;
+                manualDispatchDialog = null;
+            }
+
+            _ = WriteManualDispatchDialogFailureAsync(
                 "manual-dispatch-exception-caught",
-                $"deviceCode={e.ViewModel.DeviceCode}, stage=dialog-open, type={ex.GetType().FullName}, message={ex.Message}");
-            _ = diagnosticService.WriteAsync(
+                deviceCode,
+                stage,
+                ex);
+            _ = WriteManualDispatchDialogFailureAsync(
                 "manual-dispatch-failed",
-                $"deviceCode={e.ViewModel.DeviceCode}, stage=dialog-open, message={ex.Message}");
+                deviceCode,
+                stage,
+                ex);
             MessageBox.Show(this, "手工派单确认窗口打开失败，请稍后重试。", "打开失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
@@ -356,6 +399,27 @@ public partial class ShellWindow : Window
     private void HandleNotificationRequested(object? sender, NotificationRequestedEventArgs e)
     {
         MessageBox.Show(this, e.Message, e.Title, MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private Task WriteManualDispatchDialogDiagnosticAsync(
+        string eventName,
+        string deviceCode,
+        string stage)
+    {
+        return diagnosticService.WriteAsync(
+            eventName,
+            $"deviceCode={deviceCode}, stage={stage}, hasEditorDialog={editorDialog is not null}, editorDialogVisible={editorDialog?.IsVisible == true}, hasManualDispatchDialog={manualDispatchDialog is not null}, ownerWindowState={WindowState}");
+    }
+
+    private Task WriteManualDispatchDialogFailureAsync(
+        string eventName,
+        string deviceCode,
+        string stage,
+        Exception exception)
+    {
+        return diagnosticService.WriteAsync(
+            eventName,
+            $"deviceCode={deviceCode}, stage={stage}, exceptionType={exception.GetType().FullName}, message={exception.Message}, stackTrace={exception.StackTrace}, hasEditorDialog={editorDialog is not null}, editorDialogVisible={editorDialog?.IsVisible == true}, hasManualDispatchDialog={manualDispatchDialog is not null}, ownerWindowState={WindowState}");
     }
 
     public Task RequestCloseForAcceptanceAsync()

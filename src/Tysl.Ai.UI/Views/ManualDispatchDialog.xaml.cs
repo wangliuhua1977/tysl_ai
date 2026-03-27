@@ -6,14 +6,34 @@ namespace Tysl.Ai.UI.Views;
 
 public partial class ManualDispatchDialog : Window
 {
+    private bool isInitialized;
     private ManualDispatchDialogViewModel? viewModel;
 
     public ILocalDiagnosticService? DiagnosticService { get; set; }
 
     public ManualDispatchDialog()
+        : this(false)
     {
+    }
+
+    public ManualDispatchDialog(bool deferInitialize)
+    {
+        if (!deferInitialize)
+        {
+            InitializeDialogComponents();
+        }
+    }
+
+    public void InitializeDialogComponents()
+    {
+        if (isInitialized)
+        {
+            return;
+        }
+
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
+        isInitialized = true;
     }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)

@@ -29,19 +29,19 @@
                     <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="点位名称" />
                     <TextBox Style="{StaticResource DialogTextBoxStyle}"
                              IsReadOnly="True"
-                             Text="{Binding SiteDisplayName}" />
+                             Text="{Binding SiteDisplayName, Mode=OneWay}" />
 
                     <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="产品接入号" />
                     <TextBox Style="{StaticResource DialogTextBoxStyle}"
                              IsReadOnly="True"
-                             Text="{Binding ProductAccessNumber}" />
+                             Text="{Binding ProductAccessNumber, Mode=OneWay}" />
 
                     <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="当前异常原因" />
                     <TextBox Style="{StaticResource DialogMultilineTextBoxStyle}"
                              IsReadOnly="True"
                              MinHeight="72"
                              TextWrapping="Wrap"
-                             Text="{Binding FaultReason}" />
+                             Text="{Binding FaultReason, Mode=OneWay}" />
 
                     <Grid Margin="0,10,0,0">
                         <Grid.ColumnDefinitions>
@@ -54,24 +54,24 @@
                             <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="维护单位" />
                             <TextBox Style="{StaticResource DialogTextBoxStyle}"
                                      IsReadOnly="True"
-                                     Text="{Binding MaintenanceUnit}" />
+                                     Text="{Binding MaintenanceUnit, Mode=OneWay}" />
 
                             <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="维护人" />
                             <TextBox Style="{StaticResource DialogTextBoxStyle}"
                                      IsReadOnly="True"
-                                     Text="{Binding MaintainerName}" />
+                                     Text="{Binding MaintainerName, Mode=OneWay}" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="2">
                             <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="联系电话" />
                             <TextBox Style="{StaticResource DialogTextBoxStyle}"
                                      IsReadOnly="True"
-                                     Text="{Binding MaintainerPhone}" />
+                                     Text="{Binding MaintainerPhone, Mode=OneWay}" />
 
                             <TextBlock Style="{StaticResource DialogFieldLabelStyle}" Text="通知池 / 地址" />
                             <TextBox Style="{StaticResource DialogTextBoxStyle}"
                                      IsReadOnly="True"
-                                     Text="{Binding NotificationPoolText}" />
+                                     Text="{Binding NotificationPoolText, Mode=OneWay}" />
                             <TextBlock Margin="0,6,0,0"
                                        Style="{StaticResource CaptionTextStyle}"
                                        Text="{Binding EnabledEndpointCountText}" />
@@ -85,7 +85,7 @@
                              IsReadOnly="True"
                              MinHeight="180"
                              TextWrapping="Wrap"
-                             Text="{Binding TemplatePreview}" />
+                             Text="{Binding TemplatePreview, Mode=OneWay}" />
                 </StackPanel>
             </ScrollViewer>
         </Border>
