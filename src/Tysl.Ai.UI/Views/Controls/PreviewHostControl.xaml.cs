@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using Microsoft.Web.WebView2.Core;
 using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.UI.Models;
+using Tysl.Ai.UI.ViewModels;
 
 namespace Tysl.Ai.UI.Views.Controls;
 
@@ -173,6 +174,11 @@ public partial class PreviewHostControl : UserControl, IDisposable
 
                 if (string.IsNullOrWhiteSpace(json))
                 {
+                    WriteHostLifecycleDiagnostic(
+                        "preview-host-stop-requested",
+                        "ApplyPendingSessionAsync",
+                        "close_preview",
+                        currentSession: previousSession);
                     activeSession = null;
                     await Browser.ExecuteScriptAsync("window.TyslPreviewHost?.stop('close_preview');");
                     ShowOverlay("点击点位后自动预览。");
@@ -188,6 +194,13 @@ public partial class PreviewHostControl : UserControl, IDisposable
 
                     if (ShouldResetHostPage(previousSession, nextSession))
                     {
+                        WriteHostLifecycleDiagnostic(
+                            "preview-host-switch-requested",
+                            "ApplyPendingSessionAsync",
+                            "host_page_reset",
+                            previousSession: previousSession,
+                            nextSession: nextSession,
+                            isSessionSwitch: true);
                         PrepareHostPageReset(previousSession, nextSession);
                         pendingSessionJson = json;
                         activeSession = null;
@@ -198,6 +211,14 @@ public partial class PreviewHostControl : UserControl, IDisposable
                     activeSession = nextSession;
                     hasShownRuntimeFailure = false;
                     ShowOverlay(null);
+                    WriteHostLifecycleDiagnostic(
+                        "preview-host-play-requested",
+                        "ApplyPendingSessionAsync",
+                        "play_new_session",
+                        currentSession: nextSession,
+                        previousSession: previousSession,
+                        nextSession: nextSession,
+                        isSessionSwitch: previousSession is not null);
                     var sessionLiteral = JsonSerializer.Serialize(activeSession, JsonOptions);
                     await Browser.ExecuteScriptAsync($"window.TyslPreviewHost?.play({sessionLiteral});");
                 }
@@ -244,6 +265,11 @@ public partial class PreviewHostControl : UserControl, IDisposable
             return;
         }
 
+        WriteHostLifecycleDiagnostic(
+            "preview-host-reset-start",
+            "ResetHostPageAsync",
+            "host_page_reset",
+            currentSession: activeSession);
         browserReady = false;
         Browser.Visibility = Visibility.Collapsed;
 
@@ -259,6 +285,11 @@ public partial class PreviewHostControl : UserControl, IDisposable
         CancelNegotiation();
         ClearMediaRequestTraces();
         NavigateHostPage();
+        WriteHostLifecycleDiagnostic(
+            "preview-host-reset-end",
+            "ResetHostPageAsync",
+            "host_page_navigated",
+            currentSession: activeSession);
     }
 
     private void NavigateHostPage()
@@ -424,9 +455,17 @@ public partial class PreviewHostControl : UserControl, IDisposable
                     break;
                 case "playback_stopped":
                     var stoppedSessionId = GetValue(payload, "playbackSessionId");
+                    var stoppedDeviceCode = GetValue(payload, "deviceCode") ?? activeSession?.DeviceCode ?? "unknown";
+                    var stoppedProtocol = GetProtocol(payload);
+                    var stoppedSession = new PreviewPlaybackSessionDto
+                    {
+                        DeviceCode = stoppedDeviceCode,
+                        PlaybackSessionId = stoppedSessionId ?? string.Empty,
+                        Protocol = stoppedProtocol
+                    };
                     WriteDiagnostic(
                         "preview-resources-released",
-                        $"Preview resources released: deviceCode={GetValue(payload, "deviceCode") ?? "unknown"}, sessionId={stoppedSessionId ?? "unknown"}, protocol={GetProtocol(payload)}, reason={GetValue(payload, "reason") ?? "none"}, peerClosed={GetBoolValue(payload, "peerClosed")}, mediaTracksStopped={GetIntValue(payload, "mediaTracksStopped")}, flvPlayersDisposed={GetIntValue(payload, "flvPlayersDisposed")}, hlsPlayersDisposed={GetIntValue(payload, "hlsPlayersDisposed")}");
+                        $"{BuildHostLifecycleDiagnosticState("HandleWebMessageReceived.playback_stopped", GetValue(payload, "reason") ?? "none", currentSession: stoppedSession)}, peerClosed={GetBoolValue(payload, "peerClosed")}, mediaTracksStopped={GetIntValue(payload, "mediaTracksStopped")}, flvPlayersDisposed={GetIntValue(payload, "flvPlayersDisposed")}, hlsPlayersDisposed={GetIntValue(payload, "hlsPlayersDisposed")}");
                     if (stopPlaybackCompletionSource is not null
                         && (string.IsNullOrWhiteSpace(stopPlaybackSessionId)
                             || string.Equals(stopPlaybackSessionId, stoppedSessionId, StringComparison.OrdinalIgnoreCase)))
@@ -720,6 +759,78 @@ public partial class PreviewHostControl : UserControl, IDisposable
         _ = DiagnosticService?.WriteAsync(eventName, message);
     }
 
+    private string BuildHostLifecycleDiagnosticState(
+        string caller,
+        string reason,
+        PreviewPlaybackSessionDto? currentSession = null,
+        PreviewPlaybackSessionDto? previousSession = null,
+        PreviewPlaybackSessionDto? nextSession = null,
+        bool isSessionSwitch = false)
+    {
+        var effectiveSession = currentSession ?? activeSession ?? nextSession ?? previousSession;
+        var deviceCode = effectiveSession?.DeviceCode ?? "none";
+        var sessionId = effectiveSession?.PlaybackSessionId ?? "none";
+        var protocol = effectiveSession?.Protocol ?? "unknown";
+        var isFallbackSession = IsFallbackProtocol(protocol);
+        var viewModelState = (DataContext as ShellViewModel)?.BuildPreviewDiagnosticState(
+                                 caller,
+                                 reason,
+                                 deviceCode,
+                                 sessionId,
+                                 protocol,
+                                 isFallbackSession,
+                                 oldSessionId: previousSession?.PlaybackSessionId,
+                                 newSessionId: nextSession?.PlaybackSessionId,
+                                 isSessionSwitch: isSessionSwitch)
+                             ?? string.Join(", ", new[]
+                             {
+                                 $"caller={caller}",
+                                 $"reason={reason}",
+                                 $"deviceCode={deviceCode}",
+                                 $"sessionId={sessionId}",
+                                 $"protocol={protocol}",
+                                 "previewRequested=unknown",
+                                 "previewPlaybackState=unknown",
+                                 "hasPreviewSessionJson=unknown",
+                                 "hasPreviewSession=unknown",
+                                 "selectedPointDeviceCode=unknown",
+                                 "isWindowClosing=unknown",
+                                 $"isFallbackSession={isFallbackSession}",
+                                 $"isSessionSwitch={isSessionSwitch}",
+                                 $"oldSessionId={previousSession?.PlaybackSessionId ?? "none"}",
+                                 $"newSessionId={nextSession?.PlaybackSessionId ?? "none"}",
+                                 $"stackTrace={Environment.StackTrace.Replace(Environment.NewLine, " | ", StringComparison.Ordinal)}"
+                             });
+
+        return string.Join(", ", new[]
+        {
+            viewModelState,
+            $"hostBrowserReady={browserReady}",
+            $"hostHasPendingSessionJson={!string.IsNullOrWhiteSpace(pendingSessionJson)}",
+            $"hostActiveSessionId={activeSession?.PlaybackSessionId ?? "none"}"
+        });
+    }
+
+    private void WriteHostLifecycleDiagnostic(
+        string eventName,
+        string caller,
+        string reason,
+        PreviewPlaybackSessionDto? currentSession = null,
+        PreviewPlaybackSessionDto? previousSession = null,
+        PreviewPlaybackSessionDto? nextSession = null,
+        bool isSessionSwitch = false)
+    {
+        WriteDiagnostic(
+            eventName,
+            BuildHostLifecycleDiagnosticState(
+                caller,
+                reason,
+                currentSession,
+                previousSession,
+                nextSession,
+                isSessionSwitch));
+    }
+
     private void PrepareHostPageReset(PreviewPlaybackSessionDto? previousSession, PreviewPlaybackSessionDto nextSession)
     {
         pendingHostPageMode = IsFallbackProtocol(nextSession.Protocol)
@@ -731,7 +842,7 @@ public partial class PreviewHostControl : UserControl, IDisposable
 
         WriteDiagnostic(
             "preview-host-page-reset",
-            $"deviceCode={nextSession.DeviceCode}, sessionId={nextSession.PlaybackSessionId}, previousProtocol={previousSession?.Protocol ?? "none"}, nextProtocol={nextSession.Protocol}, pageMode={pendingHostPageMode}, reason={GetHostPageResetReason(previousSession, nextSession)}");
+            $"deviceCode={nextSession.DeviceCode}, sessionId={nextSession.PlaybackSessionId}, previousProtocol={previousSession?.Protocol ?? "none"}, nextProtocol={nextSession.Protocol}, pageMode={pendingHostPageMode}, reason={GetHostPageResetReason(previousSession, nextSession)}, oldSessionId={previousSession?.PlaybackSessionId ?? "none"}, newSessionId={nextSession.PlaybackSessionId}");
     }
 
     private static string GetHostPageResetReason(PreviewPlaybackSessionDto? previousSession, PreviewPlaybackSessionDto nextSession)
@@ -1030,6 +1141,12 @@ public partial class PreviewHostControl : UserControl, IDisposable
         AppendValue(parts, payload, "droppedFrames");
         AppendValue(parts, payload, "fatal");
         AppendValue(parts, payload, "fragments");
+        AppendValue(parts, payload, "oldSessionId");
+        AppendValue(parts, payload, "newSessionId");
+        AppendValue(parts, payload, "preferredProtocol");
+        AppendValue(parts, payload, "protocolAttemptIndex");
+        AppendValue(parts, payload, "totalAttemptIndex");
+        AppendValue(parts, payload, "maxTotalAttempts");
         AppendSnapshot(parts, payload);
         return string.Join(", ", parts);
     }
@@ -1177,9 +1294,18 @@ public partial class PreviewHostControl : UserControl, IDisposable
         pendingSessionJson = null;
         ClearMediaRequestTraces();
         var sessionId = activeSession?.PlaybackSessionId;
+        WriteHostLifecycleDiagnostic(
+            "preview-host-flush-start",
+            "FlushActiveSessionAsync",
+            reason,
+            currentSession: activeSession);
         if (Browser.CoreWebView2 is null || !browserReady || string.IsNullOrWhiteSpace(sessionId))
         {
             activeSession = null;
+            WriteHostLifecycleDiagnostic(
+                "preview-host-flush-skipped",
+                "FlushActiveSessionAsync",
+                "no_active_browser_session");
             return;
         }
 
@@ -1206,6 +1332,10 @@ public partial class PreviewHostControl : UserControl, IDisposable
         stopPlaybackSessionId = null;
         stopPlaybackCompletionSource = null;
         activeSession = null;
+        WriteHostLifecycleDiagnostic(
+            "preview-host-flush-end",
+            "FlushActiveSessionAsync",
+            reason);
     }
 
     public void Dispose()
@@ -1229,6 +1359,10 @@ public partial class PreviewHostControl : UserControl, IDisposable
 
         if (Browser.CoreWebView2 is not null)
         {
+            WriteHostLifecycleDiagnostic(
+                "preview-host-stop-requested",
+                "Dispose",
+                "host_dispose");
             try
             {
                 _ = Browser.ExecuteScriptAsync("window.TyslPreviewHost?.stop('host_dispose');");

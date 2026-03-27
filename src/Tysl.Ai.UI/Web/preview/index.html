@@ -224,6 +224,10 @@ function postDiagnostic(event, extra = {}) {
     deviceCode: state.session.deviceCode || "",
     playbackSessionId: state.session.playbackSessionId || "",
     protocol: state.session.protocol || "",
+    preferredProtocol: state.session.preferredProtocol || "",
+    protocolAttemptIndex: state.session.protocolAttemptIndex || 0,
+    totalAttemptIndex: state.session.totalAttemptIndex || 0,
+    maxTotalAttempts: state.session.maxTotalAttempts || 0,
     event,
     ...extra,
     snapshot: getVideoSnapshot()
@@ -332,6 +336,9 @@ function teardownAdapter(reason) {
 }
 
 function stop(reason) {
+  postDiagnostic("stop_requested", {
+    reason: reason || "manual_stop"
+  });
   teardownAdapter(reason || "manual_stop");
   state.session = null;
   setStatus("等待预览指令。");
@@ -1105,6 +1112,16 @@ function createPlaybackHost(session, attemptId) {
 }
 
 async function play(session) {
+  const previousSession = state.session;
+  if (previousSession) {
+    postDiagnostic("switch_session_requested", {
+      reason: "switch_session",
+      oldSessionId: previousSession.playbackSessionId || "",
+      newSessionId: session && session.playbackSessionId ? session.playbackSessionId : "",
+      oldProtocol: previousSession.protocol || "",
+      newProtocol: session && session.protocol ? session.protocol : ""
+    });
+  }
   stop("switch_session");
 
   if (!session || !session.protocol) {

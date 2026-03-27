@@ -21,4 +21,12 @@ public sealed record SitePreviewSession
     public required int ReadyTimeoutSeconds { get; init; }
 
     public required bool UsedFallback { get; init; }
+
+    public SitePreviewProtocol PreferredProtocol { get; init; } = SitePreviewProtocol.Unknown;
+
+    public int ProtocolAttemptIndex { get; init; }
+
+    public int TotalAttemptIndex { get; init; }
+
+    public int MaxTotalAttempts { get; init; }
 }

@@ -5,6 +5,11 @@ namespace Tysl.Ai.Core.Interfaces;
 
 public interface ISitePreviewService
 {
+    Task<SitePreviewResolveResult> ResolvePreviewAsync(
+        string deviceCode,
+        IReadOnlyList<SitePreviewProtocol> protocolOrder,
+        CancellationToken cancellationToken = default);
+
     Task<SitePreviewResolveResult> ResolveUserPreviewAsync(
         string deviceCode,
         CancellationToken cancellationToken = default);

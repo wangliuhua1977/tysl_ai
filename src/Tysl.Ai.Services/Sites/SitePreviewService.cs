@@ -28,7 +28,15 @@ public sealed class SitePreviewService : ISitePreviewService
         string deviceCode,
         CancellationToken cancellationToken = default)
     {
-        return platformPreviewProvider.ResolvePreviewAsync(deviceCode, PrimaryOrder, cancellationToken);
+        return ResolvePreviewAsync(deviceCode, PrimaryOrder, cancellationToken);
+    }
+
+    public Task<SitePreviewResolveResult> ResolvePreviewAsync(
+        string deviceCode,
+        IReadOnlyList<SitePreviewProtocol> protocolOrder,
+        CancellationToken cancellationToken = default)
+    {
+        return platformPreviewProvider.ResolvePreviewAsync(deviceCode, protocolOrder, cancellationToken);
     }
 
     public Task<SitePreviewResolveResult> ResolveFallbackPreviewAsync(
@@ -50,7 +58,7 @@ public sealed class SitePreviewService : ISitePreviewService
                 AttemptedProtocols = [failedProtocol],
                 FailureReason = "预览暂不可用，请稍后重试。"
             })
-            : platformPreviewProvider.ResolvePreviewAsync(deviceCode, order, cancellationToken);
+            : ResolvePreviewAsync(deviceCode, order, cancellationToken);
     }
 
     public Task<WebRtcPlaybackNegotiationResult> NegotiateWebRtcAsync(

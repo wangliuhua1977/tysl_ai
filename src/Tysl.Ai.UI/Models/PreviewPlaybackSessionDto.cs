@@ -16,6 +16,14 @@ public sealed class PreviewPlaybackSessionDto
 
     public int ReadyTimeoutSeconds { get; set; } = 10;
 
+    public string PreferredProtocol { get; set; } = string.Empty;
+
+    public int ProtocolAttemptIndex { get; set; }
+
+    public int TotalAttemptIndex { get; set; }
+
+    public int MaxTotalAttempts { get; set; } = 4;
+
     public bool ForceInitialWebRtcFailure { get; set; }
 
     public string? ForceFailureCategory { get; set; }

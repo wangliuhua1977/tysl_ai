@@ -422,6 +422,22 @@ public partial class ShellWindow : Window
             $"deviceCode={deviceCode}, stage={stage}, exceptionType={exception.GetType().FullName}, message={exception.Message}, stackTrace={exception.StackTrace}, hasEditorDialog={editorDialog is not null}, editorDialogVisible={editorDialog?.IsVisible == true}, hasManualDispatchDialog={manualDispatchDialog is not null}, ownerWindowState={WindowState}");
     }
 
+    private Task WritePreviewWindowLifecycleAsync(
+        string eventName,
+        string caller,
+        string reason,
+        Exception? exception = null)
+    {
+        var previewState = shellViewModel?.BuildPreviewDiagnosticState(caller, reason)
+                           ?? $"caller={caller}, reason={reason}, hasShellViewModel=false";
+        var exceptionSegment = exception is null
+            ? string.Empty
+            : $", exceptionType={exception.GetType().FullName}, message={exception.Message}, stackTrace={exception.StackTrace}";
+        return diagnosticService.WriteAsync(
+            eventName,
+            $"{previewState}, allowCloseAfterPreviewFlush={allowCloseAfterPreviewFlush}, isClosingAsync={isClosingAsync}, hasClosePreparation={closePreparationCompletionSource is not null}, windowState={WindowState}, stackTrace={Environment.StackTrace.Replace(Environment.NewLine, " | ", StringComparison.Ordinal)}{exceptionSegment}");
+    }
+
     public Task RequestCloseForAcceptanceAsync()
     {
         return Dispatcher.CheckAccess()
@@ -431,8 +447,17 @@ public partial class ShellWindow : Window
 
     private async Task RequestCloseForAcceptanceCoreAsync()
     {
+        await WritePreviewWindowLifecycleAsync(
+            "preview-window-close-requested",
+            "RequestCloseForAcceptanceAsync",
+            "acceptance_request");
+
         if (allowCloseAfterPreviewFlush)
         {
+            await WritePreviewWindowLifecycleAsync(
+                "preview-window-close-bypassed",
+                "RequestCloseForAcceptanceAsync",
+                "allow_close_after_flush");
             Close();
             return;
         }
@@ -450,6 +475,11 @@ public partial class ShellWindow : Window
 
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
+        _ = WritePreviewWindowLifecycleAsync(
+            "preview-window-closing",
+            "ShellWindow.OnClosing",
+            allowCloseAfterPreviewFlush ? "allow_close_after_flush" : "closing_event");
+
         if (allowCloseAfterPreviewFlush)
         {
             return;
@@ -466,9 +496,17 @@ public partial class ShellWindow : Window
 
         try
         {
-            shellViewModel?.BeginShutdownPreviewRelease();
-            await PreviewHost.FlushActiveSessionAsync();
-            shellViewModel?.CompleteShutdownAfterPreviewRelease();
+            shellViewModel?.BeginShutdownPreviewRelease("ShellWindow.OnClosing");
+            await WritePreviewWindowLifecycleAsync(
+                "preview-window-flush-start",
+                "ShellWindow.OnClosing",
+                "before_flush_active_session");
+            await PreviewHost.FlushActiveSessionAsync("window_closing");
+            await WritePreviewWindowLifecycleAsync(
+                "preview-window-flush-end",
+                "ShellWindow.OnClosing",
+                "after_flush_active_session");
+            shellViewModel?.CompleteShutdownAfterPreviewRelease("ShellWindow.OnClosing");
 
             if (editorDialog is not null)
             {
@@ -510,6 +548,11 @@ public partial class ShellWindow : Window
             _ = diagnosticService.WriteAsync(
                 "exception-caught",
                 $"source=shell-window-close, type={ex.GetType().FullName}, message={ex.Message}");
+            _ = WritePreviewWindowLifecycleAsync(
+                "preview-window-close-failed",
+                "ShellWindow.OnClosing",
+                "exception",
+                ex);
         }
         finally
         {
@@ -523,6 +566,10 @@ public partial class ShellWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _ = WritePreviewWindowLifecycleAsync(
+            "preview-window-closed",
+            "ShellWindow.OnClosed",
+            "window_closed");
         Closing -= OnClosing;
         Closed -= OnClosed;
         DataContextChanged -= OnDataContextChanged;
