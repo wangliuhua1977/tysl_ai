@@ -1121,6 +1121,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             "hls_play_failed" => "HLS 播放启动失败",
             "hls_stream_failed" => "HLS 流播放失败",
             "hls_ready_timeout" => "HLS 预览就绪超时",
+            "hls_audio_only" => "HLS 仅识别到音频轨",
+            "hls_video_codec_unsupported" => "HLS 视频编码当前环境不支持",
+            "hls_mse_append_failed" => "HLS MSE append 失败",
+            "hls_video_demux_failed" => "HLS 视频轨 demux 失败",
             "unsupported_protocol" => "预览协议不受支持",
             _ => null
         };

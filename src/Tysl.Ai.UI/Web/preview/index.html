@@ -62,7 +62,8 @@ const state = {
   pageMode: pageParams.get("pageMode") || "default",
   fallbackProtocolHint: pageParams.get("fallbackProtocol") || "",
   activeVideo: video,
-  webrtc: createWebRtcState()
+  webrtc: createWebRtcState(),
+  hls: createHlsState()
 };
 
 const webRtcReadyEvents = new Set([
@@ -71,6 +72,8 @@ const webRtcReadyEvents = new Set([
   "canplay",
   "playing"
 ]);
+const boundMediaSources = new WeakSet();
+const boundSourceBuffers = new WeakSet();
 
 function createWebRtcState() {
   return {
@@ -84,6 +87,57 @@ function createWebRtcState() {
 
 function resetWebRtcState() {
   state.webrtc = createWebRtcState();
+}
+
+function createHlsState() {
+  return {
+    manifestParsed: false,
+    fragParsedCount: 0,
+    levelCodecs: "",
+    levelAudioCodec: "",
+    levelVideoCodec: "",
+    levelTotalDuration: "",
+    levelFragments: 0,
+    mediaSourceOpenCount: 0,
+    mediaSourceEndedCount: 0,
+    mediaSourceCloseCount: 0,
+    audioSourceBufferCount: 0,
+    videoSourceBufferCount: 0,
+    unknownSourceBufferCount: 0,
+    audioSourceBufferMimeType: "",
+    videoSourceBufferMimeType: "",
+    unknownSourceBufferMimeType: "",
+    sourceBufferUpdateStartCount: 0,
+    sourceBufferUpdateEndCount: 0,
+    sourceBufferErrorCount: 0,
+    audioInitSegmentSeen: false,
+    videoInitSegmentSeen: false,
+    audioSamplesParsed: 0,
+    videoSamplesParsed: 0,
+    audioFragBufferedCount: 0,
+    videoFragBufferedCount: 0,
+    unknownFragBufferedCount: 0,
+    audioAppendCount: 0,
+    videoAppendCount: 0,
+    unknownAppendCount: 0,
+    audioAppendBytes: 0,
+    videoAppendBytes: 0,
+    unknownAppendBytes: 0,
+    audioCodecSupported: "",
+    videoCodecSupported: "",
+    lastErrorType: "",
+    lastErrorDetail: "",
+    lastErrorReason: "",
+    lastErrorMessage: "",
+    lastSourceBufferType: "",
+    lastSourceBufferMimeType: "",
+    lastSourceBufferError: "",
+    lastVideoBlockage: ""
+  };
+}
+
+function resetHlsState() {
+  state.hls = createHlsState();
 }
 
 function createReleaseStats(reason) {
@@ -101,6 +155,8 @@ function post(type, payload = {}) {
     window.chrome.webview.postMessage({ type, payload });
   }
 }
+
+ensureMediaSourceInstrumentation();
 
 function getCurrentAttemptId() {
   return state.playbackAttemptId;
@@ -120,6 +176,237 @@ function isFlvJsSupported() {
 
 function hasMediaSource() {
   return typeof window.MediaSource !== "undefined";
+}
+
+function normalizeTrackType(type) {
+  const normalized = typeof type === "string"
+    ? type.trim().toLowerCase()
+    : "";
+  if (normalized.startsWith("audio")) {
+    return "audio";
+  }
+
+  if (normalized.startsWith("video")) {
+    return "video";
+  }
+
+  return "unknown";
+}
+
+function readTrackCodecSupport(container, codec) {
+  if (!hasMediaSource() || typeof MediaSource.isTypeSupported !== "function" || !codec) {
+    return "";
+  }
+
+  const mimeType = container
+    ? `${container};codecs="${codec}"`
+    : `video/mp4;codecs="${codec}"`;
+  return String(MediaSource.isTypeSupported(mimeType));
+}
+
+function recordSourceBufferCreated(trackType, mimeType) {
+  if (trackType === "audio") {
+    state.hls.audioSourceBufferCount += 1;
+    state.hls.audioSourceBufferMimeType = mimeType || state.hls.audioSourceBufferMimeType;
+    return;
+  }
+
+  if (trackType === "video") {
+    state.hls.videoSourceBufferCount += 1;
+    state.hls.videoSourceBufferMimeType = mimeType || state.hls.videoSourceBufferMimeType;
+    return;
+  }
+
+  state.hls.unknownSourceBufferCount += 1;
+  state.hls.unknownSourceBufferMimeType = mimeType || state.hls.unknownSourceBufferMimeType;
+}
+
+function recordFragBuffered(trackType) {
+  if (trackType === "audio") {
+    state.hls.audioFragBufferedCount += 1;
+    return;
+  }
+
+  if (trackType === "video") {
+    state.hls.videoFragBufferedCount += 1;
+    return;
+  }
+
+  state.hls.unknownFragBufferedCount += 1;
+}
+
+function recordBufferAppend(trackType, byteLength) {
+  const size = Number.isFinite(byteLength) ? byteLength : 0;
+  if (trackType === "audio") {
+    state.hls.audioAppendCount += 1;
+    state.hls.audioAppendBytes += size;
+    return;
+  }
+
+  if (trackType === "video") {
+    state.hls.videoAppendCount += 1;
+    state.hls.videoAppendBytes += size;
+    return;
+  }
+
+  state.hls.unknownAppendCount += 1;
+  state.hls.unknownAppendBytes += size;
+}
+
+function getHlsStateSnapshot() {
+  return {
+    manifestParsed: state.hls.manifestParsed,
+    fragParsedCount: state.hls.fragParsedCount,
+    levelCodecs: state.hls.levelCodecs,
+    levelAudioCodec: state.hls.levelAudioCodec,
+    levelVideoCodec: state.hls.levelVideoCodec,
+    levelTotalDuration: state.hls.levelTotalDuration,
+    levelFragments: state.hls.levelFragments,
+    mediaSourceOpenCount: state.hls.mediaSourceOpenCount,
+    mediaSourceEndedCount: state.hls.mediaSourceEndedCount,
+    mediaSourceCloseCount: state.hls.mediaSourceCloseCount,
+    audioSourceBufferCount: state.hls.audioSourceBufferCount,
+    videoSourceBufferCount: state.hls.videoSourceBufferCount,
+    unknownSourceBufferCount: state.hls.unknownSourceBufferCount,
+    audioSourceBufferMimeType: state.hls.audioSourceBufferMimeType,
+    videoSourceBufferMimeType: state.hls.videoSourceBufferMimeType,
+    unknownSourceBufferMimeType: state.hls.unknownSourceBufferMimeType,
+    sourceBufferUpdateStartCount: state.hls.sourceBufferUpdateStartCount,
+    sourceBufferUpdateEndCount: state.hls.sourceBufferUpdateEndCount,
+    sourceBufferErrorCount: state.hls.sourceBufferErrorCount,
+    audioInitSegmentSeen: state.hls.audioInitSegmentSeen,
+    videoInitSegmentSeen: state.hls.videoInitSegmentSeen,
+    audioSamplesParsed: state.hls.audioSamplesParsed,
+    videoSamplesParsed: state.hls.videoSamplesParsed,
+    audioFragBufferedCount: state.hls.audioFragBufferedCount,
+    videoFragBufferedCount: state.hls.videoFragBufferedCount,
+    unknownFragBufferedCount: state.hls.unknownFragBufferedCount,
+    audioAppendCount: state.hls.audioAppendCount,
+    videoAppendCount: state.hls.videoAppendCount,
+    unknownAppendCount: state.hls.unknownAppendCount,
+    audioAppendBytes: state.hls.audioAppendBytes,
+    videoAppendBytes: state.hls.videoAppendBytes,
+    unknownAppendBytes: state.hls.unknownAppendBytes,
+    audioCodecSupported: state.hls.audioCodecSupported,
+    videoCodecSupported: state.hls.videoCodecSupported,
+    lastErrorType: state.hls.lastErrorType,
+    lastErrorDetail: state.hls.lastErrorDetail,
+    lastErrorReason: state.hls.lastErrorReason,
+    lastErrorMessage: state.hls.lastErrorMessage,
+    lastSourceBufferType: state.hls.lastSourceBufferType,
+    lastSourceBufferMimeType: state.hls.lastSourceBufferMimeType,
+    lastSourceBufferError: state.hls.lastSourceBufferError,
+    lastVideoBlockage: state.hls.lastVideoBlockage
+  };
+}
+
+function bindMediaSourceEvents(mediaSource) {
+  if (!mediaSource || !hasMediaSource() || boundMediaSources.has(mediaSource)) {
+    return;
+  }
+
+  boundMediaSources.add(mediaSource);
+  mediaSource.addEventListener("sourceopen", () => {
+    state.hls.mediaSourceOpenCount += 1;
+    postDiagnostic("video_sourceopen", {
+      reason: mediaSource.readyState || ""
+    });
+  });
+  mediaSource.addEventListener("sourceended", () => {
+    state.hls.mediaSourceEndedCount += 1;
+    postDiagnostic("video_sourceended", {
+      reason: mediaSource.readyState || ""
+    });
+  });
+  mediaSource.addEventListener("sourceclose", () => {
+    state.hls.mediaSourceCloseCount += 1;
+    postDiagnostic("video_sourceclose", {
+      reason: mediaSource.readyState || ""
+    });
+  });
+}
+
+function bindSourceBufferEvents(sourceBuffer, mimeType) {
+  if (!sourceBuffer || boundSourceBuffers.has(sourceBuffer)) {
+    return;
+  }
+
+  const trackType = normalizeTrackType(mimeType);
+  boundSourceBuffers.add(sourceBuffer);
+  recordSourceBufferCreated(trackType, mimeType || "");
+  postDiagnostic("sourcebuffer_created", {
+    dataType: trackType,
+    reason: mimeType || ""
+  });
+  sourceBuffer.addEventListener("updatestart", () => {
+    state.hls.sourceBufferUpdateStartCount += 1;
+    postDiagnostic("sourcebuffer_update_start", {
+      dataType: trackType,
+      reason: mimeType || "",
+      sourceBufferUpdating: String(!!sourceBuffer.updating)
+    });
+  });
+  sourceBuffer.addEventListener("updateend", () => {
+    state.hls.sourceBufferUpdateEndCount += 1;
+    postDiagnostic("sourcebuffer_update_end", {
+      dataType: trackType,
+      reason: mimeType || "",
+      sourceBufferUpdating: String(!!sourceBuffer.updating)
+    });
+  });
+  sourceBuffer.addEventListener("error", () => {
+    state.hls.sourceBufferErrorCount += 1;
+    state.hls.lastSourceBufferType = trackType;
+    state.hls.lastSourceBufferMimeType = mimeType || "";
+    state.hls.lastSourceBufferError = "sourcebuffer_error_event";
+    postDiagnostic("sourcebuffer_error", {
+      dataType: trackType,
+      reason: "sourcebuffer_error_event",
+      errorMessage: mimeType || ""
+    });
+  });
+}
+
+function ensureMediaSourceInstrumentation() {
+  if (!hasMediaSource() || window.__tyslMediaSourceInstrumentationInstalled) {
+    return;
+  }
+
+  window.__tyslMediaSourceInstrumentationInstalled = true;
+  const nativeCreateObjectUrl = window.URL && typeof window.URL.createObjectURL === "function"
+    ? window.URL.createObjectURL.bind(window.URL)
+    : null;
+  if (nativeCreateObjectUrl) {
+    window.URL.createObjectURL = function createInstrumentedObjectUrl(object) {
+      if (object instanceof MediaSource) {
+        bindMediaSourceEvents(object);
+      }
+
+      return nativeCreateObjectUrl(object);
+    };
+  }
+
+  const nativeAddSourceBuffer = MediaSource.prototype.addSourceBuffer;
+  MediaSource.prototype.addSourceBuffer = function addInstrumentedSourceBuffer(mimeType) {
+    bindMediaSourceEvents(this);
+    try {
+      const sourceBuffer = nativeAddSourceBuffer.call(this, mimeType);
+      bindSourceBufferEvents(sourceBuffer, mimeType);
+      return sourceBuffer;
+    } catch (error) {
+      const trackType = normalizeTrackType(mimeType);
+      state.hls.sourceBufferErrorCount += 1;
+      state.hls.lastSourceBufferType = trackType;
+      state.hls.lastSourceBufferMimeType = mimeType || "";
+      state.hls.lastSourceBufferError = describeError(error);
+      postDiagnostic("sourcebuffer_error", {
+        dataType: trackType,
+        reason: "addSourceBuffer_failed",
+        errorMessage: describeError(error)
+      });
+      throw error;
+    }
+  };
 }
 
 function describeError(error) {
@@ -220,7 +507,7 @@ function postDiagnostic(event, extra = {}) {
     return;
   }
 
-  post("playback_diagnostic", {
+  const payload = {
     deviceCode: state.session.deviceCode || "",
     playbackSessionId: state.session.playbackSessionId || "",
     protocol: state.session.protocol || "",
@@ -231,7 +518,13 @@ function postDiagnostic(event, extra = {}) {
     event,
     ...extra,
     snapshot: getVideoSnapshot()
-  });
+  };
+
+  if (state.session.protocol === "hls") {
+    Object.assign(payload, getHlsStateSnapshot());
+  }
+
+  post("playback_diagnostic", payload);
 }
 
 function setStatus(_text) {
@@ -317,6 +610,7 @@ function teardownAdapter(reason) {
   state.requestId = null;
   state.readyCategory = null;
   resetWebRtcState();
+  resetHlsState();
   resetVideo();
   replaceVideoElement();
   if (session) {
@@ -431,6 +725,66 @@ function handleReadyTimeout(category, attemptId) {
         hasVideoTrack: state.webrtc.hasVideoTrack
       });
       fail("webrtc_no_first_frame", "connected without first frame", attemptId);
+      return;
+    }
+  }
+
+  if (state.session && state.session.protocol === "hls") {
+    const hasAudioSignals = state.hls.audioInitSegmentSeen
+      || state.hls.audioSamplesParsed > 0
+      || state.hls.audioAppendCount > 0
+      || state.hls.audioSourceBufferCount > 0
+      || !!state.hls.levelAudioCodec;
+    const hasVideoSignals = state.hls.videoInitSegmentSeen
+      || state.hls.videoSamplesParsed > 0
+      || state.hls.videoAppendCount > 0
+      || state.hls.videoSourceBufferCount > 0
+      || !!state.hls.levelVideoCodec;
+    if (state.hls.sourceBufferErrorCount > 0 || state.hls.lastSourceBufferError) {
+      state.hls.lastVideoBlockage = "mse_append_failed";
+      postDiagnostic("hls_blockage_detected", {
+        category: "hls_mse_append_failed",
+        reason: state.hls.lastSourceBufferError || "sourcebuffer append failed"
+      });
+      fail("hls_mse_append_failed", state.hls.lastSourceBufferError || "sourcebuffer append failed", attemptId);
+      return;
+    }
+
+    if (state.hls.videoCodecSupported === "false") {
+      state.hls.lastVideoBlockage = "video_codec_unsupported";
+      postDiagnostic("hls_blockage_detected", {
+        category: "hls_video_codec_unsupported",
+        reason: state.hls.levelVideoCodec || "unsupported video codec"
+      });
+      fail(
+        "hls_video_codec_unsupported",
+        state.hls.levelVideoCodec || state.hls.videoSourceBufferMimeType || "unsupported video codec",
+        attemptId
+      );
+      return;
+    }
+
+    if (!hasVideoSignals && hasAudioSignals) {
+      state.hls.lastVideoBlockage = "audio_only";
+      postDiagnostic("hls_blockage_detected", {
+        category: "hls_audio_only",
+        reason: "audio track appended without video track"
+      });
+      fail("hls_audio_only", "audio track appended without video track", attemptId);
+      return;
+    }
+
+    if (state.hls.lastErrorDetail === "fragParsingError" && state.hls.videoSamplesParsed <= 0) {
+      state.hls.lastVideoBlockage = "video_demux_failed";
+      postDiagnostic("hls_blockage_detected", {
+        category: "hls_video_demux_failed",
+        reason: state.hls.lastErrorMessage || state.hls.lastErrorReason || "fragParsingError"
+      });
+      fail(
+        "hls_video_demux_failed",
+        state.hls.lastErrorMessage || state.hls.lastErrorReason || "fragParsingError",
+        attemptId
+      );
       return;
     }
   }
@@ -602,6 +956,10 @@ function bindVideoEvents(targetVideo) {
     maybeMarkFallbackReady(attemptId);
   });
 
+  attach("play", () => {
+    postDiagnostic("video_play");
+  });
+
   attach("playing", attemptId => {
     postDiagnostic("video_playing");
     if (state.session && state.session.protocol === "webrtc") {
@@ -629,7 +987,12 @@ function bindVideoEvents(targetVideo) {
   });
 
   attach("error", attemptId => {
-    postDiagnostic("video_error");
+    const mediaError = targetVideo.error || null;
+    postDiagnostic("video_error", {
+      errorCode: mediaError ? mediaError.code : 0,
+      reason: mediaError && mediaError.message ? mediaError.message : "",
+      errorMessage: mediaError && mediaError.message ? mediaError.message : ""
+    });
     if (state.session && !state.ready) {
       fail("media_error", "video error", attemptId);
     }
@@ -1096,15 +1459,83 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
               statsTotal: data && data.stats && data.stats.total !== undefined ? String(data.stats.total) : ""
             });
           });
+          hls.on(Hls.Events.FRAG_PARSING_INIT_SEGMENT, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            const tracks = data && data.tracks ? data.tracks : {};
+            const audioTrack = tracks.audio || null;
+            const videoTrack = tracks.video || null;
+            state.hls.audioInitSegmentSeen = state.hls.audioInitSegmentSeen || !!audioTrack;
+            state.hls.videoInitSegmentSeen = state.hls.videoInitSegmentSeen || !!videoTrack;
+            if (audioTrack) {
+              state.hls.levelAudioCodec = audioTrack.codec || state.hls.levelAudioCodec;
+              state.hls.audioCodecSupported = readTrackCodecSupport(audioTrack.container || "audio/mp4", audioTrack.codec || "");
+            }
+
+            if (videoTrack) {
+              state.hls.levelVideoCodec = videoTrack.codec || state.hls.levelVideoCodec;
+              state.hls.videoCodecSupported = readTrackCodecSupport(videoTrack.container || "video/mp4", videoTrack.codec || "");
+            }
+
+            postDiagnostic("hls_frag_parsing_init_segment", {
+              reason: Object.keys(tracks).join("|"),
+              audioCodec: audioTrack && audioTrack.codec ? audioTrack.codec : "",
+              videoCodec: videoTrack && videoTrack.codec ? videoTrack.codec : "",
+              audioContainer: audioTrack && audioTrack.container ? audioTrack.container : "",
+              videoContainer: videoTrack && videoTrack.container ? videoTrack.container : "",
+              audioCodecSupported: state.hls.audioCodecSupported,
+              videoCodecSupported: state.hls.videoCodecSupported
+            });
+          });
+          hls.on(Hls.Events.FRAG_PARSING_DATA, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            const trackType = normalizeTrackType(data && data.type ? data.type : "");
+            const sampleCount = data && typeof data.nb === "number" ? data.nb : 0;
+            if (trackType === "audio") {
+              state.hls.audioSamplesParsed += sampleCount;
+            } else if (trackType === "video") {
+              state.hls.videoSamplesParsed += sampleCount;
+            }
+
+            postDiagnostic("hls_frag_parsing_data", {
+              dataType: trackType,
+              reason: data && typeof data.dropped === "number" ? String(data.dropped) : "",
+              sampleCount: String(sampleCount),
+              startPts: data && data.startPTS !== undefined ? String(data.startPTS) : "",
+              endPts: data && data.endPTS !== undefined ? String(data.endPTS) : ""
+            });
+          });
+          hls.on(Hls.Events.FRAG_PARSED, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            state.hls.fragParsedCount += 1;
+            postDiagnostic("hls_frag_parsed", {
+              requestUrl: data && data.frag && data.frag.url ? data.frag.url : "",
+              fragSn: data && data.frag && data.frag.sn !== undefined ? String(data.frag.sn) : "",
+              fragLevel: data && data.frag && data.frag.level !== undefined ? String(data.frag.level) : ""
+            });
+          });
           hls.on(Hls.Events.BUFFER_APPENDING, (_, data) => {
             if (!isAttemptActive()) {
               return;
             }
 
+            const trackType = normalizeTrackType(data && data.type ? data.type : "");
+            const contentLength = data && data.data && data.data.byteLength !== undefined
+              ? Number(data.data.byteLength)
+              : 0;
+            recordBufferAppend(trackType, contentLength);
             postDiagnostic("hls_buffer_appending", {
               parent: data && data.parent ? data.parent : "",
-              dataType: data && data.type ? data.type : "",
-              contentLength: data && data.data && data.data.byteLength !== undefined ? String(data.data.byteLength) : ""
+              dataType: trackType,
+              contentLength: String(contentLength)
             });
           });
           hls.on(Hls.Events.BUFFER_APPENDED, (_, data) => {
@@ -1114,8 +1545,19 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
 
             postDiagnostic("hls_buffer_appended", {
               parent: data && data.parent ? data.parent : "",
-              dataType: data && data.type ? data.type : "",
-              contentLength: data && data.pending !== undefined ? String(data.pending) : ""
+              dataType: normalizeTrackType(data && data.type ? data.type : ""),
+              contentLength: data && data.pending !== undefined ? String(data.pending) : "",
+              reason: data && data.timeRanges ? JSON.stringify(data.timeRanges) : ""
+            });
+          });
+          hls.on(Hls.Events.BUFFER_EOS, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_buffer_eos", {
+              dataType: normalizeTrackType(data && data.type ? data.type : ""),
+              reason: data && data.parent ? data.parent : ""
             });
           });
           hls.on(Hls.Events.ERROR, (_, data) => {
@@ -1130,15 +1572,28 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
                 : data && data.url
                   ? data.url
                   : "";
+            const errorDetail = data && data.details ? data.details : "stream failed";
+            const errorType = data && data.type ? data.type : "";
+            const errorReason = data && data.reason ? data.reason : "";
+            const errorMessage = describeError(data && data.error ? data.error : "");
+            state.hls.lastErrorType = errorType;
+            state.hls.lastErrorDetail = errorDetail;
+            state.hls.lastErrorReason = errorReason;
+            state.hls.lastErrorMessage = errorMessage === "unknown error" ? "" : errorMessage;
             postDiagnostic("hls_error", {
               fatal: !!(data && data.fatal),
-              detail: data && data.details ? data.details : "stream failed"
+              detail: errorDetail,
+              type: errorType,
+              reason: errorReason,
+              errorMessage: state.hls.lastErrorMessage
             });
             postDiagnostic("hls_network_request_failed", {
               requestUrl,
-              requestKind: data && data.type ? data.type : "",
+              requestKind: errorType,
               fatal: !!(data && data.fatal),
-              detail: data && data.details ? data.details : "stream failed"
+              detail: errorDetail,
+              reason: errorReason,
+              errorMessage: state.hls.lastErrorMessage
             });
             if (data && data.fatal) {
               fail("hls_stream_failed", data.details || "stream failed", attemptId);
@@ -1149,6 +1604,7 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
               return;
             }
 
+            state.hls.manifestParsed = true;
             postDiagnostic("hls_manifest_parsed");
             requestInitialHlsFragment("manifest_parsed", true);
             trackPromiseRejection(
@@ -1164,8 +1620,26 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
               return;
             }
 
+            const details = data && data.details ? data.details : null;
+            state.hls.levelCodecs = details && details.codecs ? details.codecs : "";
+            state.hls.levelAudioCodec = details && details.audioCodec ? details.audioCodec : state.hls.levelAudioCodec;
+            state.hls.levelVideoCodec = details && details.videoCodec ? details.videoCodec : state.hls.levelVideoCodec;
+            state.hls.levelTotalDuration = details && details.totalduration !== undefined ? String(details.totalduration) : "";
+            state.hls.levelFragments = details && Array.isArray(details.fragments) ? details.fragments.length : 0;
+            if (state.hls.levelAudioCodec && !state.hls.audioCodecSupported) {
+              state.hls.audioCodecSupported = readTrackCodecSupport("audio/mp4", state.hls.levelAudioCodec);
+            }
+
+            if (state.hls.levelVideoCodec && !state.hls.videoCodecSupported) {
+              state.hls.videoCodecSupported = readTrackCodecSupport("video/mp4", state.hls.levelVideoCodec);
+            }
+
             postDiagnostic("hls_level_loaded", {
-              fragments: data && data.details && Array.isArray(data.details.fragments) ? data.details.fragments.length : 0
+              fragments: state.hls.levelFragments,
+              levelCodecs: state.hls.levelCodecs,
+              audioCodec: state.hls.levelAudioCodec,
+              videoCodec: state.hls.levelVideoCodec,
+              totalDuration: state.hls.levelTotalDuration
             });
             requestInitialHlsFragment("level_loaded", hlsStartLoadAttemptCount < 3);
             maybeMarkFallbackReady(attemptId);
@@ -1175,10 +1649,17 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
               return;
             }
 
+            const trackType = state.hls.audioAppendCount > 0 && state.hls.videoAppendCount <= 0
+              ? "audio"
+              : state.hls.videoAppendCount > 0 && state.hls.audioAppendCount <= 0
+                ? "video"
+                : "unknown";
+            recordFragBuffered(trackType);
             postDiagnostic("hls_frag_buffered", {
               requestUrl: data && data.frag && data.frag.url ? data.frag.url : "",
               fragSn: data && data.frag && data.frag.sn !== undefined ? String(data.frag.sn) : "",
-              fragLevel: data && data.frag && data.frag.level !== undefined ? String(data.frag.level) : ""
+              fragLevel: data && data.frag && data.frag.level !== undefined ? String(data.frag.level) : "",
+              dataType: trackType
             });
             maybeMarkFallbackReady(attemptId);
           });
