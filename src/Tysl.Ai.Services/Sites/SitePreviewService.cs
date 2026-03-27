@@ -6,13 +6,6 @@ namespace Tysl.Ai.Services.Sites;
 
 public sealed class SitePreviewService : ISitePreviewService
 {
-    private static readonly IReadOnlyList<SitePreviewProtocol> PrimaryOrder =
-    [
-        SitePreviewProtocol.WebRtc,
-        SitePreviewProtocol.Flv,
-        SitePreviewProtocol.Hls
-    ];
-
     private readonly IPlatformPreviewProvider platformPreviewProvider;
     private readonly ISiteRuntimeStateRepository runtimeStateRepository;
 
@@ -28,7 +21,7 @@ public sealed class SitePreviewService : ISitePreviewService
         string deviceCode,
         CancellationToken cancellationToken = default)
     {
-        return ResolvePreviewAsync(deviceCode, PrimaryOrder, cancellationToken);
+        return ResolvePreviewAsync(deviceCode, Array.Empty<SitePreviewProtocol>(), cancellationToken);
     }
 
     public Task<SitePreviewResolveResult> ResolvePreviewAsync(
@@ -47,7 +40,8 @@ public sealed class SitePreviewService : ISitePreviewService
         var order = failedProtocol switch
         {
             SitePreviewProtocol.WebRtc => [SitePreviewProtocol.Flv, SitePreviewProtocol.Hls],
-            SitePreviewProtocol.Flv => [SitePreviewProtocol.Hls],
+            SitePreviewProtocol.Flv => [SitePreviewProtocol.Hls, SitePreviewProtocol.WebRtc],
+            SitePreviewProtocol.Hls => [SitePreviewProtocol.Flv, SitePreviewProtocol.WebRtc],
             _ => Array.Empty<SitePreviewProtocol>()
         };
 

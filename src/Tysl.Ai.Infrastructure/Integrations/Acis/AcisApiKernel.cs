@@ -14,6 +14,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using Tysl.Ai.Core.Enums;
+using Tysl.Ai.Core.Models;
 
 namespace TianyiVision.Acis.Reusable;
 
@@ -38,6 +40,7 @@ public sealed class AcisApiKernel : IDisposable
     private static readonly TimeSpan DeviceAlertFailureCacheLifetime = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PreviewSuccessCacheLifetime = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PreviewFailureCacheLifetime = TimeSpan.FromSeconds(5);
+    private static readonly Lazy<string> DefaultPreviewUserAgent = new(ResolveDefaultPreviewUserAgentCore);
 
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
@@ -486,6 +489,11 @@ public sealed class AcisApiKernel : IDisposable
         }
 
         var normalized = deviceCode.Trim();
+        if (intent == AcisPreviewIntent.ClickPreview && protocolOrderOverride is not { Count: > 0 })
+        {
+            return await ResolveClickPreviewAsync(normalized, cancellationToken).ConfigureAwait(false);
+        }
+
         string[] protocols = protocolOrderOverride is { Count: > 0 }
             ? protocolOrderOverride
                 .Select(protocol => protocol?.Trim().ToLowerInvariant())
@@ -494,8 +502,81 @@ public sealed class AcisApiKernel : IDisposable
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray()
             : intent == AcisPreviewIntent.ClickPreview
-                ? (Options.Preview.ClickProtocolOrder?.Length > 0 ? Options.Preview.ClickProtocolOrder : new[] { "webrtc", "flv", "hls" })
+                ? GetDirectPreviewFallbackProtocols()
                 : (Options.Preview.InspectionProtocolOrder?.Length > 0 ? Options.Preview.InspectionProtocolOrder : new[] { "flv", "hls" });
+
+        return await ResolveDirectProtocolSequenceAsync(normalized, protocols, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<PreviewResolution> ResolveClickPreviewAsync(
+        string deviceCode,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = $"{deviceCode}|click-preview-h5";
+        if (TryGetCache(_previewCache, cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        PreviewResolution h5Resolution;
+        try
+        {
+            h5Resolution = await TryResolveH5PreviewAsync(deviceCode, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn(
+                "preview-h5-stream-request-end",
+                $"deviceCode={deviceCode}, requestException={ex.GetType().Name}, requestExceptionMessage={ex.Message}");
+            h5Resolution = PreviewResolution.Failure(
+                deviceCode,
+                "h5",
+                ["h5"],
+                Options.Ctyun.Endpoints.GetH5StreamUrl,
+                -1,
+                ex.Message,
+                "preview api request failed",
+                PreviewFailureCategory.StreamUrlParseFailed,
+                ex.Message);
+        }
+
+        if (h5Resolution.IsSuccess)
+        {
+            PutCache(_previewCache, cacheKey, h5Resolution, PreviewSuccessCacheLifetime);
+            return h5Resolution;
+        }
+
+        var directFallbackProtocols = GetDirectPreviewFallbackProtocols();
+        _logger.Info(
+            "preview-direct-protocol-fallback-start",
+            $"deviceCode={deviceCode}, reason={h5Resolution.FailureReason}, fallbackProtocols={string.Join(">", directFallbackProtocols)}");
+
+        var directResolution = await ResolveDirectProtocolSequenceAsync(deviceCode, directFallbackProtocols, cancellationToken).ConfigureAwait(false);
+        directResolution = directResolution with
+        {
+            PlatformStreamBundle = h5Resolution.PlatformStreamBundle,
+            IsDirectProtocolFallback = true,
+            SelectionReason = $"direct_protocol_fallback_after_h5:{h5Resolution.FailureReason}"
+        };
+
+        _logger.Info(
+            "preview-direct-protocol-fallback-end",
+            $"deviceCode={deviceCode}, isSuccess={directResolution.IsSuccess}, finalProtocol={directResolution.ParsedProtocolType ?? directResolution.SelectedProtocol}, failureReason={directResolution.FailureReason}");
+
+        PutCache(_previewCache, cacheKey, directResolution, directResolution.IsSuccess ? PreviewSuccessCacheLifetime : PreviewFailureCacheLifetime);
+        return directResolution;
+    }
+
+    private async Task<PreviewResolution> ResolveDirectProtocolSequenceAsync(
+        string deviceCode,
+        IReadOnlyList<string> protocols,
+        CancellationToken cancellationToken)
+    {
+        var normalized = deviceCode.Trim();
 
         PreviewResolution? preferredFailure = null;
         var attempted = new List<string>();
@@ -575,6 +656,123 @@ public sealed class AcisApiKernel : IDisposable
             "CTYunPreview",
             $"deviceCode={normalized}, attemptedProtocols={string.Join(">", attempted)}, finalResult=failure, failureReason={failure.FailureReason}");
         return failure;
+    }
+
+    private async Task<PreviewResolution> TryResolveH5PreviewAsync(
+        string deviceCode,
+        CancellationToken cancellationToken)
+    {
+        var token = await GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
+        var userAgent = ResolveDefaultPreviewUserAgent();
+        const int playerType = 1;
+        const int wasm = 1;
+        const int allLiveUrl = 1;
+        const int mediaType = 0;
+        const int mute = 0;
+        const int netType = 0;
+
+        _logger.Info(
+            "preview-h5-stream-request-start",
+            $"deviceCode={deviceCode}, userAgent={MaskSensitive(userAgent)}, playerType={playerType}, wasm={wasm}, allLiveUrl={allLiveUrl}, mediaType={mediaType}, mute={mute}, netType={netType}");
+
+        var response = await PostProtectedJsonAsync(
+            Options.Ctyun.Endpoints.GetH5StreamUrl,
+            new[]
+            {
+                new KeyValuePair<string, string>("accessToken", token.AccessToken),
+                new KeyValuePair<string, string>("enterpriseUser", Options.Ctyun.EnterpriseUser),
+                new KeyValuePair<string, string>("deviceCode", deviceCode),
+                new KeyValuePair<string, string>("mediaType", mediaType.ToString(CultureInfo.InvariantCulture)),
+                new KeyValuePair<string, string>("userAgent", userAgent),
+                new KeyValuePair<string, string>("netType", netType.ToString(CultureInfo.InvariantCulture)),
+                new KeyValuePair<string, string>("mute", mute.ToString(CultureInfo.InvariantCulture)),
+                new KeyValuePair<string, string>("playerType", playerType.ToString(CultureInfo.InvariantCulture)),
+                new KeyValuePair<string, string>("wasm", wasm.ToString(CultureInfo.InvariantCulture)),
+                new KeyValuePair<string, string>("allLiveUrl", allLiveUrl.ToString(CultureInfo.InvariantCulture))
+            },
+            decryptResponseData: true,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        _logger.Info(
+            "preview-h5-stream-request-end",
+            $"deviceCode={deviceCode}, responseCode={response.ResponseCode}, responseMessage={response.ResponseMessage}, userAgent={MaskSensitive(userAgent)}, playerType={playerType}, wasm={wasm}, allLiveUrl={allLiveUrl}");
+
+        var streamBundle = ParseH5StreamBundle(response.Data);
+        var attemptedProtocols = BuildAttemptedProtocolKeys(streamBundle);
+        _logger.Info(
+            "preview-h5-stream-response-parsed",
+            $"deviceCode={deviceCode}, userAgent={MaskSensitive(userAgent)}, playerType={playerType}, wasm={wasm}, allLiveUrl={allLiveUrl}, expireIn={streamBundle?.ExpireIn?.ToString(CultureInfo.InvariantCulture) ?? "null"}, videoEnc={streamBundle?.VideoEnc?.ToString(CultureInfo.InvariantCulture) ?? "null"}, streamUrlCount={streamBundle?.Streams.Count ?? 0}, chains={SummarizeStreamBundle(streamBundle)}");
+
+        if (streamBundle is null || streamBundle.Streams.Count == 0)
+        {
+            _logger.Warn(
+                "preview-h5-stream-chain-empty",
+                $"deviceCode={deviceCode}, userAgent={MaskSensitive(userAgent)}, playerType={playerType}, wasm={wasm}, allLiveUrl={allLiveUrl}, responseCode={response.ResponseCode}, responseMessage={response.ResponseMessage}");
+            return PreviewResolution.Failure(
+                deviceCode,
+                "h5",
+                attemptedProtocols,
+                Options.Ctyun.Endpoints.GetH5StreamUrl,
+                response.ResponseCode,
+                response.ResponseMessage,
+                "platform returned empty H5 stream chain",
+                PreviewFailureCategory.NoStreamAddress,
+                "平台未返回可用的 H5 直播链。",
+                response.PayloadParserResult,
+                response.RawResponse) with
+            {
+                PlatformStreamBundle = streamBundle,
+                SelectionReason = "h5_chain_empty",
+                ResolutionUserAgent = userAgent
+            };
+        }
+
+        var selectedStream = SelectPreferredStream(streamBundle);
+        if (selectedStream is null)
+        {
+            _logger.Warn(
+                "preview-h5-stream-chain-unsupported",
+                $"deviceCode={deviceCode}, userAgent={MaskSensitive(userAgent)}, playerType={playerType}, wasm={wasm}, allLiveUrl={allLiveUrl}, streamUrlCount={streamBundle.Streams.Count}, chains={SummarizeStreamBundle(streamBundle)}");
+            return PreviewResolution.Failure(
+                deviceCode,
+                "h5",
+                attemptedProtocols,
+                Options.Ctyun.Endpoints.GetH5StreamUrl,
+                response.ResponseCode,
+                response.ResponseMessage,
+                "platform returned only unsupported H5 stream chains",
+                PreviewFailureCategory.PlayerProtocolNotSupported,
+                "平台返回的 H5 直播链当前宿主均不可直接承载。",
+                response.PayloadParserResult,
+                response.RawResponse) with
+            {
+                PlatformStreamBundle = streamBundle,
+                SelectionReason = "h5_chain_unsupported",
+                ResolutionUserAgent = userAgent
+            };
+        }
+
+        _logger.Info(
+            "preview-h5-stream-chain-selected",
+            $"deviceCode={deviceCode}, userAgent={MaskSensitive(userAgent)}, playerType={playerType}, wasm={wasm}, allLiveUrl={allLiveUrl}, selectedIndex={selectedStream.Order}, selectedRawProtocol={selectedStream.RawProtocol}, selectedProtocol={ToProtocolKey(selectedStream.NormalizedProtocol)}, selectedLevel={selectedStream.Level?.ToString(CultureInfo.InvariantCulture) ?? "null"}, selectedUrl={SummarizeUrl(selectedStream.StreamUrl)}, notSelected={SummarizeUnselectedStreams(streamBundle, selectedStream.Order)}");
+
+        return PreviewResolution.Success(
+            deviceCode,
+            "h5",
+            attemptedProtocols,
+            Options.Ctyun.Endpoints.GetH5StreamUrl,
+            response.ResponseCode,
+            response.ResponseMessage,
+            selectedStream.StreamUrl,
+            ToProtocolKey(selectedStream.NormalizedProtocol),
+            response.PayloadParserResult,
+            response.RawResponse) with
+        {
+            PlatformStreamBundle = streamBundle,
+            SelectedStreamIndex = selectedStream.Order,
+            SelectionReason = BuildH5SelectionReason(selectedStream),
+            ResolutionUserAgent = userAgent
+        };
     }
 
     public async Task<CoordinateConvertResult> ConvertCoordinatesAsync(
@@ -1005,8 +1203,22 @@ public sealed class AcisApiKernel : IDisposable
             "flv" => HostSupportResult.Supported(),
             "hls" => HostSupportResult.Supported(),
             "webrtc" => HostSupportResult.Supported(),
-            _ => HostSupportResult.Supported()
+            _ => HostSupportResult.Unsupported("当前宿主不支持该协议。")
         };
+    }
+
+    private string[] GetDirectPreviewFallbackProtocols()
+    {
+        var configured = Options.Preview.ClickProtocolOrder?
+            .Select(protocol => protocol?.Trim().ToLowerInvariant())
+            .Where(protocol => !string.IsNullOrWhiteSpace(protocol) && !string.Equals(protocol, "h5", StringComparison.OrdinalIgnoreCase))
+            .Select(protocol => protocol!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return configured is { Length: > 0 }
+            ? configured
+            : ["webrtc", "flv", "hls"];
     }
 
     private static bool CanReuse(TokenCacheEntry? token, DateTimeOffset now, int reuseBeforeExpirySeconds)
@@ -1182,6 +1394,245 @@ public sealed class AcisApiKernel : IDisposable
         if (normalized.Contains(".m3u8", StringComparison.Ordinal)) return "hls";
         if (normalized.StartsWith("webrtc://", StringComparison.Ordinal)) return "webrtc";
         return "unknown";
+    }
+
+    private static SitePreviewStreamBundle? ParseH5StreamBundle(JsonElement data)
+    {
+        if (data.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var streams = new List<SitePreviewStreamCandidate>();
+        if (data.TryGetProperty("streamUrls", out var streamUrlsElement)
+            && streamUrlsElement.ValueKind == JsonValueKind.Array)
+        {
+            var order = 0;
+            foreach (var streamElement in streamUrlsElement.EnumerateArray())
+            {
+                var streamUrl = ReadString(streamElement, "streamUrl") ?? ReadString(streamElement, "url");
+                if (string.IsNullOrWhiteSpace(streamUrl))
+                {
+                    order++;
+                    continue;
+                }
+
+                var platformProtocolCode = ReadInt(streamElement, "protocol");
+                var rawProtocol = ResolveH5RawProtocol(platformProtocolCode, streamUrl);
+                var support = AnalyzeH5StreamSupport(rawProtocol, streamUrl);
+                streams.Add(new SitePreviewStreamCandidate
+                {
+                    Order = order,
+                    PlatformProtocolCode = platformProtocolCode,
+                    RawProtocol = rawProtocol,
+                    NormalizedProtocol = support.Protocol,
+                    StreamUrl = streamUrl,
+                    Level = ReadInt(streamElement, "level"),
+                    IsSupported = support.IsSupported,
+                    UnsupportedReason = support.Reason,
+                    WebRtcApiUrl = support.Protocol == SitePreviewProtocol.WebRtc ? BuildWebRtcPlayApiUrl(streamUrl) : null
+                });
+                order++;
+            }
+        }
+
+        return new SitePreviewStreamBundle
+        {
+            ExpireIn = ReadInt(data, "expireIn"),
+            VideoEnc = ReadInt(data, "videoEnc"),
+            Streams = streams
+        };
+    }
+
+    private static (SitePreviewProtocol Protocol, bool IsSupported, string? Reason) AnalyzeH5StreamSupport(
+        string rawProtocol,
+        string streamUrl)
+    {
+        if (string.IsNullOrWhiteSpace(streamUrl))
+        {
+            return (SitePreviewProtocol.Unknown, false, "流地址为空。");
+        }
+
+        var normalizedRawProtocol = rawProtocol.Trim().ToLowerInvariant();
+        return normalizedRawProtocol switch
+        {
+            "webrtc" => (SitePreviewProtocol.WebRtc, true, null),
+            "flv" or "http-flv" or "https-flv" or "ws-flv" or "wss-flv" => (SitePreviewProtocol.Flv, true, null),
+            "hls" => (SitePreviewProtocol.Hls, true, null),
+            "ws-fmp4" or "wss-fmp4" => (SitePreviewProtocol.Unknown, false, "当前宿主未集成 WebSocket FMP4 播放承载。"),
+            "hls-fmp4" => (SitePreviewProtocol.Unknown, false, "当前宿主未集成 H5 FMP4 播放承载。"),
+            _ => (SitePreviewProtocol.Unknown, false, $"当前宿主未识别的平台协议：{normalizedRawProtocol}")
+        };
+    }
+
+    private static string ResolveH5RawProtocol(int? protocolCode, string streamUrl)
+    {
+        if (Uri.TryCreate(streamUrl, UriKind.Absolute, out var uri))
+        {
+            var scheme = uri.Scheme.ToLowerInvariant();
+            var path = uri.AbsolutePath.ToLowerInvariant();
+            if (scheme == "webrtc")
+            {
+                return "webrtc";
+            }
+
+            if ((scheme == "ws" || scheme == "wss") && path.EndsWith(".flv", StringComparison.Ordinal))
+            {
+                return $"{scheme}-flv";
+            }
+
+            if ((scheme == "ws" || scheme == "wss") && path.EndsWith(".mp4", StringComparison.Ordinal))
+            {
+                return $"{scheme}-fmp4";
+            }
+
+            if ((scheme == "http" || scheme == "https") && path.EndsWith(".m3u8", StringComparison.Ordinal))
+            {
+                return "hls";
+            }
+
+            if ((scheme == "http" || scheme == "https") && path.EndsWith(".flv", StringComparison.Ordinal))
+            {
+                return $"{scheme}-flv";
+            }
+
+            if ((scheme == "http" || scheme == "https") && path.EndsWith(".mp4", StringComparison.Ordinal))
+            {
+                return "hls-fmp4";
+            }
+        }
+
+        return protocolCode switch
+        {
+            7 => "webrtc",
+            8 => "wss-fmp4",
+            _ => $"protocol-{protocolCode?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}"
+        };
+    }
+
+    private static SitePreviewStreamCandidate? SelectPreferredStream(SitePreviewStreamBundle bundle)
+    {
+        return bundle.Streams
+            .Where(stream => stream.IsSupported
+                             && stream.NormalizedProtocol != SitePreviewProtocol.Unknown
+                             && !string.IsNullOrWhiteSpace(stream.StreamUrl))
+            .OrderBy(stream => stream.Level is > 0 ? stream.Level.Value : 100 + stream.Order)
+            .ThenBy(stream => stream.Order)
+            .FirstOrDefault();
+    }
+
+    private static string[] BuildAttemptedProtocolKeys(SitePreviewStreamBundle? bundle)
+    {
+        if (bundle is null || bundle.Streams.Count == 0)
+        {
+            return ["h5"];
+        }
+
+        return bundle.Streams
+            .Select(stream => stream.NormalizedProtocol != SitePreviewProtocol.Unknown
+                ? ToProtocolKey(stream.NormalizedProtocol)
+                : stream.RawProtocol)
+            .Where(protocol => !string.IsNullOrWhiteSpace(protocol))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string SummarizeStreamBundle(SitePreviewStreamBundle? bundle)
+    {
+        if (bundle is null || bundle.Streams.Count == 0)
+        {
+            return "none";
+        }
+
+        return string.Join(
+            " | ",
+            bundle.Streams.Select(stream =>
+                $"#{stream.Order}:raw={stream.RawProtocol},normalized={ToProtocolKey(stream.NormalizedProtocol)},level={stream.Level?.ToString(CultureInfo.InvariantCulture) ?? "null"},supported={stream.IsSupported},url={SummarizeUrl(stream.StreamUrl)},reason={stream.UnsupportedReason ?? "none"}"));
+    }
+
+    private static string SummarizeUnselectedStreams(SitePreviewStreamBundle bundle, int selectedIndex)
+    {
+        var unselected = bundle.Streams
+            .Where(stream => stream.Order != selectedIndex)
+            .Select(stream =>
+                $"#{stream.Order}:{stream.RawProtocol}/{ToProtocolKey(stream.NormalizedProtocol)}:{(stream.IsSupported ? "skipped" : stream.UnsupportedReason ?? "unsupported")}")
+            .ToArray();
+        return unselected.Length == 0 ? "none" : string.Join(" | ", unselected);
+    }
+
+    private static string BuildH5SelectionReason(SitePreviewStreamCandidate selectedStream)
+    {
+        return selectedStream.Level is > 0
+            ? $"platform_level_{selectedStream.Level.Value}"
+            : "platform_order_fallback";
+    }
+
+    private static string SummarizeUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return "null";
+        }
+
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            var tail = uri.AbsolutePath.Length > 48
+                ? uri.AbsolutePath[^48..]
+                : uri.AbsolutePath;
+            return $"{uri.Scheme}://{uri.Host}{tail}";
+        }
+
+        return url.Length > 96 ? url[..96] : url;
+    }
+
+    private static string ToProtocolKey(SitePreviewProtocol protocol)
+    {
+        return protocol switch
+        {
+            SitePreviewProtocol.WebRtc => "webrtc",
+            SitePreviewProtocol.Flv => "flv",
+            SitePreviewProtocol.Hls => "hls",
+            SitePreviewProtocol.H5 => "h5",
+            _ => "unknown"
+        };
+    }
+
+    internal static string ResolveDefaultPreviewUserAgent()
+    {
+        return DefaultPreviewUserAgent.Value;
+    }
+
+    private static string ResolveDefaultPreviewUserAgentCore()
+    {
+        var runtimeVersion = TryGetWebView2RuntimeVersion();
+        if (string.IsNullOrWhiteSpace(runtimeVersion))
+        {
+            return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TyslAiPreview/1.0";
+        }
+
+        return $"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{runtimeVersion} Safari/537.36 Edg/{runtimeVersion}";
+    }
+
+    private static string? TryGetWebView2RuntimeVersion()
+    {
+        try
+        {
+            var environmentType = Type.GetType(
+                "Microsoft.Web.WebView2.Core.CoreWebView2Environment, Microsoft.Web.WebView2.Core",
+                throwOnError: false);
+            var method = environmentType?.GetMethod("GetAvailableBrowserVersionString", Type.EmptyTypes);
+            if (method?.Invoke(null, null) is not string versionText || string.IsNullOrWhiteSpace(versionText))
+            {
+                return null;
+            }
+
+            var normalized = versionText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)[0];
+            return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string BuildUrl(string baseUrl, string endpoint)
@@ -1590,6 +2041,16 @@ public sealed record PreviewResolution(
     CtyunPayloadParseResult? PayloadParser,
     string RawResponse)
 {
+    public SitePreviewStreamBundle? PlatformStreamBundle { get; init; }
+
+    public int SelectedStreamIndex { get; init; } = -1;
+
+    public bool IsDirectProtocolFallback { get; init; }
+
+    public string SelectionReason { get; init; } = string.Empty;
+
+    public string? ResolutionUserAgent { get; init; }
+
     public static PreviewResolution Success(
         string deviceCode,
         string selectedProtocol,
@@ -1790,8 +2251,10 @@ public sealed class PreviewProtocolPlan
             new KeyValuePair<string, string>("enterpriseUser", enterpriseUser),
             new KeyValuePair<string, string>("deviceCode", deviceCode),
             new KeyValuePair<string, string>("mediaType", "0"),
+            new KeyValuePair<string, string>("userAgent", AcisApiKernel.ResolveDefaultPreviewUserAgent()),
+            new KeyValuePair<string, string>("netType", "0"),
             new KeyValuePair<string, string>("mute", "0"),
-            new KeyValuePair<string, string>("playerType", "0"),
+            new KeyValuePair<string, string>("playerType", "1"),
             new KeyValuePair<string, string>("wasm", "1"),
             new KeyValuePair<string, string>("allLiveUrl", "1")
         }

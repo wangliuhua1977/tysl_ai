@@ -896,6 +896,37 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (failureCategory != PreviewFailureCategory.ProgramLifecycleKill
+            && TrySwitchToNextPlatformStream(currentSession, failedProtocol, failureReason))
+        {
+            return;
+        }
+
+        if (failureCategory != PreviewFailureCategory.ProgramLifecycleKill
+            && !currentSession.IsDirectProtocolFallback
+            && currentSession.PlatformStreamBundle?.Streams.Count > 0)
+        {
+            var directFallbackProtocol = GetInitialDirectFallbackProtocol(failedProtocol);
+            if (directFallbackProtocol != SitePreviewProtocol.Unknown)
+            {
+                _ = WriteDiagnosticAsync(
+                    "preview-direct-protocol-fallback-start",
+                    $"deviceCode={currentSession.DeviceCode}, sessionId={currentSession.PlaybackSessionId}, failedProtocol={ToProtocolKey(failedProtocol)}, entryProtocol={ToProtocolKey(directFallbackProtocol)}, reason={failureReason ?? "none"}");
+                PreviewStatusText = "正在切换受控补救预览";
+                _ = StartPreviewAsync(
+                    currentSession.DeviceCode,
+                    directFallbackProtocol,
+                    caller: "HandlePreviewPlaybackFailed.direct-protocol-fallback",
+                    retryReason: "h5_chain_exhausted",
+                    failureCategory: failureCategory,
+                    failureProtocol: failedProtocol,
+                    failureReason: failureReason,
+                    resetAttemptChain: false,
+                    isDirectProtocolFallback: true);
+                return;
+            }
+        }
+
         _ = WriteDiagnosticAsync(
             "preview-attempt-retry-skipped",
             BuildPreviewAttemptDiagnostic(
@@ -1320,7 +1351,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         previewRequested = true;
         return StartPreviewAsync(
             SelectedDetail.DeviceCode,
-            SitePreviewProtocol.WebRtc,
+            SitePreviewProtocol.Unknown,
             caller: "OpenPreviewAsync",
             resetAttemptChain: true);
     }
@@ -1527,13 +1558,14 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     private async Task StartPreviewAsync(
         string deviceCode,
-        SitePreviewProtocol requestedProtocol = SitePreviewProtocol.WebRtc,
+        SitePreviewProtocol requestedProtocol = SitePreviewProtocol.Unknown,
         string caller = "StartPreviewAsync",
         string? retryReason = null,
         PreviewFailureCategory failureCategory = PreviewFailureCategory.None,
         SitePreviewProtocol failureProtocol = SitePreviewProtocol.Unknown,
         string? failureReason = null,
-        bool resetAttemptChain = false)
+        bool resetAttemptChain = false,
+        bool isDirectProtocolFallback = false)
     {
         if (string.IsNullOrWhiteSpace(deviceCode))
         {
@@ -1635,6 +1667,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             SitePreviewProtocol.Flv when protocolAttemptIndex > 1 => "重试 FLV",
             SitePreviewProtocol.Flv => "切换到 FLV",
             SitePreviewProtocol.Hls => "切换到 HLS",
+            SitePreviewProtocol.Unknown => "正在建立预览",
             _ => "正在连接"
         };
         _ = WriteDiagnosticAsync(
@@ -1657,10 +1690,14 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         SitePreviewResolveResult result;
         try
         {
-            result = await sitePreviewService.ResolvePreviewAsync(
-                normalizedDeviceCode,
-                [requestedProtocol],
-                cancellationTokenSource.Token);
+            result = requestedProtocol == SitePreviewProtocol.Unknown
+                ? await sitePreviewService.ResolveUserPreviewAsync(
+                    normalizedDeviceCode,
+                    cancellationTokenSource.Token)
+                : await sitePreviewService.ResolvePreviewAsync(
+                    normalizedDeviceCode,
+                    [requestedProtocol],
+                    cancellationTokenSource.Token);
         }
         catch (OperationCanceledException)
         {
@@ -1671,6 +1708,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             _ = WriteDiagnosticAsync(
                 "preview-resolve-exception",
                 $"deviceCode={normalizedDeviceCode}, requestedProtocol={ToProtocolKey(requestedProtocol)}, type={ex.GetType().FullName}, message={ex.Message}");
+            if (isDirectProtocolFallback)
+            {
+                _ = WriteDiagnosticAsync(
+                    "preview-direct-protocol-fallback-end",
+                    $"deviceCode={normalizedDeviceCode}, requestedProtocol={ToProtocolKey(requestedProtocol)}, success=false, failureReason={ex.Message}");
+            }
             _ = WriteDiagnosticAsync(
                 "preview-attempt-end",
                 BuildPreviewAttemptDiagnostic(
@@ -1730,6 +1773,12 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             PreviewProtocolText = string.Empty;
             PreviewStatusText = "暂无实时画面";
             ClosePreviewCommand.NotifyCanExecuteChanged();
+            if (isDirectProtocolFallback)
+            {
+                _ = WriteDiagnosticAsync(
+                    "preview-direct-protocol-fallback-end",
+                    $"deviceCode={normalizedDeviceCode}, requestedProtocol={ToProtocolKey(requestedProtocol)}, success=false, failureReason={result.FailureReason ?? "unknown"}");
+            }
             _ = WriteDiagnosticAsync(
                 "preview-session-unavailable",
                 $"deviceCode={normalizedDeviceCode}, preferredProtocol={ToProtocolKey(previewPreferredProtocol == SitePreviewProtocol.Unknown ? requestedProtocol : previewPreferredProtocol)}, failureReason={result.FailureReason ?? "unknown"}, requestedProtocol={ToProtocolKey(requestedProtocol)}");
@@ -1795,14 +1844,21 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var resolvedPreferredProtocol = result.Session.PreferredProtocol != SitePreviewProtocol.Unknown
+            ? result.Session.PreferredProtocol
+            : previewPreferredProtocol != SitePreviewProtocol.Unknown
+                ? previewPreferredProtocol
+                : requestedProtocol != SitePreviewProtocol.Unknown
+                    ? requestedProtocol
+                    : result.Session.SelectedProtocol;
+        previewPreferredProtocol = resolvedPreferredProtocol;
         previewSession = result.Session with
         {
-            PreferredProtocol = previewPreferredProtocol == SitePreviewProtocol.Unknown
-                ? requestedProtocol
-                : previewPreferredProtocol,
+            PreferredProtocol = resolvedPreferredProtocol,
             ProtocolAttemptIndex = protocolAttemptIndex,
             TotalAttemptIndex = totalAttemptIndex,
-            MaxTotalAttempts = MaxPreviewTotalAttempts
+            MaxTotalAttempts = MaxPreviewTotalAttempts,
+            IsDirectProtocolFallback = isDirectProtocolFallback || result.Session.IsDirectProtocolFallback
         };
 
         var preferredProtocol = GetEffectivePreferredProtocol(previewSession);
@@ -1823,6 +1879,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         _ = WriteDiagnosticAsync(
             "preview-session-resolved",
             $"deviceCode={previewSession.DeviceCode}, sessionId={previewSession.PlaybackSessionId}, preferredProtocol={ToProtocolKey(preferredProtocol)}, finalProtocol={ToProtocolKey(previewSession.SelectedProtocol)}, fallbackTriggered={previewSession.UsedFallback || previewSession.SelectedProtocol != preferredProtocol}, attempted={string.Join(">", previewSession.AttemptedProtocols.Select(ToProtocolKey))}, totalAttemptIndex={previewSession.TotalAttemptIndex}, protocolAttemptIndex={previewSession.ProtocolAttemptIndex}, maxTotalAttempts={previewSession.MaxTotalAttempts}, sourceUrl={previewSession.SourceUrl}");
+
+        if (isDirectProtocolFallback)
+        {
+            _ = WriteDiagnosticAsync(
+                "preview-direct-protocol-fallback-end",
+                $"deviceCode={previewSession.DeviceCode}, sessionId={previewSession.PlaybackSessionId}, preferredProtocol={ToProtocolKey(preferredProtocol)}, finalProtocol={ToProtocolKey(previewSession.SelectedProtocol)}, failureReason={failureReason ?? "none"}, selectionReason={previewSession.SelectionReason ?? "none"}");
+        }
 
         if (previewSession.SelectedProtocol == SitePreviewProtocol.WebRtc)
         {
@@ -1879,7 +1942,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         PreviewStatusText = "正在连接";
         await StartPreviewAsync(
             deviceCode,
-            SitePreviewProtocol.WebRtc,
+            SitePreviewProtocol.Unknown,
             caller: "RestartPreviewIfNeededAsync",
             resetAttemptChain: true);
     }
@@ -2295,7 +2358,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             {
                 await StartPreviewAsync(
                     deviceCode,
-                    SitePreviewProtocol.WebRtc,
+                    SitePreviewProtocol.Unknown,
                     caller: "HandleMapPointSelectedAsync.same-selection",
                     resetAttemptChain: true);
             }
@@ -2690,6 +2753,82 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             : normalized;
     }
 
+    private bool TrySwitchToNextPlatformStream(
+        SitePreviewSession currentSession,
+        SitePreviewProtocol failedProtocol,
+        string? failureReason)
+    {
+        var streamBundle = currentSession.PlatformStreamBundle;
+        if (streamBundle is null
+            || currentSession.TotalAttemptIndex >= MaxPreviewTotalAttempts)
+        {
+            return false;
+        }
+
+        var nextStream = streamBundle.Streams
+            .Where(stream => stream.Order > currentSession.SelectedStreamIndex
+                             && stream.IsSupported
+                             && stream.NormalizedProtocol != SitePreviewProtocol.Unknown
+                             && !string.IsNullOrWhiteSpace(stream.StreamUrl))
+            .OrderBy(stream => stream.Order)
+            .FirstOrDefault();
+        if (nextStream is null)
+        {
+            return false;
+        }
+
+        previewTotalAttemptCount = Math.Max(previewTotalAttemptCount, currentSession.TotalAttemptIndex);
+        previewTotalAttemptCount++;
+        var nextProtocolAttemptIndex = IncrementProtocolAttemptCounter(nextStream.NormalizedProtocol);
+        var nextSession = currentSession with
+        {
+            PlaybackSessionId = Guid.NewGuid().ToString("N"),
+            SelectedProtocol = nextStream.NormalizedProtocol,
+            SourceUrl = nextStream.StreamUrl,
+            WebRtcApiUrl = nextStream.WebRtcApiUrl,
+            WebRtcUrlAcquired = nextStream.NormalizedProtocol == SitePreviewProtocol.WebRtc,
+            ReadyTimeoutSeconds = nextStream.NormalizedProtocol == SitePreviewProtocol.WebRtc ? 12 : 10,
+            UsedFallback = true,
+            SelectedStreamIndex = nextStream.Order,
+            SelectionReason = $"switch_platform_chain_after_{ToProtocolKey(failedProtocol)}",
+            ProtocolAttemptIndex = nextProtocolAttemptIndex,
+            TotalAttemptIndex = previewTotalAttemptCount
+        };
+
+        previewSession = nextSession;
+        previewPlaybackState = nextSession.SelectedProtocol switch
+        {
+            SitePreviewProtocol.WebRtc => PreviewPlaybackState.WebRtcUrlAcquired,
+            SitePreviewProtocol.Flv => PreviewPlaybackState.FallbackToFlv,
+            SitePreviewProtocol.Hls => PreviewPlaybackState.FallbackToHls,
+            _ => PreviewPlaybackState.Idle
+        };
+        PreviewSessionJson = JsonSerializer.Serialize(ToPreviewPlaybackSession(nextSession), MapHostJsonOptions);
+        PreviewProtocolText = GetProtocolBadgeText(nextSession.SelectedProtocol);
+        PreviewStatusText = nextSession.SelectedProtocol == SitePreviewProtocol.WebRtc
+            ? "正在切换平台返回的 WebRTC 链"
+            : $"正在切换平台返回的 {GetProtocolLabel(nextSession.SelectedProtocol)} 链";
+        ClosePreviewCommand.NotifyCanExecuteChanged();
+        _ = WriteDiagnosticAsync(
+            "preview-h5-stream-chain-selected",
+            $"deviceCode={nextSession.DeviceCode}, sessionId={nextSession.PlaybackSessionId}, selectedIndex={nextStream.Order}, selectedProtocol={ToProtocolKey(nextSession.SelectedProtocol)}, selectedUrl={nextSession.SourceUrl}, failureProtocol={ToProtocolKey(failedProtocol)}, failureReason={failureReason ?? "none"}, selectionReason={nextSession.SelectionReason ?? "none"}");
+        _ = WriteDiagnosticAsync(
+            "preview-session-resolved",
+            $"deviceCode={nextSession.DeviceCode}, sessionId={nextSession.PlaybackSessionId}, preferredProtocol={ToProtocolKey(nextSession.PreferredProtocol)}, finalProtocol={ToProtocolKey(nextSession.SelectedProtocol)}, fallbackTriggered=true, attempted={string.Join(">", nextSession.AttemptedProtocols.Select(ToProtocolKey))}, totalAttemptIndex={nextSession.TotalAttemptIndex}, protocolAttemptIndex={nextSession.ProtocolAttemptIndex}, maxTotalAttempts={nextSession.MaxTotalAttempts}, sourceUrl={nextSession.SourceUrl}");
+        return true;
+    }
+
+    private int IncrementProtocolAttemptCounter(SitePreviewProtocol protocol)
+    {
+        return protocol switch
+        {
+            SitePreviewProtocol.WebRtc => ++previewWebRtcAttemptCount,
+            SitePreviewProtocol.Flv => ++previewFlvAttemptCount,
+            SitePreviewProtocol.Hls => ++previewHlsAttemptCount,
+            _ => 1
+        };
+    }
+
     private static PreviewPlaybackSessionDto ToPreviewPlaybackSession(SitePreviewSession session)
     {
         return new PreviewPlaybackSessionDto
@@ -2705,6 +2844,17 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             ProtocolAttemptIndex = session.ProtocolAttemptIndex,
             TotalAttemptIndex = session.TotalAttemptIndex,
             MaxTotalAttempts = session.MaxTotalAttempts
+        };
+    }
+
+    private static SitePreviewProtocol GetInitialDirectFallbackProtocol(SitePreviewProtocol failedProtocol)
+    {
+        return failedProtocol switch
+        {
+            SitePreviewProtocol.WebRtc => SitePreviewProtocol.Flv,
+            SitePreviewProtocol.Flv => SitePreviewProtocol.Hls,
+            SitePreviewProtocol.Hls => SitePreviewProtocol.Flv,
+            _ => SitePreviewProtocol.Unknown
         };
     }
 

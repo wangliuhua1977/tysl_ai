@@ -203,10 +203,13 @@ public sealed class AcisKernelPlatformSiteProvider :
             };
         }
 
+        var protocolOverride = protocolOrder is { Count: > 0 }
+            ? protocolOrder.Select(ToProtocolKey).ToArray()
+            : null;
         var resolution = await kernel.ResolvePreviewAsync(
             deviceCode,
             AcisPreviewIntent.ClickPreview,
-            protocolOrder.Select(ToProtocolKey).ToArray(),
+            protocolOverride,
             cancellationToken);
 
         if (!resolution.IsSuccess || string.IsNullOrWhiteSpace(resolution.PreviewUrl))
@@ -220,7 +223,18 @@ public sealed class AcisKernelPlatformSiteProvider :
         }
 
         var selectedProtocol = ToPreviewProtocol(resolution.ParsedProtocolType ?? resolution.SelectedProtocol);
-        var attemptedProtocols = resolution.AttemptedProtocols.Select(ToPreviewProtocol).ToArray();
+        var attemptedProtocols = resolution.AttemptedProtocols
+            .Select(ToPreviewProtocol)
+            .ToArray();
+        if (attemptedProtocols.Length == 0)
+        {
+            attemptedProtocols = [selectedProtocol];
+        }
+
+        var preferredProtocol = resolution.PlatformStreamBundle?.Streams
+                                   .FirstOrDefault(stream => stream.IsSupported)
+                                   ?.NormalizedProtocol
+                               ?? selectedProtocol;
         var webRtcUrlAcquired = selectedProtocol == SitePreviewProtocol.WebRtc
                                 && !string.IsNullOrWhiteSpace(resolution.PreviewUrl);
 
@@ -244,11 +258,21 @@ public sealed class AcisKernelPlatformSiteProvider :
                 AttemptedProtocols = attemptedProtocols,
                 SourceUrl = resolution.PreviewUrl,
                 WebRtcApiUrl = selectedProtocol == SitePreviewProtocol.WebRtc
-                    ? AcisApiKernel.BuildWebRtcPlayApiUrl(resolution.PreviewUrl)
+                    ? resolution.PlatformStreamBundle?.Streams.FirstOrDefault(stream => stream.Order == resolution.SelectedStreamIndex)?.WebRtcApiUrl
+                      ?? AcisApiKernel.BuildWebRtcPlayApiUrl(resolution.PreviewUrl)
                     : null,
                 WebRtcUrlAcquired = webRtcUrlAcquired,
                 ReadyTimeoutSeconds = selectedProtocol == SitePreviewProtocol.WebRtc ? 12 : 10,
-                UsedFallback = attemptedProtocols.Length > 0 && selectedProtocol != attemptedProtocols[0]
+                UsedFallback = resolution.IsDirectProtocolFallback
+                               || resolution.SelectedStreamIndex > 0
+                               || (attemptedProtocols.Length > 0 && selectedProtocol != attemptedProtocols[0]),
+                PreferredProtocol = preferredProtocol,
+                PlatformStreamBundle = resolution.PlatformStreamBundle,
+                SelectedStreamIndex = resolution.SelectedStreamIndex,
+                IsDirectProtocolFallback = resolution.IsDirectProtocolFallback,
+                SelectionReason = string.IsNullOrWhiteSpace(resolution.SelectionReason)
+                    ? null
+                    : resolution.SelectionReason
             }
         };
     }

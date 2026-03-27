@@ -24,6 +24,14 @@ public sealed record SitePreviewSession
 
     public SitePreviewProtocol PreferredProtocol { get; init; } = SitePreviewProtocol.Unknown;
 
+    public SitePreviewStreamBundle? PlatformStreamBundle { get; init; }
+
+    public int SelectedStreamIndex { get; init; } = -1;
+
+    public bool IsDirectProtocolFallback { get; init; }
+
+    public string? SelectionReason { get; init; }
+
     public int ProtocolAttemptIndex { get; init; }
 
     public int TotalAttemptIndex { get; init; }
