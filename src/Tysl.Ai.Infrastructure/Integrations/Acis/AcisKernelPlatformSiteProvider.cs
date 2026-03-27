@@ -23,6 +23,7 @@ public sealed class AcisKernelPlatformSiteProvider :
     private const int MaxMetadataDetailRequests = 8;
     private const int MaxDetailRequests = 28;
     private const int MaxDetailConcurrency = 3;
+    private const int MaxPreviewProxyRedirects = 5;
     private const string DefaultPlatformCoordinateType = "bd09";
     private const string UnknownCoordinateType = "unknown";
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(60);
@@ -75,6 +76,7 @@ public sealed class AcisKernelPlatformSiteProvider :
         previewProxyHttpClient = new HttpClient(
             new SocketsHttpHandler
             {
+                AllowAutoRedirect = false,
                 AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
             })
         {
@@ -339,11 +341,9 @@ public sealed class AcisKernelPlatformSiteProvider :
             };
         }
 
-        using var proxyRequest = new HttpRequestMessage(
-            new HttpMethod(string.IsNullOrWhiteSpace(request.Method) ? "GET" : request.Method.Trim()),
-            requestUri);
-
+        var method = new HttpMethod(string.IsNullOrWhiteSpace(request.Method) ? "GET" : request.Method.Trim());
         var forwardedHeaderCount = 0;
+        var forwardedHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var header in request.Headers)
         {
             if (!ForwardedPreviewRequestHeaders.Contains(header.Key)
@@ -352,50 +352,96 @@ public sealed class AcisKernelPlatformSiteProvider :
                 continue;
             }
 
-            if (proxyRequest.Headers.TryAddWithoutValidation(header.Key, header.Value))
-            {
-                forwardedHeaderCount++;
-            }
-        }
-
-        if (!proxyRequest.Headers.Accept.Any())
-        {
-            proxyRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
-        }
-
-        if (proxyRequest.Headers.UserAgent.Count == 0)
-        {
-            proxyRequest.Headers.TryAddWithoutValidation(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edg/136.0.0.0 Safari/537.36");
+            forwardedHeaders[header.Key] = header.Value.Trim();
+            forwardedHeaderCount++;
         }
 
         try
         {
-            using var response = await previewProxyHttpClient.SendAsync(
-                proxyRequest,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
-            var content = response.Content is null
-                ? []
-                : await response.Content.ReadAsByteArrayAsync(cancellationToken);
-            var headers = BuildPreviewProxyResponseHeaders(response);
+            var currentUri = requestUri;
+            var redirectCount = 0;
+            var redirected = false;
 
-            return new PreviewProxyResourceResult
+            while (true)
             {
-                IsSuccess = response.IsSuccessStatusCode,
-                RequestUrl = requestUri.AbsoluteUri,
-                StatusCode = (int)response.StatusCode,
-                ReasonPhrase = string.IsNullOrWhiteSpace(response.ReasonPhrase)
-                    ? response.StatusCode.ToString()
-                    : response.ReasonPhrase!,
-                ContentType = response.Content?.Headers.ContentType?.ToString(),
-                Content = content,
-                Headers = headers,
-                FailureReason = response.IsSuccessStatusCode
-                    ? null
-                    : $"status={(int)response.StatusCode}, forwardedHeaders={forwardedHeaderCount}"
-            };
+                using var proxyRequest = new HttpRequestMessage(method, currentUri);
+                foreach (var header in forwardedHeaders)
+                {
+                    proxyRequest.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
+
+                if (!proxyRequest.Headers.Accept.Any())
+                {
+                    proxyRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
+                }
+
+                if (proxyRequest.Headers.UserAgent.Count == 0)
+                {
+                    proxyRequest.Headers.TryAddWithoutValidation(
+                        "User-Agent",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edg/136.0.0.0 Safari/537.36");
+                }
+
+                using var response = await previewProxyHttpClient.SendAsync(
+                    proxyRequest,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+
+                if (IsRedirectStatusCode(response.StatusCode)
+                    && response.Headers.Location is not null)
+                {
+                    if (redirectCount >= MaxPreviewProxyRedirects)
+                    {
+                        return new PreviewProxyResourceResult
+                        {
+                            IsSuccess = false,
+                            RequestUrl = requestUri.AbsoluteUri,
+                            ResponseUrl = currentUri.AbsoluteUri,
+                            StatusCode = (int)response.StatusCode,
+                            ReasonPhrase = string.IsNullOrWhiteSpace(response.ReasonPhrase)
+                                ? response.StatusCode.ToString()
+                                : response.ReasonPhrase!,
+                            Headers = BuildPreviewProxyResponseHeaders(response),
+                            Redirected = redirected || redirectCount > 0,
+                            RedirectCount = redirectCount,
+                            FailureReason = $"redirect_limit_exceeded, forwardedHeaders={forwardedHeaderCount}"
+                        };
+                    }
+
+                    currentUri = response.Headers.Location.IsAbsoluteUri
+                        ? response.Headers.Location
+                        : new Uri(currentUri, response.Headers.Location);
+                    redirected = true;
+                    redirectCount++;
+                    continue;
+                }
+
+                var content = response.Content is null
+                    ? []
+                    : await response.Content.ReadAsByteArrayAsync(cancellationToken);
+                var headers = BuildPreviewProxyResponseHeaders(response);
+                var contentLength = response.Content?.Headers.ContentLength ?? content.LongLength;
+
+                return new PreviewProxyResourceResult
+                {
+                    IsSuccess = response.IsSuccessStatusCode,
+                    RequestUrl = requestUri.AbsoluteUri,
+                    ResponseUrl = currentUri.AbsoluteUri,
+                    StatusCode = (int)response.StatusCode,
+                    ReasonPhrase = string.IsNullOrWhiteSpace(response.ReasonPhrase)
+                        ? response.StatusCode.ToString()
+                        : response.ReasonPhrase!,
+                    ContentType = response.Content?.Headers.ContentType?.ToString(),
+                    ContentLength = contentLength,
+                    Content = content,
+                    Headers = headers,
+                    Redirected = redirected,
+                    RedirectCount = redirectCount,
+                    FailureReason = response.IsSuccessStatusCode
+                        ? null
+                        : $"status={(int)response.StatusCode}, forwardedHeaders={forwardedHeaderCount}, redirects={redirectCount}"
+                };
+            }
         }
         catch (OperationCanceledException)
         {
@@ -405,13 +451,14 @@ public sealed class AcisKernelPlatformSiteProvider :
         {
             await TryWriteDiagnosticAsync(
                 "PreviewProxy",
-                $"requestUrl={requestUri.AbsoluteUri}, method={proxyRequest.Method.Method}, reason={ex.Message}",
+                $"requestUrl={requestUri.AbsoluteUri}, method={method.Method}, reason={ex.Message}",
                 cancellationToken);
 
             return new PreviewProxyResourceResult
             {
                 IsSuccess = false,
                 RequestUrl = requestUri.AbsoluteUri,
+                ResponseUrl = requestUri.AbsoluteUri,
                 StatusCode = 502,
                 ReasonPhrase = "Bad Gateway",
                 FailureReason = ex.Message
@@ -769,6 +816,12 @@ public sealed class AcisKernelPlatformSiteProvider :
         }
 
         return headers;
+    }
+
+    private static bool IsRedirectStatusCode(HttpStatusCode statusCode)
+    {
+        var numericStatusCode = (int)statusCode;
+        return numericStatusCode is 301 or 302 or 303 or 307 or 308;
     }
 
     private static bool TryParseJson(string raw, out JsonElement root)

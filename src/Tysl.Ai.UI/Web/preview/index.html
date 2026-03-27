@@ -962,6 +962,8 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
             () => new Hls({
               liveDurationInfinity: true,
               enableWorker: true,
+              startFragPrefetch: true,
+              startPosition: 0,
               autoStartLoad: false,
               xhrSetup: xhr => {
                 xhr.withCredentials = false;
@@ -974,6 +976,8 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
 
           postDiagnostic("hls_instance_created");
           let attachCallbackReceived = false;
+          let fragmentRequestObserved = false;
+          let hlsStartLoadAttemptCount = 0;
           let hlsPipelineStarted = false;
           let attachFallbackTimer = null;
           const clearAttachFallbackTimer = () => {
@@ -981,6 +985,27 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
               window.clearTimeout(attachFallbackTimer);
               attachFallbackTimer = null;
             }
+          };
+          const requestInitialHlsFragment = (trigger, allowRepeat) => {
+            if (!isAttemptActive() || fragmentRequestObserved) {
+              return;
+            }
+
+            if (!allowRepeat && hlsStartLoadAttemptCount > 0) {
+              return;
+            }
+
+            hlsStartLoadAttemptCount += 1;
+            executePlaybackStep("hls_start_load", attemptId, "hls_start_load_failed", () => hls.startLoad(0));
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_start_load_called", {
+              trigger,
+              startPosition: 0,
+              startLoadAttemptCount: hlsStartLoadAttemptCount
+            });
           };
           const continueHlsStartup = trigger => {
             if (!isAttemptActive() || hlsPipelineStarted) {
@@ -1005,14 +1030,7 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
               return;
             }
 
-            executePlaybackStep("hls_start_load", attemptId, "hls_start_load_failed", () => hls.startLoad(-1));
-            if (!isAttemptActive()) {
-              return;
-            }
-
-            postDiagnostic("hls_start_load_called", {
-              trigger
-            });
+            requestInitialHlsFragment(`${trigger}_after_load_source`, false);
           };
           hls.on(Hls.Events.MEDIA_ATTACHED, () => {
             if (!isAttemptActive()) {
@@ -1054,9 +1072,50 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
               return;
             }
 
+            fragmentRequestObserved = true;
+            postDiagnostic("hls_frag_loading", {
+              requestUrl: data && data.frag && data.frag.url ? data.frag.url : "",
+              fragSn: data && data.frag && data.frag.sn !== undefined ? String(data.frag.sn) : "",
+              fragLevel: data && data.frag && data.frag.level !== undefined ? String(data.frag.level) : ""
+            });
             postDiagnostic("hls_network_request_started", {
               requestUrl: data && data.frag && data.frag.url ? data.frag.url : "",
               requestKind: "fragment"
+            });
+          });
+          hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_frag_loaded", {
+              requestUrl: data && data.frag && data.frag.url ? data.frag.url : "",
+              fragSn: data && data.frag && data.frag.sn !== undefined ? String(data.frag.sn) : "",
+              fragLevel: data && data.frag && data.frag.level !== undefined ? String(data.frag.level) : "",
+              statsLoaded: data && data.stats && data.stats.loaded !== undefined ? String(data.stats.loaded) : "",
+              statsTotal: data && data.stats && data.stats.total !== undefined ? String(data.stats.total) : ""
+            });
+          });
+          hls.on(Hls.Events.BUFFER_APPENDING, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_buffer_appending", {
+              parent: data && data.parent ? data.parent : "",
+              dataType: data && data.type ? data.type : "",
+              contentLength: data && data.data && data.data.byteLength !== undefined ? String(data.data.byteLength) : ""
+            });
+          });
+          hls.on(Hls.Events.BUFFER_APPENDED, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_buffer_appended", {
+              parent: data && data.parent ? data.parent : "",
+              dataType: data && data.type ? data.type : "",
+              contentLength: data && data.pending !== undefined ? String(data.pending) : ""
             });
           });
           hls.on(Hls.Events.ERROR, (_, data) => {
@@ -1091,6 +1150,7 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
             }
 
             postDiagnostic("hls_manifest_parsed");
+            requestInitialHlsFragment("manifest_parsed", true);
             trackPromiseRejection(
               executePlaybackStep("hls_manifest_play", attemptId, "hls_play_failed", () => video.play()),
               "hls_play_rejected",
@@ -1107,14 +1167,19 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
             postDiagnostic("hls_level_loaded", {
               fragments: data && data.details && Array.isArray(data.details.fragments) ? data.details.fragments.length : 0
             });
+            requestInitialHlsFragment("level_loaded", hlsStartLoadAttemptCount < 3);
             maybeMarkFallbackReady(attemptId);
           });
-          hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          hls.on(Hls.Events.FRAG_BUFFERED, (_, data) => {
             if (!isAttemptActive()) {
               return;
             }
 
-            postDiagnostic("hls_frag_buffered");
+            postDiagnostic("hls_frag_buffered", {
+              requestUrl: data && data.frag && data.frag.url ? data.frag.url : "",
+              fragSn: data && data.frag && data.frag.sn !== undefined ? String(data.frag.sn) : "",
+              fragLevel: data && data.frag && data.frag.level !== undefined ? String(data.frag.level) : ""
+            });
             maybeMarkFallbackReady(attemptId);
           });
           postDiagnostic("hls_attach_media_called", {

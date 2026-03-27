@@ -17,6 +17,7 @@ public partial class PreviewHostControl : UserControl, IDisposable
 {
     private const string HostName = "preview.tysl.local";
     private const string HostUrl = $"https://{HostName}/index.html";
+    private const string ProxyHostName = "preview-proxy.tysl.local";
     private const string HlsProxyPath = "/hls-proxy";
     private const string HostPageModeDefault = "default";
     private const string HostPageModeFallbackOnly = "fallback-only";
@@ -137,6 +138,9 @@ public partial class PreviewHostControl : UserControl, IDisposable
             Browser.CoreWebView2.WebMessageReceived += HandleWebMessageReceived;
             Browser.CoreWebView2.NavigationCompleted += HandleNavigationCompleted;
             Browser.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+            Browser.CoreWebView2.AddWebResourceRequestedFilter(
+                $"{Uri.UriSchemeHttps}://{ProxyHostName}{HlsProxyPath}*",
+                CoreWebView2WebResourceContext.All);
             Browser.CoreWebView2.WebResourceRequested += HandleWebResourceRequested;
             Browser.CoreWebView2.WebResourceResponseReceived += HandleWebResourceResponseReceived;
 
@@ -971,18 +975,56 @@ public partial class PreviewHostControl : UserControl, IDisposable
             if (PreviewService is null || !TryGetHlsProxyTargetUri(e.Request.Uri, out var targetUri))
             {
                 e.Response = CreatePlainTextResponse(Browser.CoreWebView2, 400, "Bad Request", "Invalid HLS proxy target.");
+                WriteDiagnostic(
+                    "preview-host-proxy-failed",
+                    BuildProxyFailureDiagnostic(
+                        targetUrl: null,
+                        statusCode: 400,
+                        contentType: "text/plain; charset=utf-8",
+                        contentLength: 25,
+                        redirected: false,
+                        redirectCount: 0,
+                        reason: "invalid_hls_proxy_target",
+                        bodyKind: "error",
+                        bodySummary: "Invalid HLS proxy target."));
+                return;
+            }
+
+            if (string.Equals(e.Request.Method, "OPTIONS", StringComparison.OrdinalIgnoreCase))
+            {
+                e.Response = CreateOptionsResponse(Browser.CoreWebView2);
+                WriteDiagnostic(
+                    "preview-host-proxy-response",
+                    BuildProxyResponseDiagnostic(
+                        targetUri.AbsoluteUri,
+                        targetUri.AbsoluteUri,
+                        204,
+                        "No Content",
+                        "text/plain; charset=utf-8",
+                        0,
+                        false,
+                        0,
+                        bodyKind: "empty",
+                        upstreamBodySummary: null,
+                        responseBodySummary: null,
+                        bodyContainsExtM3u: false,
+                        manifestRewriteSucceeded: false,
+                        proxyManifestUrlsRewritten: false,
+                        proxySegmentUrlsRewritten: false,
+                        proxyKeyUrlsRewritten: false));
                 return;
             }
 
             var forwardedHeaders = CreatePreviewProxyHeaders(e.Request.Headers);
-            WriteMediaResourceDiagnostic(
+            var isTsProxyRequest = LooksLikeSegmentUri(targetUri.AbsolutePath);
+            var proxyRequestDiagnostic = BuildProxyRequestDiagnostic(targetUri.AbsoluteUri, e.Request.Method, forwardedHeaders);
+            WriteDiagnostic(
                 "preview-host-proxy-request",
-                targetUri.AbsoluteUri,
-                e.Request.Method,
-                "proxy",
-                diagnosticSource: "proxy",
-                requestHeaders: SummarizeHeaders(forwardedHeaders),
-                frameId: "preview-hls-proxy");
+                proxyRequestDiagnostic);
+            if (isTsProxyRequest)
+            {
+                WriteDiagnostic("hls_ts_proxy_request", proxyRequestDiagnostic);
+            }
 
             var proxyResult = await PreviewService.FetchPreviewResourceAsync(
                 new PreviewProxyRequest
@@ -992,36 +1034,69 @@ public partial class PreviewHostControl : UserControl, IDisposable
                     Headers = forwardedHeaders
                 });
 
-            var responseBytes = proxyResult.Content ?? [];
+            var rawResponseBytes = proxyResult.Content ?? [];
             var contentType = proxyResult.ContentType;
-            var manifestRewritten = false;
+            var rawBodyText = TryDecodeTextBody(rawResponseBytes, contentType);
+            var rawBodySummary = SummarizeProxyBody(rawBodyText, rawResponseBytes.LongLength);
+            var bodyContainsExtM3u = ContainsExtM3u(rawBodyText);
+            var responseBytes = rawResponseBytes;
+            var rewriteResult = HlsManifestRewriteResult.None;
             if (proxyResult.StatusCode >= 200
                 && proxyResult.StatusCode < 300
                 && IsHlsManifestResponse(targetUri, contentType))
             {
-                responseBytes = RewriteHlsManifest(responseBytes, targetUri, out manifestRewritten);
+                rewriteResult = RewriteHlsManifest(responseBytes, targetUri);
+                responseBytes = rewriteResult.Content;
                 contentType ??= "application/vnd.apple.mpegurl";
             }
 
-            var responseHeaders = BuildProxyResponseHeaders(proxyResult.Headers, contentType, manifestRewritten);
+            var responseBodyText = TryDecodeTextBody(responseBytes, contentType);
+            var responseBodySummary = SummarizeProxyBody(responseBodyText, responseBytes.LongLength);
+            var bodyKind = ClassifyProxyBody(
+                proxyResult.StatusCode,
+                contentType,
+                rawBodyText,
+                responseBytes.LongLength,
+                proxyResult.Redirected);
+            var responseHeaders = BuildProxyResponseHeaders(
+                proxyResult.Headers,
+                contentType,
+                responseBytes.LongLength,
+                rewriteResult.Rewritten);
             e.Response = Browser.CoreWebView2.Environment.CreateWebResourceResponse(
                 new MemoryStream(responseBytes, writable: false),
                 proxyResult.StatusCode,
                 string.IsNullOrWhiteSpace(proxyResult.ReasonPhrase) ? "OK" : proxyResult.ReasonPhrase,
                 responseHeaders);
 
-            WriteMediaResourceDiagnostic(
-                "preview-host-proxy-response",
+            var proxyResponseDiagnostic = BuildProxyResponseDiagnostic(
                 targetUri.AbsoluteUri,
-                e.Request.Method,
-                "proxy",
+                string.IsNullOrWhiteSpace(proxyResult.ResponseUrl) ? targetUri.AbsoluteUri : proxyResult.ResponseUrl,
                 proxyResult.StatusCode,
                 proxyResult.ReasonPhrase,
-                "proxy",
-                mimeType: contentType,
-                responseHeaders: SummarizeHeaders(proxyResult.Headers),
-                requestHeaders: SummarizeHeaders(forwardedHeaders),
-                frameId: manifestRewritten ? "preview-hls-proxy-rewritten" : "preview-hls-proxy");
+                contentType,
+                responseBytes.LongLength,
+                proxyResult.Redirected,
+                proxyResult.RedirectCount,
+                bodyKind,
+                rawBodySummary,
+                responseBodySummary,
+                bodyContainsExtM3u,
+                rewriteResult.Rewritten,
+                rewriteResult.ManifestUrlsRewritten,
+                rewriteResult.SegmentUrlsRewritten,
+                rewriteResult.KeyUrlsRewritten);
+            WriteDiagnostic(
+                "preview-host-proxy-response",
+                proxyResponseDiagnostic);
+            if (isTsProxyRequest)
+            {
+                WriteDiagnostic(
+                    proxyResult.StatusCode >= 200 && proxyResult.StatusCode < 300
+                        ? "hls_ts_proxy_response"
+                        : "hls_ts_proxy_failed",
+                    proxyResponseDiagnostic);
+            }
         }
         catch (Exception ex)
         {
@@ -1030,9 +1105,24 @@ public partial class PreviewHostControl : UserControl, IDisposable
                 e.Response = CreatePlainTextResponse(Browser.CoreWebView2, 502, "Bad Gateway", ex.Message);
             }
 
+            var targetUrl = TryGetHlsProxyTargetUri(e.Request.Uri, out var targetUri) ? targetUri.AbsoluteUri : e.Request.Uri;
+            var proxyFailureDiagnostic = BuildProxyFailureDiagnostic(
+                targetUrl: targetUrl,
+                statusCode: 502,
+                contentType: "text/plain; charset=utf-8",
+                contentLength: null,
+                redirected: false,
+                redirectCount: 0,
+                reason: ex.Message,
+                bodyKind: "error",
+                bodySummary: ex.Message);
             WriteDiagnostic(
                 "preview-host-proxy-failed",
-                $"deviceCode={activeSession?.DeviceCode ?? "unknown"}, sessionId={activeSession?.PlaybackSessionId ?? "unknown"}, protocol={activeSession?.Protocol ?? "unknown"}, reason={SanitizeDiagnosticFragment(ex.Message)}");
+                proxyFailureDiagnostic);
+            if (targetUri is not null && LooksLikeSegmentUri(targetUri.AbsolutePath))
+            {
+                WriteDiagnostic("hls_ts_proxy_failed", proxyFailureDiagnostic);
+            }
         }
         finally
         {
@@ -1051,6 +1141,15 @@ public partial class PreviewHostControl : UserControl, IDisposable
             statusCode,
             reasonPhrase,
             "Content-Type: text/plain; charset=utf-8\r\nCache-Control: no-store");
+    }
+
+    private static CoreWebView2WebResourceResponse CreateOptionsResponse(CoreWebView2 webView)
+    {
+        return webView.Environment.CreateWebResourceResponse(
+            Stream.Null,
+            204,
+            "No Content",
+            BuildOptionsResponseHeaders());
     }
 
     private static IReadOnlyDictionary<string, string> CreatePreviewProxyHeaders(CoreWebView2HttpRequestHeaders headers)
@@ -1072,6 +1171,7 @@ public partial class PreviewHostControl : UserControl, IDisposable
     private static string BuildProxyResponseHeaders(
         IReadOnlyDictionary<string, string> headers,
         string? contentType,
+        long contentLength,
         bool manifestRewritten)
     {
         var values = new List<string>();
@@ -1095,7 +1195,12 @@ public partial class PreviewHostControl : UserControl, IDisposable
             values.Add($"Content-Type: {contentType}");
         }
 
+        values.Add($"Content-Length: {contentLength}");
         values.Add("Cache-Control: no-store");
+        values.Add($"Access-Control-Allow-Origin: https://{HostName}");
+        values.Add("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
+        values.Add("Access-Control-Allow-Headers: Accept, Accept-Language, Cache-Control, Content-Type, Origin, Pragma, Range, User-Agent");
+        values.Add("Access-Control-Expose-Headers: Content-Length, Content-Range, Content-Type");
         if (manifestRewritten)
         {
             values.Add("X-Tysl-Hls-Proxy: rewritten");
@@ -1104,11 +1209,26 @@ public partial class PreviewHostControl : UserControl, IDisposable
         return string.Join("\r\n", values);
     }
 
+    private static string BuildOptionsResponseHeaders()
+    {
+        return string.Join(
+            "\r\n",
+            [
+                "Cache-Control: no-store",
+                $"Access-Control-Allow-Origin: https://{HostName}",
+                "Access-Control-Allow-Methods: GET, HEAD, OPTIONS",
+                "Access-Control-Allow-Headers: Accept, Accept-Language, Cache-Control, Content-Type, Origin, Pragma, Range, User-Agent",
+                "Access-Control-Expose-Headers: Content-Length, Content-Range, Content-Type",
+                "Content-Length: 0"
+            ]);
+    }
+
     private static bool TryGetHlsProxyTargetUri(string? requestUri, out Uri targetUri)
     {
         targetUri = null!;
         if (!Uri.TryCreate(requestUri, UriKind.Absolute, out var hostUri)
-            || !string.Equals(hostUri.Host, HostName, StringComparison.OrdinalIgnoreCase)
+            || (!string.Equals(hostUri.Host, HostName, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(hostUri.Host, ProxyHostName, StringComparison.OrdinalIgnoreCase))
             || !string.Equals(hostUri.AbsolutePath, HlsProxyPath, StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -1127,7 +1247,7 @@ public partial class PreviewHostControl : UserControl, IDisposable
 
     private static string BuildHlsProxyUrl(string targetUrl)
     {
-        return $"{Uri.UriSchemeHttps}://{HostName}{HlsProxyPath}?target={Uri.EscapeDataString(targetUrl)}";
+        return $"{Uri.UriSchemeHttps}://{ProxyHostName}{HlsProxyPath}?target={Uri.EscapeDataString(targetUrl)}";
     }
 
     private static string? GetQueryValue(Uri uri, string key)
@@ -1161,20 +1281,29 @@ public partial class PreviewHostControl : UserControl, IDisposable
                    && contentType.Contains("mpegurl", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static byte[] RewriteHlsManifest(byte[] content, Uri manifestUri, out bool rewritten)
+    private static HlsManifestRewriteResult RewriteHlsManifest(byte[] content, Uri manifestUri)
     {
-        rewritten = false;
         if (content.Length == 0)
         {
-            return content;
+            return HlsManifestRewriteResult.None;
         }
 
-        var source = Encoding.UTF8.GetString(content);
+        var source = DecodeUtf8(content);
         var lines = source.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         var builder = new StringBuilder(source.Length + 256);
+        var manifestUrlsRewritten = false;
+        var segmentUrlsRewritten = false;
+        var keyUrlsRewritten = false;
+        var rewritten = false;
         for (var index = 0; index < lines.Length; index++)
         {
-            var updatedLine = RewriteHlsManifestLine(lines[index], manifestUri, ref rewritten);
+            var updatedLine = RewriteHlsManifestLine(
+                lines[index],
+                manifestUri,
+                ref rewritten,
+                ref manifestUrlsRewritten,
+                ref segmentUrlsRewritten,
+                ref keyUrlsRewritten);
             builder.Append(updatedLine);
             if (index < lines.Length - 1)
             {
@@ -1182,19 +1311,33 @@ public partial class PreviewHostControl : UserControl, IDisposable
             }
         }
 
-        return Encoding.UTF8.GetBytes(builder.ToString());
+        return new HlsManifestRewriteResult(
+            Encoding.UTF8.GetBytes(builder.ToString()),
+            rewritten,
+            manifestUrlsRewritten,
+            segmentUrlsRewritten,
+            keyUrlsRewritten);
     }
 
-    private static string RewriteHlsManifestLine(string line, Uri manifestUri, ref bool rewritten)
+    private static string RewriteHlsManifestLine(
+        string line,
+        Uri manifestUri,
+        ref bool rewritten,
+        ref bool manifestUrlsRewritten,
+        ref bool segmentUrlsRewritten,
+        ref bool keyUrlsRewritten)
     {
         if (string.IsNullOrWhiteSpace(line))
         {
             return line;
         }
 
-        if (line.StartsWith('#'))
+        if (line.StartsWith("#", StringComparison.Ordinal))
         {
             var attributeRewritten = false;
+            var attributeManifestUrlsRewritten = false;
+            var attributeSegmentUrlsRewritten = false;
+            var attributeKeyUrlsRewritten = false;
             var replacedLine = HlsManifestUriAttributeRegex.Replace(line, match =>
             {
                 var candidate = match.Groups["uri"].Value;
@@ -1204,11 +1347,27 @@ public partial class PreviewHostControl : UserControl, IDisposable
                 }
 
                 attributeRewritten = true;
+                if (LooksLikeManifestUri(resolvedUri.AbsolutePath))
+                {
+                    attributeManifestUrlsRewritten = true;
+                }
+                else if (LooksLikeKeyUri(resolvedUri.AbsolutePath))
+                {
+                    attributeKeyUrlsRewritten = true;
+                }
+                else
+                {
+                    attributeSegmentUrlsRewritten = true;
+                }
+
                 return $"URI=\"{BuildHlsProxyUrl(resolvedUri.AbsoluteUri)}\"";
             });
             if (attributeRewritten)
             {
                 rewritten = true;
+                manifestUrlsRewritten |= attributeManifestUrlsRewritten;
+                segmentUrlsRewritten |= attributeSegmentUrlsRewritten;
+                keyUrlsRewritten |= attributeKeyUrlsRewritten;
             }
 
             return replacedLine;
@@ -1220,6 +1379,19 @@ public partial class PreviewHostControl : UserControl, IDisposable
         }
 
         rewritten = true;
+        if (LooksLikeManifestUri(targetUri.AbsolutePath))
+        {
+            manifestUrlsRewritten = true;
+        }
+        else if (LooksLikeKeyUri(targetUri.AbsolutePath))
+        {
+            keyUrlsRewritten = true;
+        }
+        else
+        {
+            segmentUrlsRewritten = true;
+        }
+
         return BuildHlsProxyUrl(targetUri.AbsoluteUri);
     }
 
@@ -1243,6 +1415,323 @@ public partial class PreviewHostControl : UserControl, IDisposable
 
         targetUri = resolvedTargetUri;
         return true;
+    }
+
+    private string BuildProxyRequestDiagnostic(
+        string targetUrl,
+        string? method,
+        IReadOnlyDictionary<string, string> requestHeaders)
+    {
+        var parts = CreateProxyDiagnosticPrefix(targetUrl);
+        parts.Add($"method={method ?? "GET"}");
+        AppendDiagnosticPart(parts, "requestHeaders", SummarizeHeaders(requestHeaders));
+        return string.Join(", ", parts);
+    }
+
+    private string BuildProxyResponseDiagnostic(
+        string targetUrl,
+        string responseUrl,
+        int statusCode,
+        string? reasonPhrase,
+        string? contentType,
+        long? contentLength,
+        bool redirected,
+        int redirectCount,
+        string bodyKind,
+        string? upstreamBodySummary,
+        string? responseBodySummary,
+        bool bodyContainsExtM3u,
+        bool manifestRewriteSucceeded,
+        bool proxyManifestUrlsRewritten,
+        bool proxySegmentUrlsRewritten,
+        bool proxyKeyUrlsRewritten)
+    {
+        var parts = CreateProxyDiagnosticPrefix(targetUrl);
+        parts.Add($"responseUrl={SanitizeUrlForDiagnostic(responseUrl)}");
+        parts.Add($"statusCode={statusCode}");
+        parts.Add($"redirected={redirected}");
+        parts.Add($"redirectCount={redirectCount}");
+        parts.Add($"bodyKind={bodyKind}");
+        parts.Add($"bodyEmpty={contentLength.GetValueOrDefault() == 0}");
+        parts.Add($"bodyContainsExtM3U={bodyContainsExtM3u}");
+        parts.Add($"manifestRewriteSucceeded={manifestRewriteSucceeded}");
+        parts.Add($"proxyManifestUrlsRewritten={proxyManifestUrlsRewritten}");
+        parts.Add($"proxySegmentUrlsRewritten={proxySegmentUrlsRewritten}");
+        parts.Add($"proxyKeyUrlsRewritten={proxyKeyUrlsRewritten}");
+        if (!string.IsNullOrWhiteSpace(reasonPhrase))
+        {
+            parts.Add($"reason={SanitizeDiagnosticFragment(reasonPhrase)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(contentType))
+        {
+            parts.Add($"contentType={SanitizeDiagnosticFragment(contentType)}");
+        }
+
+        if (contentLength.HasValue)
+        {
+            parts.Add($"contentLength={contentLength.Value}");
+        }
+
+        AppendDiagnosticPart(parts, "upstreamBodySummary", upstreamBodySummary);
+        AppendDiagnosticPart(parts, "responseBodySummary", responseBodySummary);
+        return string.Join(", ", parts);
+    }
+
+    private string BuildProxyFailureDiagnostic(
+        string? targetUrl,
+        int statusCode,
+        string? contentType,
+        long? contentLength,
+        bool redirected,
+        int redirectCount,
+        string reason,
+        string bodyKind,
+        string? bodySummary)
+    {
+        var parts = CreateProxyDiagnosticPrefix(targetUrl);
+        parts.Add($"statusCode={statusCode}");
+        parts.Add($"redirected={redirected}");
+        parts.Add($"redirectCount={redirectCount}");
+        parts.Add($"bodyKind={bodyKind}");
+        parts.Add($"bodyEmpty={!contentLength.HasValue || contentLength.Value == 0}");
+        if (!string.IsNullOrWhiteSpace(contentType))
+        {
+            parts.Add($"contentType={SanitizeDiagnosticFragment(contentType)}");
+        }
+
+        if (contentLength.HasValue)
+        {
+            parts.Add($"contentLength={contentLength.Value}");
+        }
+
+        parts.Add($"reason={SanitizeDiagnosticFragment(reason)}");
+        AppendDiagnosticPart(parts, "bodySummary", bodySummary);
+        return string.Join(", ", parts);
+    }
+
+    private List<string> CreateProxyDiagnosticPrefix(string? targetUrl)
+    {
+        return
+        [
+            $"deviceCode={SanitizeDiagnosticFragment(activeSession?.DeviceCode ?? "unknown")}",
+            $"sessionId={SanitizeDiagnosticFragment(activeSession?.PlaybackSessionId ?? "unknown")}",
+            $"protocol={SanitizeDiagnosticFragment(activeSession?.Protocol ?? "unknown")}",
+            $"target={SanitizeUrlForDiagnostic(targetUrl)}"
+        ];
+    }
+
+    private static string? TryDecodeTextBody(byte[] content, string? contentType)
+    {
+        if (content.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        if (IsLikelyTextualBody(contentType))
+        {
+            return DecodeUtf8(content);
+        }
+
+        return LooksLikeUtf8Text(content) ? DecodeUtf8(content) : null;
+    }
+
+    private static bool IsLikelyTextualBody(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return false;
+        }
+
+        return contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+               || contentType.Contains("json", StringComparison.OrdinalIgnoreCase)
+               || contentType.Contains("xml", StringComparison.OrdinalIgnoreCase)
+               || contentType.Contains("javascript", StringComparison.OrdinalIgnoreCase)
+               || contentType.Contains("mpegurl", StringComparison.OrdinalIgnoreCase)
+               || contentType.Contains("html", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeUtf8Text(byte[] content)
+    {
+        var length = Math.Min(content.Length, 256);
+        for (var index = 0; index < length; index++)
+        {
+            var value = content[index];
+            if (value == 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string DecodeUtf8(byte[] content)
+    {
+        if (content.Length >= 3
+            && content[0] == 0xEF
+            && content[1] == 0xBB
+            && content[2] == 0xBF)
+        {
+            return Encoding.UTF8.GetString(content, 3, content.Length - 3);
+        }
+
+        return Encoding.UTF8.GetString(content);
+    }
+
+    private static string SummarizeProxyBody(string? body, long contentLength)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return contentLength == 0 ? "empty" : $"binary:{contentLength}";
+        }
+
+        var sanitized = SanitizeBodySummary(body);
+        return sanitized.Length <= 500 ? sanitized : sanitized[..500];
+    }
+
+    private static string SanitizeBodySummary(string value)
+    {
+        return SanitizeSensitiveText(value)
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", " | ", StringComparison.Ordinal)
+            .Trim();
+    }
+
+    private static bool ContainsExtM3u(string? body)
+    {
+        return !string.IsNullOrWhiteSpace(body)
+               && body.Contains("#EXTM3U", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ClassifyProxyBody(
+        int statusCode,
+        string? contentType,
+        string? body,
+        long contentLength,
+        bool redirected)
+    {
+        if (redirected || statusCode is 301 or 302 or 303 or 307 or 308)
+        {
+            return "redirect";
+        }
+
+        if (contentLength == 0 || string.IsNullOrWhiteSpace(body))
+        {
+            return "empty";
+        }
+
+        if (ContainsExtM3u(body))
+        {
+            return "m3u8";
+        }
+
+        if ((!string.IsNullOrWhiteSpace(contentType) && contentType.Contains("html", StringComparison.OrdinalIgnoreCase))
+            || body.Contains("<html", StringComparison.OrdinalIgnoreCase)
+            || body.Contains("<!doctype html", StringComparison.OrdinalIgnoreCase))
+        {
+            return "html";
+        }
+
+        return statusCode >= 400 ? "error" : "text";
+    }
+
+    private static string SanitizeUrlForDiagnostic(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "none";
+        }
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            return SanitizeSensitiveText(value);
+        }
+
+        var query = uri.Query;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return uri.GetLeftPart(UriPartial.Path);
+        }
+
+        var pairs = query.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(segment =>
+            {
+                var separatorIndex = segment.IndexOf('=');
+                var rawKey = separatorIndex >= 0 ? segment[..separatorIndex] : segment;
+                var rawValue = separatorIndex >= 0 ? segment[(separatorIndex + 1)..] : string.Empty;
+                var decodedKey = WebUtility.UrlDecode(rawKey);
+                var decodedValue = WebUtility.UrlDecode(rawValue);
+                var sanitizedValue = IsSensitiveQueryParameter(decodedKey)
+                    ? "redacted"
+                    : SanitizeSensitiveText(decodedValue);
+                return $"{decodedKey}={sanitizedValue}";
+            });
+
+        return $"{uri.GetLeftPart(UriPartial.Path)}?{string.Join("&", pairs)}";
+    }
+
+    private static string SanitizeSensitiveText(string value)
+    {
+        var sanitized = value;
+        foreach (var parameterName in new[] { "token", "origin", "reqid", "hls_ctx", "auth_key", "fq" })
+        {
+            sanitized = Regex.Replace(
+                sanitized,
+                $@"(?<prefix>(^|[?&\s,;]){parameterName}=)(?<value>[^&\s,;]+)",
+                "${prefix}redacted",
+                RegexOptions.IgnoreCase);
+        }
+
+        return sanitized;
+    }
+
+    private static bool IsSensitiveQueryParameter(string? key)
+    {
+        return key is not null
+               && (key.Equals("token", StringComparison.OrdinalIgnoreCase)
+                   || key.Equals("origin", StringComparison.OrdinalIgnoreCase)
+                   || key.Equals("reqid", StringComparison.OrdinalIgnoreCase)
+                   || key.Equals("hls_ctx", StringComparison.OrdinalIgnoreCase)
+                   || key.Equals("auth_key", StringComparison.OrdinalIgnoreCase)
+                   || key.Equals("fq", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool LooksLikeManifestUri(string? absolutePath)
+    {
+        return !string.IsNullOrWhiteSpace(absolutePath)
+               && absolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeKeyUri(string? absolutePath)
+    {
+        return !string.IsNullOrWhiteSpace(absolutePath)
+               && absolutePath.EndsWith(".key", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeSegmentUri(string? absolutePath)
+    {
+        if (string.IsNullOrWhiteSpace(absolutePath))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(absolutePath);
+        return extension.Equals(".ts", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".m4s", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".mp4", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".aac", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private readonly record struct HlsManifestRewriteResult(
+        byte[] Content,
+        bool Rewritten,
+        bool ManifestUrlsRewritten,
+        bool SegmentUrlsRewritten,
+        bool KeyUrlsRewritten)
+    {
+        public static HlsManifestRewriteResult None => new([], false, false, false, false);
     }
 
     private void WriteMediaResourceDiagnostic(
@@ -1644,7 +2133,8 @@ public partial class PreviewHostControl : UserControl, IDisposable
         string? resourceContext,
         string? mimeType)
     {
-        if (string.Equals(requestedUri.Host, HostName, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(requestedUri.Host, HostName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(requestedUri.Host, ProxyHostName, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -1746,8 +2236,17 @@ public partial class PreviewHostControl : UserControl, IDisposable
         AppendValue(parts, payload, "requestKind");
         AppendValue(parts, payload, "configuredSeconds");
         AppendValue(parts, payload, "readyTimeoutSeconds");
+        AppendValue(parts, payload, "startPosition");
+        AppendValue(parts, payload, "startLoadAttemptCount");
         AppendValue(parts, payload, "decodedFrames");
         AppendValue(parts, payload, "droppedFrames");
+        AppendValue(parts, payload, "fragSn");
+        AppendValue(parts, payload, "fragLevel");
+        AppendValue(parts, payload, "statsLoaded");
+        AppendValue(parts, payload, "statsTotal");
+        AppendValue(parts, payload, "parent");
+        AppendValue(parts, payload, "dataType");
+        AppendValue(parts, payload, "contentLength");
         AppendValue(parts, payload, "fatal");
         AppendValue(parts, payload, "fragments");
         AppendValue(parts, payload, "attachCallbackReceived");
