@@ -16,4 +16,8 @@ public interface IPlatformPreviewProvider
         string streamUrl,
         string offerSdp,
         CancellationToken cancellationToken = default);
+
+    Task<PreviewProxyResourceResult> FetchPreviewResourceAsync(
+        PreviewProxyRequest request,
+        CancellationToken cancellationToken = default);
 }

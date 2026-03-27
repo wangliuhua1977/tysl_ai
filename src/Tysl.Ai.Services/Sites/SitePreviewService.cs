@@ -76,6 +76,15 @@ public sealed class SitePreviewService : ISitePreviewService
             cancellationToken);
     }
 
+    public Task<PreviewProxyResourceResult> FetchPreviewResourceAsync(
+        PreviewProxyRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return platformPreviewProvider.FetchPreviewResourceAsync(request, cancellationToken);
+    }
+
     public async Task RecordPlaybackAsync(
         SitePreviewPlaybackRecord record,
         CancellationToken cancellationToken = default)

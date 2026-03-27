@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using TianyiVision.Acis.Reusable;
 using Tysl.Ai.Core.Enums;
@@ -25,10 +27,38 @@ public sealed class AcisKernelPlatformSiteProvider :
     private const string UnknownCoordinateType = "unknown";
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan DetailCacheLifetime = TimeSpan.FromMinutes(3);
+    private static readonly HashSet<string> ForwardedPreviewRequestHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Accept",
+        "Accept-Language",
+        "Cache-Control",
+        "Pragma",
+        "Range",
+        "User-Agent"
+    };
+    private static readonly HashSet<string> IgnoredPreviewResponseHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Access-Control-Allow-Credentials",
+        "Access-Control-Allow-Headers",
+        "Access-Control-Allow-Methods",
+        "Access-Control-Allow-Origin",
+        "Connection",
+        "Content-Encoding",
+        "Content-Length",
+        "Keep-Alive",
+        "Proxy-Authenticate",
+        "Proxy-Authorization",
+        "Set-Cookie",
+        "TE",
+        "Trailer",
+        "Transfer-Encoding",
+        "Upgrade"
+    };
 
     private readonly AcisApiKernel? kernel;
     private readonly string? configPath;
     private readonly ConcurrentDictionary<string, DetailCacheEntry> detailCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HttpClient previewProxyHttpClient;
     private readonly SemaphoreSlim refreshSync = new(1, 1);
     private PlatformCacheEntry? cacheEntry;
     private PlatformConnectionState currentState;
@@ -42,6 +72,14 @@ public sealed class AcisKernelPlatformSiteProvider :
 
         configPath = loadResult.ConfigPath;
         kernel = loadResult.Options is null ? null : new AcisApiKernel(loadResult.Options);
+        previewProxyHttpClient = new HttpClient(
+            new SocketsHttpHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+            })
+        {
+            Timeout = TimeSpan.FromSeconds(20)
+        };
         currentState = loadResult.IsReady
             ? CreateState(
                 PlatformConnectionStatus.Degraded,
@@ -124,6 +162,7 @@ public sealed class AcisKernelPlatformSiteProvider :
     public void Dispose()
     {
         refreshSync.Dispose();
+        previewProxyHttpClient.Dispose();
         kernel?.Dispose();
     }
 
@@ -243,6 +282,117 @@ public sealed class AcisKernelPlatformSiteProvider :
             Server = result.Server,
             FailureReason = result.IsSuccess ? null : result.FailureReason
         };
+    }
+
+    public async Task<PreviewProxyResourceResult> FetchPreviewResourceAsync(
+        PreviewProxyRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (kernel is null)
+        {
+            return new PreviewProxyResourceResult
+            {
+                IsSuccess = false,
+                RequestUrl = request.RequestUrl,
+                StatusCode = 503,
+                ReasonPhrase = "Service Unavailable",
+                FailureReason = "预览服务未配置。"
+            };
+        }
+
+        if (!Uri.TryCreate(request.RequestUrl, UriKind.Absolute, out var requestUri)
+            || requestUri.Scheme is not "http" and not "https")
+        {
+            return new PreviewProxyResourceResult
+            {
+                IsSuccess = false,
+                RequestUrl = request.RequestUrl,
+                StatusCode = 400,
+                ReasonPhrase = "Bad Request",
+                FailureReason = "预览代理仅支持 HTTP/HTTPS。"
+            };
+        }
+
+        using var proxyRequest = new HttpRequestMessage(
+            new HttpMethod(string.IsNullOrWhiteSpace(request.Method) ? "GET" : request.Method.Trim()),
+            requestUri);
+
+        var forwardedHeaderCount = 0;
+        foreach (var header in request.Headers)
+        {
+            if (!ForwardedPreviewRequestHeaders.Contains(header.Key)
+                || string.IsNullOrWhiteSpace(header.Value))
+            {
+                continue;
+            }
+
+            if (proxyRequest.Headers.TryAddWithoutValidation(header.Key, header.Value))
+            {
+                forwardedHeaderCount++;
+            }
+        }
+
+        if (!proxyRequest.Headers.Accept.Any())
+        {
+            proxyRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
+        }
+
+        if (proxyRequest.Headers.UserAgent.Count == 0)
+        {
+            proxyRequest.Headers.TryAddWithoutValidation(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edg/136.0.0.0 Safari/537.36");
+        }
+
+        try
+        {
+            using var response = await previewProxyHttpClient.SendAsync(
+                proxyRequest,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            var content = response.Content is null
+                ? []
+                : await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            var headers = BuildPreviewProxyResponseHeaders(response);
+
+            return new PreviewProxyResourceResult
+            {
+                IsSuccess = response.IsSuccessStatusCode,
+                RequestUrl = requestUri.AbsoluteUri,
+                StatusCode = (int)response.StatusCode,
+                ReasonPhrase = string.IsNullOrWhiteSpace(response.ReasonPhrase)
+                    ? response.StatusCode.ToString()
+                    : response.ReasonPhrase!,
+                ContentType = response.Content?.Headers.ContentType?.ToString(),
+                Content = content,
+                Headers = headers,
+                FailureReason = response.IsSuccessStatusCode
+                    ? null
+                    : $"status={(int)response.StatusCode}, forwardedHeaders={forwardedHeaderCount}"
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await TryWriteDiagnosticAsync(
+                "PreviewProxy",
+                $"requestUrl={requestUri.AbsoluteUri}, method={proxyRequest.Method.Method}, reason={ex.Message}",
+                cancellationToken);
+
+            return new PreviewProxyResourceResult
+            {
+                IsSuccess = false,
+                RequestUrl = requestUri.AbsoluteUri,
+                StatusCode = 502,
+                ReasonPhrase = "Bad Gateway",
+                FailureReason = ex.Message
+            };
+        }
     }
 
     public Task WriteDiagnosticAsync(
@@ -565,6 +715,36 @@ public sealed class AcisKernelPlatformSiteProvider :
         {
             // Best effort only. Diagnostics must never break the UI path.
         }
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildPreviewProxyResponseHeaders(HttpResponseMessage response)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var header in response.Headers)
+        {
+            if (IgnoredPreviewResponseHeaders.Contains(header.Key))
+            {
+                continue;
+            }
+
+            headers[header.Key] = string.Join("; ", header.Value);
+        }
+
+        if (response.Content is not null)
+        {
+            foreach (var header in response.Content.Headers)
+            {
+                if (IgnoredPreviewResponseHeaders.Contains(header.Key))
+                {
+                    continue;
+                }
+
+                headers[header.Key] = string.Join("; ", header.Value);
+            }
+        }
+
+        return headers;
     }
 
     private static bool TryParseJson(string raw, out JsonElement root)

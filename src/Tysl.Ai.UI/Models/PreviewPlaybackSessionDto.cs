@@ -10,6 +10,8 @@ public sealed class PreviewPlaybackSessionDto
 
     public string SourceUrl { get; set; } = string.Empty;
 
+    public string? ProxySourceUrl { get; set; }
+
     public string? WebRtcApiUrl { get; set; }
 
     public bool WebRtcUrlAcquired { get; set; }

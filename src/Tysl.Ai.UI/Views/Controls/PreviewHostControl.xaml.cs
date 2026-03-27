@@ -1,8 +1,12 @@
 using System.IO;
+using System.Net;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Web.WebView2.Core;
+using Tysl.Ai.Core.Models;
 using Tysl.Ai.Core.Interfaces;
 using Tysl.Ai.UI.Models;
 using Tysl.Ai.UI.ViewModels;
@@ -13,8 +17,10 @@ public partial class PreviewHostControl : UserControl, IDisposable
 {
     private const string HostName = "preview.tysl.local";
     private const string HostUrl = $"https://{HostName}/index.html";
+    private const string HlsProxyPath = "/hls-proxy";
     private const string HostPageModeDefault = "default";
     private const string HostPageModeFallbackOnly = "fallback-only";
+    private static readonly Regex HlsManifestUriAttributeRegex = new(@"URI=""(?<uri>[^""]+)""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -39,11 +45,14 @@ public partial class PreviewHostControl : UserControl, IDisposable
     private string currentHostPageMode = HostPageModeDefault;
     private CancellationTokenSource? negotiationCts;
     private CoreWebView2DevToolsProtocolEventReceiver? networkLoadingFailedReceiver;
+    private CoreWebView2DevToolsProtocolEventReceiver? networkRequestWillBeSentExtraInfoReceiver;
     private string? pendingHostPageMode;
     private string? pendingHostPageProtocol;
     private string? pendingSessionJson;
     private CoreWebView2DevToolsProtocolEventReceiver? networkRequestWillBeSentReceiver;
     private CoreWebView2DevToolsProtocolEventReceiver? networkResponseReceivedReceiver;
+    private CoreWebView2DevToolsProtocolEventReceiver? networkResponseReceivedExtraInfoReceiver;
+    private CoreWebView2DevToolsProtocolEventReceiver? securityCertificateErrorReceiver;
     private TaskCompletionSource<bool>? stopPlaybackCompletionSource;
     private string? stopPlaybackSessionId;
 
@@ -209,6 +218,9 @@ public partial class PreviewHostControl : UserControl, IDisposable
                     }
 
                     activeSession = nextSession;
+                    activeSession.ProxySourceUrl = string.Equals(activeSession.Protocol, "hls", StringComparison.OrdinalIgnoreCase)
+                        ? BuildHlsProxyUrl(activeSession.SourceUrl)
+                        : null;
                     hasShownRuntimeFailure = false;
                     ShowOverlay(null);
                     WriteHostLifecycleDiagnostic(
@@ -330,11 +342,17 @@ public partial class PreviewHostControl : UserControl, IDisposable
 
     private void HandleWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
     {
+        if (TryHandleHlsProxyRequest(e))
+        {
+            return;
+        }
+
         WriteMediaResourceDiagnostic(
             "preview-host-network-request",
             e.Request.Uri,
             e.Request.Method,
-            e.ResourceContext.ToString());
+            e.ResourceContext.ToString(),
+            requestHeaders: SummarizeRequestHeaders(e.Request.Headers));
     }
 
     private void HandleWebResourceResponseReceived(object? sender, CoreWebView2WebResourceResponseReceivedEventArgs e)
@@ -345,25 +363,36 @@ public partial class PreviewHostControl : UserControl, IDisposable
             e.Request.Method,
             "response",
             e.Response.StatusCode,
-            e.Response.ReasonPhrase);
+            e.Response.ReasonPhrase,
+            responseHeaders: SummarizeResponseHeaders(e.Response.Headers));
     }
 
     private async Task EnsureDevToolsNetworkDiagnosticsAsync(CoreWebView2 webView)
     {
         if (networkRequestWillBeSentReceiver is not null
+            || networkRequestWillBeSentExtraInfoReceiver is not null
             || networkResponseReceivedReceiver is not null
-            || networkLoadingFailedReceiver is not null)
+            || networkResponseReceivedExtraInfoReceiver is not null
+            || networkLoadingFailedReceiver is not null
+            || securityCertificateErrorReceiver is not null)
         {
             return;
         }
 
         networkRequestWillBeSentReceiver = webView.GetDevToolsProtocolEventReceiver("Network.requestWillBeSent");
+        networkRequestWillBeSentExtraInfoReceiver = webView.GetDevToolsProtocolEventReceiver("Network.requestWillBeSentExtraInfo");
         networkResponseReceivedReceiver = webView.GetDevToolsProtocolEventReceiver("Network.responseReceived");
+        networkResponseReceivedExtraInfoReceiver = webView.GetDevToolsProtocolEventReceiver("Network.responseReceivedExtraInfo");
         networkLoadingFailedReceiver = webView.GetDevToolsProtocolEventReceiver("Network.loadingFailed");
+        securityCertificateErrorReceiver = webView.GetDevToolsProtocolEventReceiver("Security.certificateError");
         networkRequestWillBeSentReceiver.DevToolsProtocolEventReceived += HandleNetworkRequestWillBeSent;
+        networkRequestWillBeSentExtraInfoReceiver.DevToolsProtocolEventReceived += HandleNetworkRequestWillBeSentExtraInfo;
         networkResponseReceivedReceiver.DevToolsProtocolEventReceived += HandleNetworkResponseReceived;
+        networkResponseReceivedExtraInfoReceiver.DevToolsProtocolEventReceived += HandleNetworkResponseReceivedExtraInfo;
         networkLoadingFailedReceiver.DevToolsProtocolEventReceived += HandleNetworkLoadingFailed;
+        securityCertificateErrorReceiver.DevToolsProtocolEventReceived += HandleSecurityCertificateError;
         await webView.CallDevToolsProtocolMethodAsync("Network.enable", "{}");
+        await webView.CallDevToolsProtocolMethodAsync("Security.enable", "{}");
     }
 
     private void HandleNetworkRequestWillBeSent(object? sender, CoreWebView2DevToolsProtocolEventReceivedEventArgs e)
@@ -371,14 +400,29 @@ public partial class PreviewHostControl : UserControl, IDisposable
         WriteDevToolsMediaDiagnostic("preview-host-network-request", e.ParameterObjectAsJson);
     }
 
+    private void HandleNetworkRequestWillBeSentExtraInfo(object? sender, CoreWebView2DevToolsProtocolEventReceivedEventArgs e)
+    {
+        WriteDevToolsMediaDiagnostic("preview-host-network-request-extra", e.ParameterObjectAsJson);
+    }
+
     private void HandleNetworkResponseReceived(object? sender, CoreWebView2DevToolsProtocolEventReceivedEventArgs e)
     {
         WriteDevToolsMediaDiagnostic("preview-host-network-response", e.ParameterObjectAsJson);
     }
 
+    private void HandleNetworkResponseReceivedExtraInfo(object? sender, CoreWebView2DevToolsProtocolEventReceivedEventArgs e)
+    {
+        WriteDevToolsMediaDiagnostic("preview-host-network-response-extra", e.ParameterObjectAsJson);
+    }
+
     private void HandleNetworkLoadingFailed(object? sender, CoreWebView2DevToolsProtocolEventReceivedEventArgs e)
     {
         WriteDevToolsMediaDiagnostic("preview-host-network-failed", e.ParameterObjectAsJson);
+    }
+
+    private void HandleSecurityCertificateError(object? sender, CoreWebView2DevToolsProtocolEventReceivedEventArgs e)
+    {
+        WriteDevToolsMediaDiagnostic("preview-host-network-certificate-error", e.ParameterObjectAsJson);
     }
 
     private async void HandleWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -861,10 +905,22 @@ public partial class PreviewHostControl : UserControl, IDisposable
             networkRequestWillBeSentReceiver = null;
         }
 
+        if (networkRequestWillBeSentExtraInfoReceiver is not null)
+        {
+            networkRequestWillBeSentExtraInfoReceiver.DevToolsProtocolEventReceived -= HandleNetworkRequestWillBeSentExtraInfo;
+            networkRequestWillBeSentExtraInfoReceiver = null;
+        }
+
         if (networkResponseReceivedReceiver is not null)
         {
             networkResponseReceivedReceiver.DevToolsProtocolEventReceived -= HandleNetworkResponseReceived;
             networkResponseReceivedReceiver = null;
+        }
+
+        if (networkResponseReceivedExtraInfoReceiver is not null)
+        {
+            networkResponseReceivedExtraInfoReceiver.DevToolsProtocolEventReceived -= HandleNetworkResponseReceivedExtraInfo;
+            networkResponseReceivedExtraInfoReceiver = null;
         }
 
         if (networkLoadingFailedReceiver is not null)
@@ -873,12 +929,320 @@ public partial class PreviewHostControl : UserControl, IDisposable
             networkLoadingFailedReceiver = null;
         }
 
+        if (securityCertificateErrorReceiver is not null)
+        {
+            securityCertificateErrorReceiver.DevToolsProtocolEventReceived -= HandleSecurityCertificateError;
+            securityCertificateErrorReceiver = null;
+        }
+
         ClearMediaRequestTraces();
     }
 
     private void ClearMediaRequestTraces()
     {
         mediaRequestTraces.Clear();
+    }
+
+    private bool TryHandleHlsProxyRequest(CoreWebView2WebResourceRequestedEventArgs e)
+    {
+        if (Browser.CoreWebView2 is null
+            || PreviewService is null
+            || !TryGetHlsProxyTargetUri(e.Request.Uri, out _))
+        {
+            return false;
+        }
+
+        var deferral = e.GetDeferral();
+        _ = HandleHlsProxyRequestAsync(e, deferral);
+        return true;
+    }
+
+    private async Task HandleHlsProxyRequestAsync(
+        CoreWebView2WebResourceRequestedEventArgs e,
+        CoreWebView2Deferral deferral)
+    {
+        try
+        {
+            if (Browser.CoreWebView2 is null)
+            {
+                return;
+            }
+
+            if (PreviewService is null || !TryGetHlsProxyTargetUri(e.Request.Uri, out var targetUri))
+            {
+                e.Response = CreatePlainTextResponse(Browser.CoreWebView2, 400, "Bad Request", "Invalid HLS proxy target.");
+                return;
+            }
+
+            var forwardedHeaders = CreatePreviewProxyHeaders(e.Request.Headers);
+            WriteMediaResourceDiagnostic(
+                "preview-host-proxy-request",
+                targetUri.AbsoluteUri,
+                e.Request.Method,
+                "proxy",
+                diagnosticSource: "proxy",
+                requestHeaders: SummarizeHeaders(forwardedHeaders),
+                frameId: "preview-hls-proxy");
+
+            var proxyResult = await PreviewService.FetchPreviewResourceAsync(
+                new PreviewProxyRequest
+                {
+                    RequestUrl = targetUri.AbsoluteUri,
+                    Method = e.Request.Method,
+                    Headers = forwardedHeaders
+                });
+
+            var responseBytes = proxyResult.Content ?? [];
+            var contentType = proxyResult.ContentType;
+            var manifestRewritten = false;
+            if (proxyResult.StatusCode >= 200
+                && proxyResult.StatusCode < 300
+                && IsHlsManifestResponse(targetUri, contentType))
+            {
+                responseBytes = RewriteHlsManifest(responseBytes, targetUri, out manifestRewritten);
+                contentType ??= "application/vnd.apple.mpegurl";
+            }
+
+            var responseHeaders = BuildProxyResponseHeaders(proxyResult.Headers, contentType, manifestRewritten);
+            e.Response = Browser.CoreWebView2.Environment.CreateWebResourceResponse(
+                new MemoryStream(responseBytes, writable: false),
+                proxyResult.StatusCode,
+                string.IsNullOrWhiteSpace(proxyResult.ReasonPhrase) ? "OK" : proxyResult.ReasonPhrase,
+                responseHeaders);
+
+            WriteMediaResourceDiagnostic(
+                "preview-host-proxy-response",
+                targetUri.AbsoluteUri,
+                e.Request.Method,
+                "proxy",
+                proxyResult.StatusCode,
+                proxyResult.ReasonPhrase,
+                "proxy",
+                mimeType: contentType,
+                responseHeaders: SummarizeHeaders(proxyResult.Headers),
+                requestHeaders: SummarizeHeaders(forwardedHeaders),
+                frameId: manifestRewritten ? "preview-hls-proxy-rewritten" : "preview-hls-proxy");
+        }
+        catch (Exception ex)
+        {
+            if (Browser.CoreWebView2 is not null)
+            {
+                e.Response = CreatePlainTextResponse(Browser.CoreWebView2, 502, "Bad Gateway", ex.Message);
+            }
+
+            WriteDiagnostic(
+                "preview-host-proxy-failed",
+                $"deviceCode={activeSession?.DeviceCode ?? "unknown"}, sessionId={activeSession?.PlaybackSessionId ?? "unknown"}, protocol={activeSession?.Protocol ?? "unknown"}, reason={SanitizeDiagnosticFragment(ex.Message)}");
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private static CoreWebView2WebResourceResponse CreatePlainTextResponse(
+        CoreWebView2 webView,
+        int statusCode,
+        string reasonPhrase,
+        string message)
+    {
+        return webView.Environment.CreateWebResourceResponse(
+            new MemoryStream(Encoding.UTF8.GetBytes(message ?? string.Empty), writable: false),
+            statusCode,
+            reasonPhrase,
+            "Content-Type: text/plain; charset=utf-8\r\nCache-Control: no-store");
+    }
+
+    private static IReadOnlyDictionary<string, string> CreatePreviewProxyHeaders(CoreWebView2HttpRequestHeaders headers)
+    {
+        var forwarded = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers)
+        {
+            if (string.IsNullOrWhiteSpace(header.Key) || string.IsNullOrWhiteSpace(header.Value))
+            {
+                continue;
+            }
+
+            forwarded[header.Key] = header.Value.Trim();
+        }
+
+        return forwarded;
+    }
+
+    private static string BuildProxyResponseHeaders(
+        IReadOnlyDictionary<string, string> headers,
+        string? contentType,
+        bool manifestRewritten)
+    {
+        var values = new List<string>();
+        foreach (var header in headers)
+        {
+            if (string.IsNullOrWhiteSpace(header.Key) || string.IsNullOrWhiteSpace(header.Value))
+            {
+                continue;
+            }
+
+            if (string.Equals(header.Key, "Content-Type", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            values.Add($"{header.Key}: {header.Value}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(contentType))
+        {
+            values.Add($"Content-Type: {contentType}");
+        }
+
+        values.Add("Cache-Control: no-store");
+        if (manifestRewritten)
+        {
+            values.Add("X-Tysl-Hls-Proxy: rewritten");
+        }
+
+        return string.Join("\r\n", values);
+    }
+
+    private static bool TryGetHlsProxyTargetUri(string? requestUri, out Uri targetUri)
+    {
+        targetUri = null!;
+        if (!Uri.TryCreate(requestUri, UriKind.Absolute, out var hostUri)
+            || !string.Equals(hostUri.Host, HostName, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(hostUri.AbsolutePath, HlsProxyPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var target = GetQueryValue(hostUri, "target");
+        if (!Uri.TryCreate(target, UriKind.Absolute, out var resolvedTargetUri)
+            || resolvedTargetUri.Scheme is not ("http" or "https"))
+        {
+            return false;
+        }
+
+        targetUri = resolvedTargetUri;
+        return true;
+    }
+
+    private static string BuildHlsProxyUrl(string targetUrl)
+    {
+        return $"{Uri.UriSchemeHttps}://{HostName}{HlsProxyPath}?target={Uri.EscapeDataString(targetUrl)}";
+    }
+
+    private static string? GetQueryValue(Uri uri, string key)
+    {
+        if (string.IsNullOrWhiteSpace(uri.Query))
+        {
+            return null;
+        }
+
+        var segments = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var segment in segments)
+        {
+            var separatorIndex = segment.IndexOf('=');
+            var rawKey = separatorIndex >= 0 ? segment[..separatorIndex] : segment;
+            if (!string.Equals(WebUtility.UrlDecode(rawKey), key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var rawValue = separatorIndex >= 0 ? segment[(separatorIndex + 1)..] : string.Empty;
+            return WebUtility.UrlDecode(rawValue);
+        }
+
+        return null;
+    }
+
+    private static bool IsHlsManifestResponse(Uri requestUri, string? contentType)
+    {
+        return requestUri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)
+               || (!string.IsNullOrWhiteSpace(contentType)
+                   && contentType.Contains("mpegurl", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static byte[] RewriteHlsManifest(byte[] content, Uri manifestUri, out bool rewritten)
+    {
+        rewritten = false;
+        if (content.Length == 0)
+        {
+            return content;
+        }
+
+        var source = Encoding.UTF8.GetString(content);
+        var lines = source.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var builder = new StringBuilder(source.Length + 256);
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var updatedLine = RewriteHlsManifestLine(lines[index], manifestUri, ref rewritten);
+            builder.Append(updatedLine);
+            if (index < lines.Length - 1)
+            {
+                builder.Append('\n');
+            }
+        }
+
+        return Encoding.UTF8.GetBytes(builder.ToString());
+    }
+
+    private static string RewriteHlsManifestLine(string line, Uri manifestUri, ref bool rewritten)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return line;
+        }
+
+        if (line.StartsWith('#'))
+        {
+            var attributeRewritten = false;
+            var replacedLine = HlsManifestUriAttributeRegex.Replace(line, match =>
+            {
+                var candidate = match.Groups["uri"].Value;
+                if (!TryResolveProxyableUri(manifestUri, candidate, out var resolvedUri))
+                {
+                    return match.Value;
+                }
+
+                attributeRewritten = true;
+                return $"URI=\"{BuildHlsProxyUrl(resolvedUri.AbsoluteUri)}\"";
+            });
+            if (attributeRewritten)
+            {
+                rewritten = true;
+            }
+
+            return replacedLine;
+        }
+
+        if (!TryResolveProxyableUri(manifestUri, line.Trim(), out var targetUri))
+        {
+            return line;
+        }
+
+        rewritten = true;
+        return BuildHlsProxyUrl(targetUri.AbsoluteUri);
+    }
+
+    private static bool TryResolveProxyableUri(Uri baseUri, string candidate, out Uri targetUri)
+    {
+        targetUri = null!;
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        if (!Uri.TryCreate(baseUri, candidate, out var resolvedTargetUri))
+        {
+            return false;
+        }
+
+        if (resolvedTargetUri.Scheme is not ("http" or "https"))
+        {
+            return false;
+        }
+
+        targetUri = resolvedTargetUri;
+        return true;
     }
 
     private void WriteMediaResourceDiagnostic(
@@ -891,7 +1255,18 @@ public partial class PreviewHostControl : UserControl, IDisposable
         string diagnosticSource = "webresource",
         string? requestId = null,
         string? mimeType = null,
-        bool? canceled = null)
+        bool? canceled = null,
+        string? requestHeaders = null,
+        string? responseHeaders = null,
+        string? initiator = null,
+        string? frameId = null,
+        string? documentUrl = null,
+        string? blockedReason = null,
+        string? corsError = null,
+        string? mixedContentType = null,
+        string? failureText = null,
+        string? remoteAddress = null,
+        string? securityState = null)
     {
         if (!TryBuildMediaResourceDiagnosticMessage(
                 requestUri,
@@ -903,6 +1278,17 @@ public partial class PreviewHostControl : UserControl, IDisposable
                 requestId,
                 mimeType,
                 canceled,
+                requestHeaders,
+                responseHeaders,
+                initiator,
+                frameId,
+                documentUrl,
+                blockedReason,
+                corsError,
+                mixedContentType,
+                failureText,
+                remoteAddress,
+                securityState,
                 out var message))
         {
             return;
@@ -921,6 +1307,17 @@ public partial class PreviewHostControl : UserControl, IDisposable
         string? requestId,
         string? mimeType,
         bool? canceled,
+        string? requestHeaders,
+        string? responseHeaders,
+        string? initiator,
+        string? frameId,
+        string? documentUrl,
+        string? blockedReason,
+        string? corsError,
+        string? mixedContentType,
+        string? failureText,
+        string? remoteAddress,
+        string? securityState,
         out string message)
     {
         message = string.Empty;
@@ -972,6 +1369,18 @@ public partial class PreviewHostControl : UserControl, IDisposable
             parts.Add($"canceled={canceled.Value}");
         }
 
+        AppendDiagnosticPart(parts, "requestHeaders", requestHeaders);
+        AppendDiagnosticPart(parts, "responseHeaders", responseHeaders);
+        AppendDiagnosticPart(parts, "initiator", initiator);
+        AppendDiagnosticPart(parts, "frameId", frameId);
+        AppendDiagnosticPart(parts, "documentUrl", documentUrl);
+        AppendDiagnosticPart(parts, "blockedReason", blockedReason);
+        AppendDiagnosticPart(parts, "corsError", corsError);
+        AppendDiagnosticPart(parts, "mixedContentType", mixedContentType);
+        AppendDiagnosticPart(parts, "failureText", failureText);
+        AppendDiagnosticPart(parts, "remoteAddress", remoteAddress);
+        AppendDiagnosticPart(parts, "securityState", securityState);
+
         message = string.Join(", ", parts);
         return true;
     }
@@ -986,17 +1395,64 @@ public partial class PreviewHostControl : UserControl, IDisposable
             var resourceContext = GetValue(payload, "type");
             var requestUri = GetNestedValue(payload, "request", "url");
             var method = GetNestedValue(payload, "request", "method");
-            var statusCode = GetNullableIntValue(payload, "response", "status");
-            var reasonPhrase = GetNestedValue(payload, "response", "statusText") ?? GetValue(payload, "errorText");
+            var statusCode = GetNullableIntValue(payload, "response", "status")
+                             ?? GetNullableIntValue(payload, "statusCode");
+            var reasonPhrase = GetNestedValue(payload, "response", "statusText")
+                               ?? GetValue(payload, "errorText")
+                               ?? GetValue(payload, "errorType");
             var mimeType = GetNestedValue(payload, "response", "mimeType");
             var canceled = GetNullableBoolValue(payload, "canceled");
+            var requestHeaders = SummarizeJsonHeaders(payload, "request", "headers")
+                                 ?? SummarizeJsonHeaders(payload, "headers");
+            var responseHeaders = SummarizeJsonHeaders(payload, "response", "headers")
+                                  ?? SummarizeJsonHeaders(payload, "headers");
+            var initiator = BuildInitiatorSummary(payload);
+            var frameId = GetValue(payload, "frameId");
+            var documentUrl = GetValue(payload, "documentURL");
+            var blockedReason = GetValue(payload, "blockedReason");
+            var corsError = GetNestedValue(payload, "corsErrorStatus", "corsError");
+            var mixedContentType = GetValue(payload, "mixedContentType");
+            var failureText = GetValue(payload, "errorText");
+            var remoteAddress = BuildRemoteAddress(payload);
+            var securityState = GetNestedValue(payload, "response", "securityState");
 
-            if (!string.IsNullOrWhiteSpace(requestId)
-                && mediaRequestTraces.TryGetValue(requestId, out var requestTrace))
+            if (!string.IsNullOrWhiteSpace(requestId))
             {
+                var requestTrace = GetOrCreateMediaRequestTrace(requestId, requestUri, method, resourceContext);
+                requestTrace.RequestUri = requestUri ?? requestTrace.RequestUri;
+                requestTrace.Method = method ?? requestTrace.Method;
+                requestTrace.ResourceContext = resourceContext ?? requestTrace.ResourceContext;
+                requestTrace.RequestHeaders = requestHeaders ?? requestTrace.RequestHeaders;
+                requestTrace.ResponseHeaders = responseHeaders ?? requestTrace.ResponseHeaders;
+                requestTrace.Initiator = initiator ?? requestTrace.Initiator;
+                requestTrace.FrameId = frameId ?? requestTrace.FrameId;
+                requestTrace.DocumentUrl = documentUrl ?? requestTrace.DocumentUrl;
+                requestTrace.BlockedReason = blockedReason ?? requestTrace.BlockedReason;
+                requestTrace.CorsError = corsError ?? requestTrace.CorsError;
+                requestTrace.MixedContentType = mixedContentType ?? requestTrace.MixedContentType;
+                requestTrace.FailureText = failureText ?? requestTrace.FailureText;
+                requestTrace.RemoteAddress = remoteAddress ?? requestTrace.RemoteAddress;
+                requestTrace.SecurityState = securityState ?? requestTrace.SecurityState;
+
                 requestUri ??= requestTrace.RequestUri;
                 method ??= requestTrace.Method;
                 resourceContext ??= requestTrace.ResourceContext;
+                requestHeaders ??= requestTrace.RequestHeaders;
+                responseHeaders ??= requestTrace.ResponseHeaders;
+                initiator ??= requestTrace.Initiator;
+                frameId ??= requestTrace.FrameId;
+                documentUrl ??= requestTrace.DocumentUrl;
+                blockedReason ??= requestTrace.BlockedReason;
+                corsError ??= requestTrace.CorsError;
+                mixedContentType ??= requestTrace.MixedContentType;
+                failureText ??= requestTrace.FailureText;
+                remoteAddress ??= requestTrace.RemoteAddress;
+                securityState ??= requestTrace.SecurityState;
+            }
+
+            if (string.IsNullOrWhiteSpace(requestUri))
+            {
+                requestUri = GetValue(payload, "requestURL");
             }
 
             if (string.IsNullOrWhiteSpace(requestUri))
@@ -1014,23 +1470,171 @@ public partial class PreviewHostControl : UserControl, IDisposable
                 "cdp",
                 requestId,
                 mimeType,
-                canceled);
+                canceled,
+                requestHeaders,
+                responseHeaders,
+                initiator,
+                frameId,
+                documentUrl,
+                blockedReason,
+                corsError,
+                mixedContentType,
+                failureText,
+                remoteAddress,
+                securityState);
 
             if (!string.IsNullOrWhiteSpace(requestId))
             {
-                if (string.Equals(eventName, "preview-host-network-failed", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(eventName, "preview-host-network-failed", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(eventName, "preview-host-network-certificate-error", StringComparison.OrdinalIgnoreCase))
                 {
                     mediaRequestTraces.Remove(requestId);
-                }
-                else
-                {
-                    mediaRequestTraces[requestId] = new MediaRequestTrace(requestUri, method, resourceContext);
                 }
             }
         }
         catch
         {
             // Ignore diagnostic parsing failures.
+        }
+    }
+
+    private MediaRequestTrace GetOrCreateMediaRequestTrace(
+        string requestId,
+        string? requestUri,
+        string? method,
+        string? resourceContext)
+    {
+        if (mediaRequestTraces.TryGetValue(requestId, out var existing))
+        {
+            return existing;
+        }
+
+        var created = new MediaRequestTrace(requestUri, method, resourceContext);
+        mediaRequestTraces[requestId] = created;
+        return created;
+    }
+
+    private static void AppendDiagnosticPart(List<string> parts, string key, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        parts.Add($"{key}={SanitizeDiagnosticFragment(value)}");
+    }
+
+    private static string SanitizeDiagnosticFragment(string value)
+    {
+        return value
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", " | ", StringComparison.Ordinal)
+            .Replace(", ", "; ", StringComparison.Ordinal)
+            .Trim();
+    }
+
+    private static string? SummarizeRequestHeaders(CoreWebView2HttpRequestHeaders headers)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers)
+        {
+            if (string.IsNullOrWhiteSpace(header.Key) || string.IsNullOrWhiteSpace(header.Value))
+            {
+                continue;
+            }
+
+            values[header.Key] = header.Value.Trim();
+        }
+
+        return SummarizeHeaders(values);
+    }
+
+    private static string? SummarizeResponseHeaders(CoreWebView2HttpResponseHeaders headers)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers)
+        {
+            if (string.IsNullOrWhiteSpace(header.Key) || string.IsNullOrWhiteSpace(header.Value))
+            {
+                continue;
+            }
+
+            values[header.Key] = header.Value.Trim();
+        }
+
+        return SummarizeHeaders(values);
+    }
+
+    private static string? SummarizeJsonHeaders(JsonElement payload, params string[] propertyPath)
+    {
+        if (!TryGetNestedElement(payload, out var element, propertyPath)
+            || element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in element.EnumerateObject())
+        {
+            var value = GetElementString(property.Value);
+            if (string.IsNullOrWhiteSpace(property.Name) || string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            values[property.Name] = value.Trim();
+        }
+
+        return SummarizeHeaders(values);
+    }
+
+    private static string? SummarizeHeaders(IReadOnlyDictionary<string, string> headers)
+    {
+        if (headers.Count == 0)
+        {
+            return null;
+        }
+
+        return string.Join(
+            "; ",
+            headers
+                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(pair => $"{pair.Key}:{SanitizeDiagnosticFragment(pair.Value)}"));
+    }
+
+    private static string? BuildInitiatorSummary(JsonElement payload)
+    {
+        if (!TryGetNestedElement(payload, out var initiatorElement, "initiator")
+            || initiatorElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var parts = new List<string>();
+        AppendElementPart(parts, "type", initiatorElement, "type");
+        AppendElementPart(parts, "url", initiatorElement, "url");
+        AppendElementPart(parts, "lineNumber", initiatorElement, "lineNumber");
+        return parts.Count == 0 ? null : string.Join("|", parts);
+    }
+
+    private static string? BuildRemoteAddress(JsonElement payload)
+    {
+        var address = GetNestedValue(payload, "response", "remoteIPAddress");
+        var port = GetNestedValue(payload, "response", "remotePort");
+        if (string.IsNullOrWhiteSpace(address))
+        {
+            return null;
+        }
+
+        return string.IsNullOrWhiteSpace(port) ? address : $"{address}:{port}";
+    }
+
+    private static void AppendElementPart(List<string> parts, string key, JsonElement payload, params string[] propertyPath)
+    {
+        var value = GetNestedValue(payload, propertyPath);
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            parts.Add($"{key}={SanitizeDiagnosticFragment(value)}");
         }
     }
 
@@ -1137,6 +1741,8 @@ public partial class PreviewHostControl : UserControl, IDisposable
         AppendValue(parts, payload, "trigger");
         AppendValue(parts, payload, "requestId");
         AppendValue(parts, payload, "requestUrl");
+        AppendValue(parts, payload, "originalRequestUrl");
+        AppendValue(parts, payload, "proxyUrl");
         AppendValue(parts, payload, "requestKind");
         AppendValue(parts, payload, "configuredSeconds");
         AppendValue(parts, payload, "readyTimeoutSeconds");
@@ -1414,13 +2020,35 @@ public partial class PreviewHostControl : UserControl, IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private sealed class MediaRequestTrace(string requestUri, string? method, string? resourceContext)
+    private sealed class MediaRequestTrace(string? requestUri, string? method, string? resourceContext)
     {
-        public string RequestUri { get; } = requestUri;
+        public string? RequestUri { get; set; } = requestUri;
 
-        public string? Method { get; } = method;
+        public string? Method { get; set; } = method;
 
-        public string? ResourceContext { get; } = resourceContext;
+        public string? ResourceContext { get; set; } = resourceContext;
+
+        public string? RequestHeaders { get; set; }
+
+        public string? ResponseHeaders { get; set; }
+
+        public string? Initiator { get; set; }
+
+        public string? FrameId { get; set; }
+
+        public string? DocumentUrl { get; set; }
+
+        public string? BlockedReason { get; set; }
+
+        public string? CorsError { get; set; }
+
+        public string? MixedContentType { get; set; }
+
+        public string? FailureText { get; set; }
+
+        public string? RemoteAddress { get; set; }
+
+        public string? SecurityState { get; set; }
     }
 }
 

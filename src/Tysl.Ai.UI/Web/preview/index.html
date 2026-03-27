@@ -945,13 +945,28 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
       }
 
       if (protocol === "hls") {
+        const manifestUrl = session.proxySourceUrl || session.sourceUrl;
         if (isHlsSupported()) {
           postDiagnostic("hls_js_selected");
+          if (manifestUrl !== session.sourceUrl) {
+            postDiagnostic("hls_proxy_source_selected", {
+              requestKind: "manifest",
+              requestUrl: session.sourceUrl,
+              proxyUrl: manifestUrl
+            });
+          }
           const hls = executePlaybackStep(
             "hls_create_instance",
             attemptId,
             "hls_instance_create_failed",
-            () => new Hls({ liveDurationInfinity: true, enableWorker: true, autoStartLoad: false })
+            () => new Hls({
+              liveDurationInfinity: true,
+              enableWorker: true,
+              autoStartLoad: false,
+              xhrSetup: xhr => {
+                xhr.withCredentials = false;
+              }
+            })
           );
           if (!isAttemptActive() || !hls) {
             return;
@@ -979,16 +994,17 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
               attachCallbackReceived,
               mediaAssigned: hls.media === video
             });
-            executePlaybackStep("hls_load_source", attemptId, "hls_load_source_failed", () => hls.loadSource(session.sourceUrl));
+            postDiagnostic("hls_load_source_called", {
+              trigger,
+              requestUrl: manifestUrl,
+              originalRequestUrl: session.sourceUrl,
+              requestKind: "manifest"
+            });
+            executePlaybackStep("hls_load_source", attemptId, "hls_load_source_failed", () => hls.loadSource(manifestUrl));
             if (!isAttemptActive()) {
               return;
             }
 
-            postDiagnostic("hls_load_source_called", {
-              trigger,
-              requestUrl: session.sourceUrl,
-              requestKind: "manifest"
-            });
             executePlaybackStep("hls_start_load", attemptId, "hls_start_load_failed", () => hls.startLoad(-1));
             if (!isAttemptActive()) {
               return;
@@ -1014,10 +1030,12 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
             const requestUrl = data && data.url ? data.url : session.sourceUrl;
             postDiagnostic("hls_manifest_loading", {
               requestUrl,
+              originalRequestUrl: session.sourceUrl,
               requestKind: "manifest"
             });
             postDiagnostic("hls_network_request_started", {
               requestUrl,
+              originalRequestUrl: session.sourceUrl,
               requestKind: "manifest"
             });
           });
@@ -1129,7 +1147,7 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
         if (video.canPlayType("application/vnd.apple.mpegurl")) {
           postDiagnostic("hls_native_fallback_selected");
           executePlaybackStep("hls_native_set_src", attemptId, "hls_native_src_failed", () => {
-            video.src = session.sourceUrl;
+            video.src = manifestUrl;
           });
           if (!isAttemptActive()) {
             return;

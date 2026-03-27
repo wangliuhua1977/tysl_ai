@@ -26,6 +26,10 @@ public interface ISitePreviewService
         string offerSdp,
         CancellationToken cancellationToken = default);
 
+    Task<PreviewProxyResourceResult> FetchPreviewResourceAsync(
+        PreviewProxyRequest request,
+        CancellationToken cancellationToken = default);
+
     Task RecordPlaybackAsync(
         SitePreviewPlaybackRecord record,
         CancellationToken cancellationToken = default);
