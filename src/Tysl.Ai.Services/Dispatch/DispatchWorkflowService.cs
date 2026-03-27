@@ -128,35 +128,52 @@ public sealed class DispatchWorkflowService : IDispatchService
         string deviceCode,
         CancellationToken cancellationToken = default)
     {
-        var context = await LoadSiteContextAsync(deviceCode, cancellationToken);
-        ValidateManualDispatchContext(context);
-
-        var traceContext = CreateTraceContext("manual-dispatch", context.PlatformSite!.DeviceCode);
-        var plan = await webhookNotificationService.BuildDispatchPlanAsync(
-            NotificationTemplateKind.Dispatch,
-            BuildDispatchTemplateContext(
-                context.PlatformSite!,
-                context.LocalProfile!,
-                context.RuntimeState!,
-                ResolveDispatchDisplayStatus(context.ActiveWorkOrder),
-                context.RuntimeState!.LastInspectionAt ?? DateTimeOffset.UtcNow),
-            traceContext,
+        var normalizedDeviceCode = NormalizeRequiredDeviceCode(deviceCode);
+        await diagnosticService.WriteAsync(
+            "manual-dispatch-prepare-start",
+            $"deviceCode={normalizedDeviceCode}",
             cancellationToken);
 
-        return new ManualDispatchPreparation
+        try
         {
-            DeviceCode = context.PlatformSite!.DeviceCode,
-            SiteDisplayName = ResolveDisplayName(context.PlatformSite, context.LocalProfile),
-            ProductAccessNumber = context.LocalProfile!.ProductAccessNumber,
-            FaultReason = ResolveFaultReason(context.RuntimeState!, context.ActiveWorkOrder),
-            MaintenanceUnit = context.LocalProfile.MaintenanceUnit,
-            MaintainerName = context.LocalProfile.MaintainerName,
-            MaintainerPhone = context.LocalProfile.MaintainerPhone,
-            TemplateKind = NotificationTemplateKind.Dispatch,
-            NotificationPool = plan.Pool,
-            EnabledEndpointCount = plan.Endpoints.Count,
-            TemplatePreview = CollapsePreview(plan.RenderedContent)
-        };
+            var context = await LoadSiteContextAsync(normalizedDeviceCode, cancellationToken);
+            await ValidateManualDispatchContextAsync(normalizedDeviceCode, context, cancellationToken);
+
+            var traceContext = CreateTraceContext("manual-dispatch", context.PlatformSite!.DeviceCode);
+            var plan = await webhookNotificationService.BuildDispatchPlanAsync(
+                NotificationTemplateKind.Dispatch,
+                BuildDispatchTemplateContext(
+                    context.PlatformSite!,
+                    context.LocalProfile!,
+                    context.RuntimeState!,
+                    ResolveDispatchDisplayStatus(context.ActiveWorkOrder),
+                    context.RuntimeState!.LastInspectionAt ?? DateTimeOffset.UtcNow),
+                traceContext,
+                cancellationToken);
+
+            return new ManualDispatchPreparation
+            {
+                DeviceCode = context.PlatformSite!.DeviceCode,
+                SiteDisplayName = ResolveDisplayName(context.PlatformSite, context.LocalProfile),
+                ProductAccessNumber = context.LocalProfile!.ProductAccessNumber,
+                FaultReason = ResolveFaultReason(context.RuntimeState!, context.ActiveWorkOrder),
+                MaintenanceUnit = context.LocalProfile.MaintenanceUnit,
+                MaintainerName = context.LocalProfile.MaintainerName,
+                MaintainerPhone = context.LocalProfile.MaintainerPhone,
+                TemplateKind = NotificationTemplateKind.Dispatch,
+                NotificationPool = plan.Pool,
+                EnabledEndpointCount = plan.Endpoints.Count,
+                TemplatePreview = CollapsePreview(plan.RenderedContent)
+            };
+        }
+        catch (Exception ex)
+        {
+            await diagnosticService.WriteAsync(
+                "manual-dispatch-prepare-failed",
+                $"deviceCode={normalizedDeviceCode}, stage={ResolveFailureStage(ex)}, message={ex.Message}",
+                cancellationToken);
+            throw;
+        }
     }
 
     public async Task ManualDispatchAsync(
@@ -165,8 +182,14 @@ public sealed class DispatchWorkflowService : IDispatchService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var context = await LoadSiteContextAsync(request.DeviceCode, cancellationToken);
-        ValidateManualDispatchContext(context);
+        var normalizedDeviceCode = NormalizeRequiredDeviceCode(request.DeviceCode);
+        await diagnosticService.WriteAsync(
+            "manual-dispatch-execute-start",
+            $"deviceCode={normalizedDeviceCode}",
+            cancellationToken);
+
+        var context = await LoadSiteContextAsync(normalizedDeviceCode, cancellationToken);
+        await ValidateManualDispatchContextAsync(normalizedDeviceCode, context, cancellationToken);
 
         var traceContext = CreateTraceContext("manual-dispatch", context.PlatformSite!.DeviceCode);
         var executionResult = await CreateOrUpdateFaultWorkOrderAsync(
@@ -182,13 +205,22 @@ public sealed class DispatchWorkflowService : IDispatchService
         if (!executionResult.HasSuccessfulDelivery)
         {
             await diagnosticService.WriteAsync(
+                "manual-dispatch-send-failed",
+                $"deviceCode={context.PlatformSite.DeviceCode}, summary={executionResult.Summary}",
+                cancellationToken);
+            await diagnosticService.WriteAsync(
                 "manual-dispatch-failed",
                 $"deviceCode={context.PlatformSite.DeviceCode}, stage=send, summary={executionResult.Summary}",
                 cancellationToken);
             throw CreateStagedException(
                 "send",
-                "手工派单未发送成功，请检查通知配置或稍后重试。");
+                "通知发送失败，请检查配置或稍后重试。");
         }
+
+        await diagnosticService.WriteAsync(
+            "manual-dispatch-send-succeeded",
+            $"deviceCode={context.PlatformSite.DeviceCode}, summary={executionResult.Summary}",
+            cancellationToken);
     }
 
     public async Task<CloseWorkOrderPreparation> PrepareCloseWorkOrderAsync(
@@ -528,36 +560,55 @@ public sealed class DispatchWorkflowService : IDispatchService
         return new SiteContext(platformSite, localProfile, runtimeState, activeWorkOrder);
     }
 
+    private async Task ValidateManualDispatchContextAsync(
+        string deviceCode,
+        SiteContext context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            ValidateManualDispatchContext(context);
+        }
+        catch (Exception ex) when (ResolveFailureStage(ex) == "validation")
+        {
+            await diagnosticService.WriteAsync(
+                "manual-dispatch-validation-failed",
+                $"deviceCode={deviceCode}, message={ex.Message}",
+                cancellationToken);
+            throw;
+        }
+    }
+
     private static void ValidateManualDispatchContext(SiteContext context)
     {
         if (context.PlatformSite is null)
         {
-            throw new InvalidOperationException("当前点位不存在或平台未返回设备信息。");
+            throw CreateStagedException("validation", "当前点位不存在或平台未返回设备信息。");
         }
 
         if (context.LocalProfile is null || context.LocalProfile.IsMonitored == false)
         {
-            throw new InvalidOperationException("当前点位未纳管，不能发起手工派单。");
+            throw CreateStagedException("validation", "当前点位未纳管，不能发起手工派单。");
         }
 
         if (context.LocalProfile.IsIgnored)
         {
-            throw new InvalidOperationException("已忽略点位不能发起手工派单。");
+            throw CreateStagedException("validation", "已忽略点位不能发起手工派单。");
         }
 
         if (!HasMinimumDispatchInfo(context.LocalProfile))
         {
-            throw new InvalidOperationException("当前点位维护信息不完整，至少需要维护单位、维护人、联系电话和产品接入号。");
+            throw CreateStagedException("validation", "当前点位维护信息不完整，至少需要维护单位、维护人、联系电话和产品接入号。");
         }
 
         if (context.RuntimeState is null || MapFaultCode(context.RuntimeState.LastFaultCode) is null)
         {
-            throw new InvalidOperationException("当前点位未处于异常状态，无法发起手工派单。");
+            throw CreateStagedException("validation", "当前点位未处于异常状态，无法发起手工派单。");
         }
 
         if (context.ActiveWorkOrder is not null && context.ActiveWorkOrder.Status == DispatchWorkOrderStatus.Active)
         {
-            throw new InvalidOperationException("当前点位已有活动工单，无需重复手工派单。");
+            throw CreateStagedException("validation", "当前点位已有活动工单，无需重复手工派单。");
         }
     }
 
@@ -769,6 +820,16 @@ public sealed class DispatchWorkflowService : IDispatchService
     private static string? NormalizeText(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string NormalizeRequiredDeviceCode(string deviceCode)
+    {
+        if (string.IsNullOrWhiteSpace(deviceCode))
+        {
+            throw CreateStagedException("validation", "设备编码不能为空。");
+        }
+
+        return deviceCode.Trim();
     }
 
     private async Task LogDispatchPersistenceFailureAsync(

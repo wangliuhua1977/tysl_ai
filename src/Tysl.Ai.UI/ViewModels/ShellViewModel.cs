@@ -1589,9 +1589,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 "manual-dispatch-exception-caught",
                 $"deviceCode={deviceCode}, stage=open, type={ex.GetType().FullName}, message={ex.Message}");
             _ = WriteDiagnosticAsync(
-                "manual-dispatch-failed",
+                "manual-dispatch-open-ui-failed",
                 $"deviceCode={deviceCode}, stage=open, message={ex.Message}");
-            Notify("派单失败", "手工派单窗口打开失败，请稍后重试。");
+            Notify(
+                "派单失败",
+                ResolveDispatchFailureStage(ex) == "validation"
+                    ? ex.Message
+                    : "手工派单窗口打开失败，请稍后重试。");
         }
     }
 
@@ -1942,9 +1946,6 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         try
         {
-            _ = WriteDiagnosticAsync(
-                "manual-dispatch-execute-start",
-                $"deviceCode={viewModel.DeviceCode}");
             await Task.Run(() => dispatchService.ManualDispatchAsync(new ManualDispatchRequest
             {
                 DeviceCode = viewModel.DeviceCode
@@ -1953,18 +1954,26 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             viewModel.RequestClose();
             await LoadDashboardAsync(viewModel.DeviceCode, true);
             _ = WriteDiagnosticAsync(
-                "manual-dispatch-success",
+                "manual-dispatch-execute-ui-succeeded",
                 $"deviceCode={viewModel.DeviceCode}");
         }
         catch (Exception ex)
         {
+            var failureStage = ResolveDispatchFailureStage(ex);
             _ = WriteDiagnosticAsync(
                 "manual-dispatch-exception-caught",
                 $"deviceCode={viewModel.DeviceCode}, stage=execute, type={ex.GetType().FullName}, message={ex.Message}");
             _ = WriteDiagnosticAsync(
-                "manual-dispatch-failed",
+                "manual-dispatch-execute-ui-failed",
                 $"deviceCode={viewModel.DeviceCode}, stage=execute, message={ex.Message}");
-            Notify("派单失败", "手工派单未发送成功，请检查通知配置或稍后重试。");
+            Notify(
+                failureStage == "send" ? "发送失败" : "派单失败",
+                failureStage switch
+                {
+                    "validation" => ex.Message,
+                    "send" => "通知发送失败，请检查配置或稍后重试。",
+                    _ => "手工派单处理失败，请稍后重试。"
+                });
         }
         finally
         {
@@ -2356,6 +2365,11 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private Task WriteDiagnosticAsync(string eventName, string message)
     {
         return diagnosticService.WriteAsync(eventName, message);
+    }
+
+    private static string ResolveDispatchFailureStage(Exception exception)
+    {
+        return exception.Data["dispatch-stage"] as string ?? "unknown";
     }
 
     private void ResetAcceptanceForcedPreviewFailure()
