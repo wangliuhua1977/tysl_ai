@@ -14,6 +14,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
     private const int MaxWebRtcAttempts = 2;
     private const int MaxFlvAttempts = 2;
     private const int MaxHlsAttempts = 1;
+    private const string FinalPreviewFailureSummary = "全协议预览失败";
 
     private static readonly JsonSerializerOptions MapHostJsonOptions = new()
     {
@@ -836,25 +837,29 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                     nextProtocol: SitePreviewProtocol.Unknown));
 
             var finalPreferredProtocol = GetEffectivePreferredProtocol(currentSession);
-            _ = RecordPreviewPlaybackAsync(
+            if (failureCategory == PreviewFailureCategory.ProgramLifecycleKill)
+            {
+                _ = RecordPreviewPlaybackAsync(
+                    currentSession.DeviceCode,
+                    currentSession.PlaybackSessionId,
+                    finalPreferredProtocol,
+                    failedProtocol,
+                    false,
+                    currentSession.UsedFallback || failedProtocol != SitePreviewProtocol.WebRtc,
+                    failedProtocol,
+                    failureReason);
+                ApplyPreviewUnavailableState();
+                return;
+            }
+
+            FinalizePreviewChainFailure(
                 currentSession.DeviceCode,
                 currentSession.PlaybackSessionId,
                 finalPreferredProtocol,
                 failedProtocol,
-                false,
-                currentSession.UsedFallback || failedProtocol != SitePreviewProtocol.WebRtc,
-                failedProtocol,
-                failureReason);
-
-            previewPlaybackState = PreviewPlaybackState.Unavailable;
-            previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
-            previewFallbackFailureReason = null;
-            PreviewProtocolText = string.Empty;
-            PreviewStatusText = "暂无实时画面";
-            previewSession = null;
-            PreviewSessionJson = null;
-            ResetPreviewAttemptState();
-            ClosePreviewCommand.NotifyCanExecuteChanged();
+                failureCategory,
+                failureReason,
+                "HandlePreviewPlaybackFailed");
             return;
         }
 
@@ -951,7 +956,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         bool isSuccess,
         bool usedFallback,
         SitePreviewProtocol failureProtocol,
-        string? failureReason)
+        string? failureReason,
+        bool isFinalChainFailure = false,
+        string? finalFailureSummary = null)
     {
         if (string.IsNullOrWhiteSpace(deviceCode))
         {
@@ -978,6 +985,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                     UsedFallback = usedFallback,
                     FailureProtocol = normalizedFailureProtocol,
                     FailureReason = normalizedFailureReason,
+                    IsFinalChainFailure = isFinalChainFailure,
+                    FinalFailureSummary = string.IsNullOrWhiteSpace(finalFailureSummary)
+                        ? null
+                        : finalFailureSummary.Trim(),
                     OccurredAt = DateTimeOffset.UtcNow
                 });
         }
@@ -991,6 +1002,59 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 "preview-playback-record-failed",
                 $"deviceCode={deviceCode}, protocol={ToProtocolKey(protocol)}, success={isSuccess}, usedFallback={usedFallback}, type={ex.GetType().FullName}, message={ex.Message}");
         }
+    }
+
+    private void FinalizePreviewChainFailure(
+        string deviceCode,
+        string? playbackSessionId,
+        SitePreviewProtocol preferredProtocol,
+        SitePreviewProtocol failedProtocol,
+        PreviewFailureCategory failureCategory,
+        string? failureReason,
+        string caller)
+    {
+        var normalizedDeviceCode = string.IsNullOrWhiteSpace(deviceCode)
+            ? string.Empty
+            : deviceCode.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            ApplyPreviewUnavailableState();
+            return;
+        }
+
+        var normalizedSessionId = string.IsNullOrWhiteSpace(playbackSessionId)
+            ? $"preview-final-{Guid.NewGuid():N}"
+            : playbackSessionId.Trim();
+        var usedFallback = preferredProtocol != failedProtocol
+                           || previewFallbackFailureProtocol != SitePreviewProtocol.Unknown;
+        _ = WriteDiagnosticAsync(
+            "preview-chain-final-failed",
+            $"caller={caller}, deviceCode={normalizedDeviceCode}, sessionId={normalizedSessionId}, preferredProtocol={ToProtocolKey(preferredProtocol)}, failedProtocol={ToProtocolKey(failedProtocol)}, failureCategory={failureCategory}, reason={failureReason ?? "none"}, summary={FinalPreviewFailureSummary}");
+        _ = RecordPreviewPlaybackAsync(
+            normalizedDeviceCode,
+            normalizedSessionId,
+            preferredProtocol,
+            failedProtocol,
+            false,
+            usedFallback,
+            failedProtocol,
+            FinalPreviewFailureSummary,
+            isFinalChainFailure: true,
+            finalFailureSummary: FinalPreviewFailureSummary);
+        ApplyPreviewUnavailableState();
+    }
+
+    private void ApplyPreviewUnavailableState()
+    {
+        previewPlaybackState = PreviewPlaybackState.Unavailable;
+        previewFallbackFailureProtocol = SitePreviewProtocol.Unknown;
+        previewFallbackFailureReason = null;
+        PreviewProtocolText = string.Empty;
+        PreviewStatusText = "暂无实时画面";
+        previewSession = null;
+        PreviewSessionJson = null;
+        ResetPreviewAttemptState();
+        ClosePreviewCommand.NotifyCanExecuteChanged();
     }
 
     private static string? BuildPreviewFailureReason(string? category, string? reason)
@@ -1020,6 +1084,9 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             "flv_stream_failed" => "FLV 流播放失败",
             "flv_ready_timeout" => "FLV 预览就绪超时",
             "hls_not_supported" => "当前环境不支持 HLS 预览",
+            "hls_attach_failed" => "HLS 媒体挂载失败",
+            "hls_load_source_failed" => "HLS 清单加载启动失败",
+            "hls_start_load_failed" => "HLS 拉流启动失败",
             "hls_play_failed" => "HLS 播放启动失败",
             "hls_stream_failed" => "HLS 流播放失败",
             "hls_ready_timeout" => "HLS 预览就绪超时",
@@ -1481,9 +1548,6 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         if (!TryReservePreviewAttempt(normalizedDeviceCode, requestedProtocol, out var protocolAttemptIndex, out var totalAttemptIndex, out var abortReason))
         {
-            previewPlaybackState = PreviewPlaybackState.Unavailable;
-            PreviewProtocolText = string.Empty;
-            PreviewStatusText = "暂无实时画面";
             _ = WriteDiagnosticAsync(
                 "preview-chain-aborted",
                 BuildPreviewAttemptDiagnostic(
@@ -1497,7 +1561,14 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                     PreviewFailureCategory.None,
                     retryReason: abortReason,
                     nextProtocol: SitePreviewProtocol.Unknown));
-            ClosePreviewCommand.NotifyCanExecuteChanged();
+            FinalizePreviewChainFailure(
+                normalizedDeviceCode,
+                previewSession?.PlaybackSessionId,
+                previewPreferredProtocol == SitePreviewProtocol.Unknown ? requestedProtocol : previewPreferredProtocol,
+                requestedProtocol,
+                PreviewFailureCategory.ResolveUnavailable,
+                abortReason,
+                caller);
             return;
         }
 
@@ -1615,10 +1686,34 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                     nextProtocol: GetNextProtocol(requestedProtocol),
                     failureProtocol,
                     failureReason: ex.Message));
-            previewPlaybackState = PreviewPlaybackState.Unavailable;
-            PreviewProtocolText = string.Empty;
-            PreviewStatusText = "暂无实时画面";
-            ClosePreviewCommand.NotifyCanExecuteChanged();
+            var nextProtocol = GetNextProtocol(requestedProtocol);
+            if (nextProtocol != SitePreviewProtocol.Unknown
+                && previewRequested
+                && !isDisposed)
+            {
+                previewFallbackFailureProtocol = requestedProtocol;
+                previewFallbackFailureReason = ex.Message;
+                await StartPreviewAsync(
+                    normalizedDeviceCode,
+                    nextProtocol,
+                    caller: $"{caller}.resolve-exception-next-protocol",
+                    retryReason: ex.GetType().Name,
+                    failureCategory: PreviewFailureCategory.ResolveUnavailable,
+                    failureProtocol: requestedProtocol,
+                    failureReason: ex.Message,
+                    resetAttemptChain: false);
+            }
+            else
+            {
+                FinalizePreviewChainFailure(
+                    normalizedDeviceCode,
+                    previewSession?.PlaybackSessionId,
+                    previewPreferredProtocol == SitePreviewProtocol.Unknown ? requestedProtocol : previewPreferredProtocol,
+                    requestedProtocol,
+                    PreviewFailureCategory.ResolveUnavailable,
+                    ex.Message,
+                    caller);
+            }
             return;
         }
 
@@ -1659,6 +1754,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
                 && previewRequested
                 && !isDisposed)
             {
+                previewFallbackFailureProtocol = requestedProtocol;
+                previewFallbackFailureReason = result.FailureReason;
                 _ = WriteDiagnosticAsync(
                     "preview-attempt-retry-skipped",
                     BuildPreviewAttemptDiagnostic(
@@ -1686,7 +1783,14 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             }
             else
             {
-                ResetPreviewAttemptState();
+                FinalizePreviewChainFailure(
+                    normalizedDeviceCode,
+                    previewSession?.PlaybackSessionId,
+                    previewPreferredProtocol == SitePreviewProtocol.Unknown ? requestedProtocol : previewPreferredProtocol,
+                    requestedProtocol,
+                    PreviewFailureCategory.ResolveUnavailable,
+                    result.FailureReason,
+                    caller);
             }
             return;
         }

@@ -958,38 +958,108 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
           }
 
           postDiagnostic("hls_instance_created");
-          hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-            if (!isAttemptActive()) {
+          let attachCallbackReceived = false;
+          let hlsPipelineStarted = false;
+          let attachFallbackTimer = null;
+          const clearAttachFallbackTimer = () => {
+            if (attachFallbackTimer) {
+              window.clearTimeout(attachFallbackTimer);
+              attachFallbackTimer = null;
+            }
+          };
+          const continueHlsStartup = trigger => {
+            if (!isAttemptActive() || hlsPipelineStarted) {
               return;
             }
 
-            postDiagnostic("hls_media_attached");
+            hlsPipelineStarted = true;
+            clearAttachFallbackTimer();
+            postDiagnostic("hls_media_attached", {
+              trigger,
+              attachCallbackReceived,
+              mediaAssigned: hls.media === video
+            });
             executePlaybackStep("hls_load_source", attemptId, "hls_load_source_failed", () => hls.loadSource(session.sourceUrl));
             if (!isAttemptActive()) {
               return;
             }
 
-            postDiagnostic("hls_load_source_called");
+            postDiagnostic("hls_load_source_called", {
+              trigger,
+              requestUrl: session.sourceUrl,
+              requestKind: "manifest"
+            });
             executePlaybackStep("hls_start_load", attemptId, "hls_start_load_failed", () => hls.startLoad(-1));
             if (!isAttemptActive()) {
               return;
             }
 
-            postDiagnostic("hls_start_load_called");
-          });
-          hls.on(Hls.Events.MANIFEST_LOADING, () => {
+            postDiagnostic("hls_start_load_called", {
+              trigger
+            });
+          };
+          hls.on(Hls.Events.MEDIA_ATTACHED, () => {
             if (!isAttemptActive()) {
               return;
             }
 
-            postDiagnostic("hls_manifest_loading");
+            attachCallbackReceived = true;
+            continueHlsStartup("media_attached_event");
+          });
+          hls.on(Hls.Events.MANIFEST_LOADING, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            const requestUrl = data && data.url ? data.url : session.sourceUrl;
+            postDiagnostic("hls_manifest_loading", {
+              requestUrl,
+              requestKind: "manifest"
+            });
+            postDiagnostic("hls_network_request_started", {
+              requestUrl,
+              requestKind: "manifest"
+            });
+          });
+          hls.on(Hls.Events.LEVEL_LOADING, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_network_request_started", {
+              requestUrl: data && data.url ? data.url : "",
+              requestKind: "level"
+            });
+          });
+          hls.on(Hls.Events.FRAG_LOADING, (_, data) => {
+            if (!isAttemptActive()) {
+              return;
+            }
+
+            postDiagnostic("hls_network_request_started", {
+              requestUrl: data && data.frag && data.frag.url ? data.frag.url : "",
+              requestKind: "fragment"
+            });
           });
           hls.on(Hls.Events.ERROR, (_, data) => {
             if (!isAttemptActive()) {
               return;
             }
 
+            const requestUrl = data && data.context && data.context.url
+              ? data.context.url
+              : data && data.frag && data.frag.url
+                ? data.frag.url
+                : data && data.url
+                  ? data.url
+                  : "";
             postDiagnostic("hls_error", {
+              fatal: !!(data && data.fatal),
+              detail: data && data.details ? data.details : "stream failed"
+            });
+            postDiagnostic("hls_network_request_failed", {
+              requestUrl,
+              requestKind: data && data.type ? data.type : "",
               fatal: !!(data && data.fatal),
               detail: data && data.details ? data.details : "stream failed"
             });
@@ -1029,12 +1099,27 @@ function createMediaPlaybackHost(protocol, session, attemptId) {
             postDiagnostic("hls_frag_buffered");
             maybeMarkFallbackReady(attemptId);
           });
+          postDiagnostic("hls_attach_media_called", {
+            mediaAssigned: hls.media === video
+          });
           executePlaybackStep("hls_attach_media", attemptId, "hls_attach_failed", () => hls.attachMedia(video));
           if (!isAttemptActive()) {
             return;
           }
 
+          attachFallbackTimer = window.setTimeout(() => {
+            if (!isAttemptActive() || hlsPipelineStarted) {
+              return;
+            }
+
+            postDiagnostic("hls_no_attach_callback", {
+              mediaAssigned: hls.media === video,
+              videoIsConnected: !!(video && video.isConnected)
+            });
+            continueHlsStartup("attach_callback_missing");
+          }, 300);
           cleanup = () => {
+            clearAttachFallbackTimer();
             try { hls.destroy(); } catch (_) {}
           };
           startReadyTimer(Math.max(18, session.readyTimeoutSeconds || 10), "hls_ready_timeout", attemptId);

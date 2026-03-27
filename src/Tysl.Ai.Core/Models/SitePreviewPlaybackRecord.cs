@@ -20,5 +20,9 @@ public sealed record SitePreviewPlaybackRecord
 
     public string? FailureReason { get; init; }
 
+    public bool IsFinalChainFailure { get; init; }
+
+    public string? FinalFailureSummary { get; init; }
+
     public required DateTimeOffset OccurredAt { get; init; }
 }

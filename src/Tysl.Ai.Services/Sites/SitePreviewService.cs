@@ -84,10 +84,37 @@ public sealed class SitePreviewService : ISitePreviewService
 
         var currentState = await runtimeStateRepository.GetByDeviceCodeAsync(record.DeviceCode, cancellationToken)
                            ?? CreateDefaultRuntimeState(record.DeviceCode, record.OccurredAt);
+        var clearsPreviewFault = record.IsSuccess
+                                 && currentState.LastFaultCode == RuntimeFaultCode.PreviewResolveFailed;
+        var marksPreviewFault = !record.IsSuccess && record.IsFinalChainFailure;
+        var finalFailureSummary = string.IsNullOrWhiteSpace(record.FinalFailureSummary)
+            ? "全协议预览失败"
+            : record.FinalFailureSummary.Trim();
+        var nextFaultCode = clearsPreviewFault
+            ? RuntimeFaultCode.None
+            : marksPreviewFault
+                ? RuntimeFaultCode.PreviewResolveFailed
+                : currentState.LastFaultCode;
+        var nextFaultSummary = clearsPreviewFault
+            ? null
+            : marksPreviewFault
+                ? finalFailureSummary
+                : currentState.LastFaultSummary;
+        var nextPreviewResolveState = record.IsSuccess
+            ? PreviewResolveState.Resolved
+            : marksPreviewFault
+                ? PreviewResolveState.Failed
+                : currentState.LastPreviewResolveState;
+        var nextConsecutiveFailureCount = clearsPreviewFault
+            ? 0
+            : marksPreviewFault
+                ? (currentState.ConsecutiveFailureCount <= 0 ? 1 : currentState.ConsecutiveFailureCount + 1)
+                : currentState.ConsecutiveFailureCount;
 
         await runtimeStateRepository.UpsertAsync(
             currentState with
             {
+                LastPreviewResolveState = nextPreviewResolveState,
                 LastPreviewAt = record.OccurredAt,
                 LastPreviewSessionId = record.PlaybackSessionId,
                 LastPreviewPreferredProtocol = record.PreferredProtocol,
@@ -96,6 +123,9 @@ public sealed class SitePreviewService : ISitePreviewService
                 LastPreviewUsedFallback = record.UsedFallback,
                 LastPreviewFailureProtocol = record.FailureProtocol,
                 LastPreviewFailureReason = record.FailureReason,
+                LastFaultCode = nextFaultCode,
+                LastFaultSummary = nextFaultSummary,
+                ConsecutiveFailureCount = nextConsecutiveFailureCount,
                 UpdatedAt = record.OccurredAt
             },
             cancellationToken);

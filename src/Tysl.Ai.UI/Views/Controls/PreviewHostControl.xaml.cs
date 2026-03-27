@@ -1134,13 +1134,18 @@ public partial class PreviewHostControl : UserControl, IDisposable
         AppendValue(parts, payload, "connectionState");
         AppendValue(parts, payload, "iceConnectionState");
         AppendValue(parts, payload, "kind");
+        AppendValue(parts, payload, "trigger");
         AppendValue(parts, payload, "requestId");
+        AppendValue(parts, payload, "requestUrl");
+        AppendValue(parts, payload, "requestKind");
         AppendValue(parts, payload, "configuredSeconds");
         AppendValue(parts, payload, "readyTimeoutSeconds");
         AppendValue(parts, payload, "decodedFrames");
         AppendValue(parts, payload, "droppedFrames");
         AppendValue(parts, payload, "fatal");
         AppendValue(parts, payload, "fragments");
+        AppendValue(parts, payload, "attachCallbackReceived");
+        AppendValue(parts, payload, "mediaAssigned");
         AppendValue(parts, payload, "oldSessionId");
         AppendValue(parts, payload, "newSessionId");
         AppendValue(parts, payload, "preferredProtocol");
